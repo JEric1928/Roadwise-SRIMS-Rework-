@@ -2,14 +2,18 @@ package com.roadwise.backend.repository;
 
 import java.util.List;
 import com.roadwise.backend.model.RoadReport;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 @Repository
-public interface RoadReportRepository extends JpaRepository<RoadReport, Long> {
+public interface RoadReportRepository extends JpaRepository<RoadReport, Long>, JpaSpecificationExecutor<RoadReport> {
 
     List<RoadReport> findByBarangay_Id(Long barangayId);
 
