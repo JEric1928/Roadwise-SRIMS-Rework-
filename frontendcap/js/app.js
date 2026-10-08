@@ -3968,6 +3968,14 @@ function handleVerifyMfa() {
       }
       sessionStorage.setItem("barangayName", data.barangayName || "City Hall Central");
 
+      // Store JWT Tokens
+      if (data.accessToken) {
+        localStorage.setItem("accessToken", data.accessToken);
+      }
+      if (data.refreshToken) {
+        localStorage.setItem("refreshToken", data.refreshToken);
+      }
+
       // 4. Save synced user object in localStorage for cross-component compatibility
       const userPayload = {
         id: data.userId,
