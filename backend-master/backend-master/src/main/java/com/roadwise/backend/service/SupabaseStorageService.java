@@ -4,12 +4,17 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.security.MessageDigest;
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 
@@ -29,6 +34,17 @@ public class SupabaseStorageService {
 
     private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList(".jpg", ".jpeg", ".png", ".webp");
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+    private static final int MAX_IMAGE_DIMENSION = 4096;
+
+    public String computeSha256(byte[] bytes) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(bytes);
+            return HexFormat.of().formatHex(hash);
+        } catch (Exception e) {
+            return "";
+        }
+    }
 
     public String uploadImage(MultipartFile file) throws Exception {
         if (file == null || file.isEmpty()) {
@@ -50,6 +66,18 @@ public class SupabaseStorageService {
         if (!detectedMimeType.startsWith("image/")) {
             throw new IllegalArgumentException("Uploaded file is not a valid image format.");
         }
+
+        // Validate image dimensions for decompression bomb protection
+        try (InputStream is = new ByteArrayInputStream(fileBytes)) {
+            BufferedImage img = ImageIO.read(is);
+            if (img != null) {
+                if (img.getWidth() > MAX_IMAGE_DIMENSION || img.getHeight() > MAX_IMAGE_DIMENSION) {
+                    throw new IllegalArgumentException("Image dimensions exceed maximum allowed limit of " + MAX_IMAGE_DIMENSION + "x" + MAX_IMAGE_DIMENSION);
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception ignored) {}
 
         String cleanFileName = UUID.randomUUID() + "_" + originalName.replaceAll("[^a-zA-Z0-9._-]", "_");
         String uploadEndpoint = String.format("%s/storage/v1/object/%s/%s", supabaseUrl, bucketName, cleanFileName);

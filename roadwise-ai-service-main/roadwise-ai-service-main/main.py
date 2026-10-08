@@ -1,3 +1,4 @@
+import hashlib
 import io
 import numpy as np
 import onnxruntime as ort
@@ -30,16 +31,27 @@ except Exception as e:
 
 SEVERITY_LEVELS = ["Low", "Medium", "High"]
 CONFIDENCE_FLOOR = 0.40
+MODEL_VERSION = "rdd2022-d4-resnet38-v2"
+MAX_CACHE_SIZE = 1000
+PREDICTION_CACHE: Dict[str, dict] = {}
 
 
-def is_non_road_upload(img: Image.Image) -> tuple[bool, str]:
+def cache_set(key: str, value: dict):
+    if len(PREDICTION_CACHE) >= MAX_CACHE_SIZE:
+        # Evict first inserted key (FIFO)
+        first_key = next(iter(PREDICTION_CACHE))
+        PREDICTION_CACHE.pop(first_key, None)
+    PREDICTION_CACHE[key] = value
+
+
+def is_non_road_upload(img: Image.Image) -> tuple[bool, str, str]:
     rgb = np.array(img.convert("RGB"), dtype=np.float32)
     gray = np.array(img.convert("L"), dtype=np.float32)
     total_pixels = gray.size
 
     white_ratio = float(np.sum(gray > 200.0) / total_pixels)
     if white_ratio > 0.45:
-        return True, "Surface rejected: Document or paper surface detected."
+        return True, "Surface rejected: Document or paper surface detected.", "REJECTED"
 
     h, w = gray.shape
     center_rgb = rgb[int(h * 0.2):int(h * 0.8), int(w * 0.2):int(w * 0.8)]
@@ -47,13 +59,14 @@ def is_non_road_upload(img: Image.Image) -> tuple[bool, str]:
     center_saturation = float(np.mean(np.maximum.reduce([r, g, b]) - np.minimum.reduce([r, g, b])))
 
     if center_saturation > 42.0:
-        return True, "Surface rejected: High-saturation digital graphic detected."
+        return True, "Surface rejected: High-saturation digital graphic detected.", "REJECTED"
 
     mean_brightness = float(np.mean(gray))
     if mean_brightness < 20.0:
-        return True, "Image is too dark to inspect."
+        return True, "Image is too dark to inspect.", "REJECTED"
 
-    return False, "Passed"
+    quality = "ACCEPTABLE" if mean_brightness >= 40.0 else "LOW_QUALITY"
+    return False, "Passed", quality
 
 
 # ==============================================================================
@@ -120,16 +133,25 @@ async def predict_severity(file: UploadFile = File(...)):
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
+    img_hash = hashlib.sha256(contents).hexdigest()
+    if img_hash in PREDICTION_CACHE:
+        return PREDICTION_CACHE[img_hash]
+
     try:
         raw_image = Image.open(io.BytesIO(contents))
-        is_invalid, reason = is_non_road_upload(raw_image)
+        is_invalid, reason, image_quality = is_non_road_upload(raw_image)
         if is_invalid:
-            return {
+            res = {
                 "severity": "Unassessed",
                 "confidence": 0.0,
                 "status": "INVALID_SURFACE",
-                "message": reason
+                "message": reason,
+                "modelVersion": MODEL_VERSION,
+                "reviewRequired": True,
+                "imageQuality": image_quality
             }
+            cache_set(img_hash, res)
+            return res
 
         image_resized = raw_image.convert("RGB").resize((224, 224))
         img_np = np.array(image_resized, dtype=np.float32) / 255.0
@@ -145,19 +167,31 @@ async def predict_severity(file: UploadFile = File(...)):
         top_confidence = float(probs[max_idx])
         predicted_severity = SEVERITY_LEVELS[max_idx]
 
+        review_required = top_confidence < 0.70 or image_quality == "LOW_QUALITY"
+
         if top_confidence < CONFIDENCE_FLOOR:
-            return {
+            res = {
                 "severity": "Unassessed",
                 "confidence": round(top_confidence * 100.0, 1),
                 "status": "UNCERTAIN_PREDICTION",
-                "message": "Model confidence too low to determine distress severity."
+                "message": "Model confidence too low to determine distress severity.",
+                "modelVersion": MODEL_VERSION,
+                "reviewRequired": True,
+                "imageQuality": image_quality
             }
+            cache_set(img_hash, res)
+            return res
 
-        return {
+        res = {
             "severity": predicted_severity,
             "confidence": round(top_confidence * 100.0, 1),
-            "status": "CONFIRMED"
+            "status": "CONFIRMED",
+            "modelVersion": MODEL_VERSION,
+            "reviewRequired": review_required,
+            "imageQuality": image_quality
         }
+        cache_set(img_hash, res)
+        return res
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")

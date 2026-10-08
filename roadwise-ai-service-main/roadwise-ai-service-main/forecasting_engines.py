@@ -29,7 +29,7 @@ def simulate_pavement_lifecycle(
     Simulates continuous pavement degradation using a Gamma process combined
     with Grünwald-Letnikov fractional calculus for memory-dependent plastic deformation.
     """
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
     soil_params = get_soil_parameters(soil_type)
     k_volatility = soil_params["volatility_k"]
     base_alpha = soil_params["gamma_decay_alpha"]
@@ -56,7 +56,7 @@ def simulate_pavement_lifecycle(
         # 1. Continuous Gamma process increment
         # Shape alpha_t depends on soil volatility and current time
         shape_t = base_alpha * k_volatility * (1.0 + 0.02 * (m / 12.0))
-        gamma_inc = np.random.gamma(shape=shape_t, scale=1.0 / beta_scale)
+        gamma_inc = rng.gamma(shape=shape_t, scale=1.0 / beta_scale)
 
         # 2. Fractional viscoelastic memory operator sum D^\alpha_t X(t)
         hist_len = min(m, memory_horizon)
@@ -78,6 +78,9 @@ def simulate_pavement_lifecycle(
 
     time_axis_years = [round(m / 12.0, 2) for m in range(months + 1)]
 
+    # Linear baseline comparison model (constant linear annual degradation of 5 PCI/yr)
+    linear_baseline_pci = [max(0.0, round(initial_pci - 5.0 * t, 2)) for t in time_axis_years]
+
     return {
         "road_id": road_id,
         "soil_type": soil_type,
@@ -86,8 +89,10 @@ def simulate_pavement_lifecycle(
         "time_to_failure_years": time_to_failure_years,
         "time_axis_years": time_axis_years,
         "pci_trajectory": pci_trajectory.tolist(),
+        "linear_baseline_pci": linear_baseline_pci,
         "total_wear": round(float(wear_accumulated[-1]), 2),
-        "status": "CRITICAL" if time_to_failure_years < 3.0 else "STABLE"
+        "status": "CRITICAL" if time_to_failure_years < 3.0 else "STABLE",
+        "model_version": "pavement-decay-gamma-v2.1"
     }
 
 
@@ -107,7 +112,7 @@ def simulate_hydrological_shock(
     dQ_t = mu * Q_t * dt + sigma * Q_t * dW_t + Q_t * dJ_t
     Simulates subsurface pore-water pressure spikes and calculates slope failure probability (P_f).
     """
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
     soil = get_soil_parameters(soil_type)
 
     # Base pore-water pressure (kPa)
@@ -129,14 +134,14 @@ def simulate_hydrological_shock(
     jump_mean = 0.2 + (excess_rain / 200.0) * soil["volatility_k"]
 
     for i in range(1, steps):
-        dW = np.random.normal(0, np.sqrt(dt))
+        dW = rng.normal(0, np.sqrt(dt))
 
         # Poisson jump process
-        n_jumps = np.random.poisson((lambda_jump + excess_rain / 500.0) * dt)
+        n_jumps = rng.poisson((lambda_jump + excess_rain / 500.0) * dt)
         jump_factor = 0.0
         if n_jumps > 0:
             # Log-normal jump magnitude
-            jump_factor = np.sum(np.random.lognormal(mean=jump_mean, sigma=0.2, size=n_jumps))
+            jump_factor = np.sum(rng.lognormal(mean=jump_mean, sigma=0.2, size=n_jumps))
 
         # Euler-Maruyama step
         dQ = mu_rain * Q_t[i - 1] * dt + sigma * Q_t[i - 1] * dW + Q_t[i - 1] * jump_factor
@@ -162,7 +167,7 @@ def simulate_hydrological_shock(
     # Slope failure probability P_f = P(FS < 1.0) via Monte Carlo perturbation
     fs_sims = []
     for _ in range(500):
-        q_pert = max_pore_pressure * np.random.normal(1.0, 0.15)
+        q_pert = max_pore_pressure * rng.normal(1.0, 0.15)
         eff_s = max(0.1, unit_weight * depth - q_pert)
         ss = cohesion + eff_s * (np.cos(beta_rad) ** 2) * np.tan(phi_rad)
         fs_sims.append(ss / max(0.01, shear_stress))
@@ -199,7 +204,7 @@ def simulate_defect_propagation(
     d P_t / dt = f_se(P_t, G) + f_td(t)
     where f_se represents graph Laplacian diffusion and f_td represents temporal stress growth.
     """
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     # Simple chain/grid network graph nodes
     nodes = [f"RD-{i+1:03d}" for i in range(num_nodes)]
@@ -221,7 +226,7 @@ def simulate_defect_propagation(
     # Initial defect levels (node 0 starts with severe defect, others minimal)
     p_t = np.zeros((timesteps + 1, num_nodes))
     p_t[0, 0] = 0.85  # Severe defect spike
-    p_t[0, 1:] = np.random.uniform(0.05, 0.2, size=num_nodes - 1)
+    p_t[0, 1:] = rng.uniform(0.05, 0.2, size=num_nodes - 1)
 
     dt = 1.0  # Monthly timestep
 
@@ -270,12 +275,12 @@ def simulate_financial_risk_var(
     S(alpha, beta, gamma, delta) to forecast catastrophic capital Value-at-Risk (VaR)
     and Expected Shortfall (ES).
     """
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     # 1. CMS Algorithm for Lévy-Stable variates
     # Uniform U in (-pi/2, pi/2), Exponential W with mean 1
-    u = np.random.uniform(-np.pi / 2.0, np.pi / 2.0, size=num_simulations)
-    w = np.random.exponential(scale=1.0, size=num_simulations)
+    u = rng.uniform(-np.pi / 2.0, np.pi / 2.0, size=num_simulations)
+    w = rng.exponential(scale=1.0, size=num_simulations)
 
     # CMS formula for alpha != 1
     zeta = -beta_skew * np.tan(np.pi * alpha_tail / 2.0)

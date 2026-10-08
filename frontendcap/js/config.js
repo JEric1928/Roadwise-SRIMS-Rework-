@@ -22,3 +22,19 @@ const API_HEADERS = new Proxy({}, {
     return headers[prop];
   }
 });
+
+// Utility: Debounce user input events
+function debounce(func, delay = 300) {
+  let timeoutId;
+  return function(...args) {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => func.apply(this, args), delay);
+  };
+}
+
+// Utility: Cancellable fetch with AbortController
+function cancellableFetch(url, options = {}) {
+  const controller = new AbortController();
+  const promise = fetch(url, { ...options, signal: controller.signal });
+  return { promise, cancel: () => controller.abort() };
+}

@@ -5,6 +5,8 @@ import com.roadwise.backend.model.CityRoad;
 import com.roadwise.backend.repository.BarangayRepository;
 import com.roadwise.backend.repository.CityRoadRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -30,6 +32,7 @@ public class CityRoadController {
     // 1. GET ALL ROADS (Original)
     // ==========================================
     @GetMapping
+    @Cacheable("cityRoads")
     public List<CityRoad> getAllRoads() {
         return repository.findAll();
     }
@@ -53,6 +56,7 @@ public class CityRoadController {
     // ADD NEW CITY ROAD (WITH VALIDATION & SMART AUTO-ID)
     // ==========================================
     @PostMapping
+    @CacheEvict(value = "cityRoads", allEntries = true)
     public ResponseEntity<?> createCityRoad(@RequestBody CityRoad cityRoad) {
         // 1. Ensure a Barangay is attached
         if (cityRoad.getBarangay() == null || cityRoad.getBarangay().getId() == null) {
@@ -117,6 +121,7 @@ public class CityRoadController {
     // UPDATE AN EXISTING CITY ROAD (With smart validation)
     // ==========================================
     @PutMapping("/{id}")
+    @CacheEvict(value = "cityRoads", allEntries = true)
     public ResponseEntity<?> updateCityRoad(@PathVariable Long id, @RequestBody CityRoad updatedInfo) {
         // 1. Find the exact road in the database
         Optional<CityRoad> existingOpt = cityRoadRepository.findById(id);
