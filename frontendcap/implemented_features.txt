@@ -1,0 +1,104 @@
+========================================================================
+ROADWISE - CITY ROAD INSPECTION AND MONITORING SYSTEM (SAN JOSE DEL MONTE)
+IMPLEMENTED FEATURES SUMMARY
+========================================================================
+
+RoadWise is a web-based client-side application designed to log, validate, and track city road structural damage reports. It supports three distinct user roles (CPDO Administrator, Barangay Official, and City Engineering Office) with unified, persistent state management using browser localStorage.
+
+------------------------------------------------------------------------
+1. SYSTEM-WIDE & ARCHITECTURAL FEATURES
+------------------------------------------------------------------------
+- Client-Side Database Simulation (localStorage):
+  - Emulates backend data persistence.
+  - Shares and syncs state data in real-time across multiple tabs or active windows using storage listener events.
+  - Pre-populates the database with realistic mock data for Barangays, Roads, and Reports.
+- Build & Bundling Infrastructure:
+  - Configuration files (webpack.common.js, webpack.config.dev.js, webpack.config.prod.js) to manage builds, optimize assets, and copy resources.
+  - Development server script mapping.
+- Themed 404 Error Page:
+  - Custom "Road Blocked" 404 page utilizing custom-animated SVGs (flashing warning lights, floating traffic cones, moving road stripe animations) tailored to the civil engineering aesthetic.
+
+------------------------------------------------------------------------
+2. AUTHENTICATION & QUICK DEMO SYSTEM
+------------------------------------------------------------------------
+- Interactive Login Portal (login.html):
+  - Role-based input fields with toggleable password visibility.
+  - Quick Demo Logins: Trigger-ready options for CPDO Admin, Muzon Barangay Official, and City Engineering Office (CEO). Selecting a role auto-fills the credentials and performs a smooth, animated login simulation.
+
+------------------------------------------------------------------------
+3. CPDO SYSTEM ADMINISTRATION (admin_dashboard.html)
+------------------------------------------------------------------------
+- Main Dashboard:
+  - Live KPI Counters: Displays real-time statistics for Total Reports, Reports Awaiting Review, Ongoing Repairs, and Archived/Closed projects.
+  - SJDM Severity Analytics: Dynamic doughnut chart rendered using Chart.js illustrating current severity distribution (Critical, High, Medium, Low).
+  - YOLOv8 Damage Classifier Lab:
+    - Interactive computer vision sandbox allowing users to select sample images (Severe Pothole, Alligator Cracking, Clear Smooth Road) or upload custom road damage files.
+    - Simulates image scanning using a custom CSS/JS laser overlay animation.
+    - Renders precise CSS bounding boxes (e.g., "Pothole: 95.4%") on detected distress areas.
+    - Evaluates confidence scores and automatically assigns a severity level.
+    - Files an auto-drafted validation ticket populated with detected image attributes.
+- Report Validation Module:
+  - Table displaying pending road damage reports with search functionality.
+  - Review Modal: Opens details of a submitted report including:
+    - Assessment overview, submitting Barangay metadata, and road dimensions (length, width, culverts, bridges, terrain).
+    - Side-by-side comparative damage evidence picture.
+    - "Locate on Map" action: Deep links coordinates to the interactive Map View.
+    - "Reject" button: Opens a custom text feedback area to log the rejection reason and alert the Barangay.
+    - "Accept & Validate" button: Promotes report status to "Approved for Dispatch", generates a Project ID, and pushes it to the Engineering Office.
+- Repair Project Tracking Module:
+  - Real-time tracking data table grouped by severity color indicators.
+  - Track Project Modal:
+    - Visualizes the original damage report details alongside the engineering resolution card.
+    - Monitors real-time CEO operations progress.
+    - Once the CEO submits completion photo evidence and notes, allows CPDO Admin to review and click "Approve & Close Project" to archive the ticket.
+- Barangay Infrastructure Management Module:
+  - Grid listing registered Barangays, active reports, contact info, and road registers.
+  - Register New Barangay Form Modal: Allows adding new SJDM barangays (District 1/2, Point of Contact, and official contact/email).
+  - Manage Barangay Modal: Displays a registry of all city roads under a specific Barangay and includes mechanisms to add new roads or delete existing roads.
+- SJDM Live Road Damage Map:
+  - Full-screen interactive map powered by Leaflet.js.
+  - Places colored marker nodes based on latitude/longitude coordinates (Red for Critical, Orange for High, Yellow for Medium, Green for Low).
+  - Integrates animated pulse alerts on critical danger spots.
+  - Interactive popups displaying metadata and direct modal deep links (e.g., Review/Track).
+- High Priority Road Repair Masterlist Document Generation:
+  - Dynamic printable template customized with official government headers, Bulacan logo, CPDO seal, master table list of critical items, and official signature verification blocks.
+
+------------------------------------------------------------------------
+4. BARANGAY OFFICIAL PORTAL (barangay_dashboard.html)
+------------------------------------------------------------------------
+- Local Overview Dashboard:
+  - Local KPI Cards: Tracks submitted reports, pending CPDO reviews, ongoing repairs, and rejections.
+  - Submissions Registry: Searchable registry displaying all filed reports and their current status.
+- Admin Action Items:
+  - Notifications display panel showing reports rejected by the CPDO Admin.
+  - Displays the specific rejection reason.
+  - "Resubmit/Revise" action: Automatically re-populates the reporting form with the rejected report's data for editing and revision.
+- Add New Report Form:
+  - Road Details Selection: Dropdown of registered local roads. Selecting a road automatically queries database metadata and auto-completes forms (Road ID, Importance, Type, Width, Length, Bridges, Terrain, Culverts).
+  - Damage Information Uploads: File system uploader with live thumbnail preview.
+  - GPS Location Capture Tool: Capture location coordinates centered around target coordinates with randomized offsets.
+  - Form submission packages coordinates, uploads, and form inputs to CPDO queue.
+
+------------------------------------------------------------------------
+5. CITY ENGINEERING OFFICE PORTAL (ceo_dashboard.html)
+------------------------------------------------------------------------
+- Engineering Overview Dashboard:
+  - KPI Panels: Highlights pending dispatch jobs, in-progress operations, awaiting approvals, and completed tasks.
+  - Priority Dispatch Queue: Displays high-priority (Critical/High/Medium) work orders sent from the CPDO.
+  - Interactive Work Schedule Timeline: Maintenance calendar listing equipment dispatching and crew allocations.
+- Active Repair Queue:
+  - Active operations table highlighting project details and current work states.
+- Project Management Modal:
+  - Displays original Barangay submissions, location map linkages, and dimensions.
+  - Dispatch button: Updates the state to "In Progress".
+  - Project Resolution area: Dropzone to upload completion proof photo and text area to log engineering notes/materials used. Submitting routes the project to "Awaiting Final Admin Approval" state.
+- Barangay Infrastructure Management:
+  - Quick access reference tool to query active roads and contacts by Barangay.
+
+------------------------------------------------------------------------
+6. SHARED USER PROFILE & SETTINGS
+------------------------------------------------------------------------
+- Profile Settings Panels (Across All Roles):
+  - Split layout displaying identity details (Employee ID, Email, Role, Contact Number).
+  - Password change form inputs (Current Password, New Password, Confirm Password).
+  - Session termination ("Log Out" buttons) returning to the main login portal.

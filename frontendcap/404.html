@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Road Blocked | Page Not Found</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        background-color: #0b0f19;
+        font-family: 'Outfit', sans-serif;
+        color: #f1f5f9;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        position: relative;
+      }
+
+      /* Ambient Background Glows */
+      body::before {
+        content: '';
+        position: absolute;
+        width: 300px;
+        height: 300px;
+        background: radial-gradient(circle, rgba(59, 130, 246, 0.15) 0%, transparent 70%);
+        top: 20%;
+        left: 20%;
+        z-index: 1;
+        pointer-events: none;
+      }
+
+      body::after {
+        content: '';
+        position: absolute;
+        width: 350px;
+        height: 350px;
+        background: radial-gradient(circle, rgba(239, 68, 68, 0.1) 0%, transparent 70%);
+        bottom: 15%;
+        right: 15%;
+        z-index: 1;
+        pointer-events: none;
+      }
+
+      .error-container {
+        position: relative;
+        z-index: 10;
+        width: 100%;
+        max-width: 600px;
+        padding: 40px;
+        text-align: center;
+        background: rgba(15, 23, 42, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 28px;
+        backdrop-filter: blur(16px);
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        margin: 20px;
+        animation: cardFadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+
+      @keyframes cardFadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(20px) scale(0.95);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      h1 {
+        font-size: 32px;
+        font-weight: 800;
+        color: #ffffff;
+        margin-bottom: 12px;
+        letter-spacing: -0.5px;
+      }
+
+      p {
+        font-size: 16px;
+        color: #94a3b8;
+        line-height: 1.6;
+        margin-bottom: 30px;
+      }
+
+      .btn-home {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+        color: #ffffff;
+        text-decoration: none;
+        padding: 12px 30px;
+        border-radius: 30px;
+        font-weight: 600;
+        font-size: 15px;
+        box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .btn-home:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 25px rgba(59, 130, 246, 0.5);
+        background: linear-gradient(135deg, #60a5fa 0%, #2563eb 100%);
+      }
+
+      .btn-home:active {
+        transform: translateY(0);
+      }
+
+      .btn-home span.arrow {
+        transition: transform 0.2s ease;
+      }
+
+      .btn-home:hover span.arrow {
+        transform: translateX(-4px);
+      }
+
+      /* SVG Animation Styles */
+      .animated-road-line {
+        animation: slideRoad 1.2s linear infinite;
+      }
+
+      @keyframes slideRoad {
+        to {
+          stroke-dashoffset: -40;
+        }
+      }
+
+      .floating-barrier {
+        animation: floatBarrier 4s ease-in-out infinite;
+        transform-origin: center;
+      }
+
+      @keyframes floatBarrier {
+        0%, 100% {
+          transform: translate(130px, 80px) translateY(0px) rotate(0deg);
+        }
+        50% {
+          transform: translate(130px, 80px) translateY(-8px) rotate(0.8deg);
+        }
+      }
+
+      .floating-cone-left {
+        animation: floatConeLeft 5s ease-in-out infinite;
+        transform-origin: center;
+      }
+
+      @keyframes floatConeLeft {
+        0%, 100% { transform: translate(90px, 210px) translateY(0px) rotate(0deg) scale(0.7); }
+        50% { transform: translate(90px, 210px) translateY(-6px) rotate(-3deg) scale(0.7); }
+      }
+
+      .floating-cone-right {
+        animation: floatConeRight 4.5s ease-in-out infinite;
+        transform-origin: center;
+      }
+
+      @keyframes floatConeRight {
+        0%, 100% { transform: translate(350px, 190px) translateY(0px) rotate(0deg) scale(0.65); }
+        50% { transform: translate(350px, 190px) translateY(-7px) rotate(4deg) scale(0.65); }
+      }
+
+      .flashing-bulb {
+        animation: flash 1s steps(2, start) infinite;
+      }
+
+      @keyframes flash {
+        0%, 100% { fill: #f59e0b; filter: drop-shadow(0 0 3px #f59e0b); }
+        50% { fill: #ef4444; filter: drop-shadow(0 0 12px #ef4444); }
+      }
+
+      .pulsing-glow {
+        animation: pulseGlow 1s ease-in-out infinite;
+        transform-origin: 0px -4px;
+      }
+
+      @keyframes pulseGlow {
+        0%, 100% { transform: scale(0.8); opacity: 0.2; }
+        50% { transform: scale(1.3); opacity: 0.5; }
+      }
+    </style>
+  </head>
+
+  <body>
+    <div class="error-container">
+      
+      <!-- Animated SVG Vector Graphic -->
+      <svg viewBox="0 0 500 300" width="100%" height="240" style="margin-bottom: 25px; overflow: visible;">
+        <defs>
+          <linearGradient id="barrierGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#f59e0b"/>
+            <stop offset="50%" stop-color="#fbbf24"/>
+            <stop offset="100%" stop-color="#d97706"/>
+          </linearGradient>
+        </defs>
+
+        <!-- Asphalt Road Perspective -->
+        <path d="M 250,110 L 250,110 L 40,300 L 460,300 Z" fill="#1e293b" opacity="0.4"/>
+        
+        <!-- Road Borders -->
+        <path d="M 250,110 L 40,300" stroke="#475569" stroke-width="3" stroke-dasharray="8 8" opacity="0.6"/>
+        <path d="M 250,110 L 460,300" stroke="#475569" stroke-width="3" stroke-dasharray="8 8" opacity="0.6"/>
+        
+        <!-- Center Yellow Line (Animated Movement) -->
+        <line x1="250" y1="110" x2="250" y2="300" stroke="#fbbf24" stroke-width="5" stroke-dasharray="18 18" class="animated-road-line"/>
+
+        <!-- Construction Cone (Left side, Floating) -->
+        <g class="floating-cone-left" transform="translate(90, 210) scale(0.7)">
+          <ellipse cx="40" cy="80" rx="30" ry="10" fill="#020617" opacity="0.5"/>
+          <path d="M 10,80 L 70,80 L 60,83 L 20,83 Z" fill="#334155"/>
+          <path d="M 25,80 L 35,25 L 45,25 L 55,80 Z" fill="#f97316"/>
+          <path d="M 29.5,55 L 32.5,38 L 47.5,38 L 50.5,55 Z" fill="#ffffff"/>
+          <path d="M 26.5,70 L 28.5,60 L 51.5,60 L 53.5,70 Z" fill="#ffffff"/>
+          <ellipse cx="40" cy="25" rx="5" ry="2" fill="#d97706"/>
+        </g>
+
+        <!-- Construction Cone (Right side, Floating) -->
+        <g class="floating-cone-right" transform="translate(350, 190) scale(0.65)">
+          <ellipse cx="40" cy="80" rx="30" ry="10" fill="#020617" opacity="0.5"/>
+          <path d="M 10,80 L 70,80 L 60,83 L 20,83 Z" fill="#334155"/>
+          <path d="M 25,80 L 35,25 L 45,25 L 55,80 Z" fill="#f97316"/>
+          <path d="M 29.5,55 L 32.5,38 L 47.5,38 L 50.5,55 Z" fill="#ffffff"/>
+          <path d="M 26.5,70 L 28.5,60 L 51.5,60 L 53.5,70 Z" fill="#ffffff"/>
+          <ellipse cx="40" cy="25" rx="5" ry="2" fill="#d97706"/>
+        </g>
+
+        <!-- Main Roadblock Barrier Group -->
+        <g class="floating-barrier" transform="translate(130, 80)">
+          <!-- Ground Shadow -->
+          <ellipse cx="120" cy="180" rx="80" ry="12" fill="#020617" opacity="0.7"/>
+
+          <!-- Structural Legs -->
+          <line x1="60" y1="90" x2="35" y2="175" stroke="#475569" stroke-width="12" stroke-linecap="round"/>
+          <line x1="60" y1="90" x2="85" y2="175" stroke="#334155" stroke-width="10" stroke-linecap="round"/>
+          <line x1="180" y1="90" x2="155" y2="175" stroke="#475569" stroke-width="12" stroke-linecap="round"/>
+          <line x1="180" y1="90" x2="205" y2="175" stroke="#334155" stroke-width="10" stroke-linecap="round"/>
+
+          <!-- Plank 1 -->
+          <rect x="20" y="70" width="200" height="24" rx="4" fill="url(#barrierGrad)"/>
+          <path d="M 40,70 L 60,70 L 40,94 L 20,94 Z" fill="#1e293b"/>
+          <path d="M 80,70 L 100,70 L 80,94 L 60,94 Z" fill="#1e293b"/>
+          <path d="M 120,70 L 140,70 L 120,94 L 100,94 Z" fill="#1e293b"/>
+          <path d="M 160,70 L 180,70 L 160,94 L 140,94 Z" fill="#1e293b"/>
+          <path d="M 200,70 L 220,70 L 200,94 L 180,94 Z" fill="#1e293b"/>
+
+          <!-- Plank 2 -->
+          <rect x="20" y="104" width="200" height="24" rx="4" fill="url(#barrierGrad)"/>
+          <path d="M 40,104 L 60,104 L 40,128 L 20,128 Z" fill="#1e293b"/>
+          <path d="M 80,104 L 100,104 L 80,128 L 60,128 Z" fill="#1e293b"/>
+          <path d="M 120,104 L 140,104 L 120,128 L 100,128 Z" fill="#1e293b"/>
+          <path d="M 160,104 L 180,104 L 160,128 L 140,128 Z" fill="#1e293b"/>
+          <path d="M 200,104 L 220,104 L 200,128 L 180,128 Z" fill="#1e293b"/>
+
+          <!-- Warning Triangular Sign -->
+          <g transform="translate(70, 25)">
+            <polygon points="50,0 100,86 0,86" fill="#ef4444" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
+            <polygon points="50,8 90,78 10,78" fill="#0f172a"/>
+            <text x="50" y="55" font-family="'Outfit', sans-serif" font-weight="900" font-size="20" fill="#ffffff" text-anchor="middle">404</text>
+            <text x="50" y="70" font-family="'Outfit', sans-serif" font-weight="700" font-size="9" fill="#ef4444" text-anchor="middle" letter-spacing="1">BLOCKED</text>
+          </g>
+
+          <!-- Warning Flasher Left -->
+          <g transform="translate(40, 50)" class="warning-light">
+            <rect x="-8" y="0" width="16" height="20" fill="#334155" rx="2"/>
+            <circle cx="0" cy="-4" r="8" class="flashing-bulb"/>
+            <circle cx="0" cy="-4" r="18" class="pulsing-glow" fill="#ef4444" opacity="0.4" style="mix-blend-mode: screen;"/>
+          </g>
+
+          <!-- Warning Flasher Right -->
+          <g transform="translate(200, 50)" class="warning-light">
+            <rect x="-8" y="0" width="16" height="20" fill="#334155" rx="2"/>
+            <circle cx="0" cy="-4" r="8" class="flashing-bulb"/>
+            <circle cx="0" cy="-4" r="18" class="pulsing-glow" fill="#ef4444" opacity="0.4" style="mix-blend-mode: screen;"/>
+          </g>
+        </g>
+      </svg>
+
+      <h1>Road Closed</h1>
+      <p>The page you are trying to navigate to is currently blocked or under construction. Please return to the homepage.</p>
+      
+      <a href="login.html" class="btn-home">
+        <span class="arrow">⬅</span> Go Back Home
+      </a>
+
+    </div>
+  </body>
+</html>

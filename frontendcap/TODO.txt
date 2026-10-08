@@ -1,0 +1,49 @@
+RoadWise - Frontend to Backend Process Mapping
+This document outlines the major frontend processes and their corresponding backend/database interactions, organized by user role. It serves as a technical blueprint for the backend development team.
+1.	ADMIN (City Planning & Development Office - CPDO)
+A.	Authentication & Profile Management
+●	Login Portal: Validates Official ID/Email and Password. (Requires session token generation).
+●	Header Profile Menu (Top Right):
+•	Official Identity Tab: Fetches and displays static Admin details (Employee ID, Email, Department).
+•	Security & Password Tab: Contains the "Update Password" form. (Requires POST request to verify current password and hash the new password).
+•	Log Out Button: Destroys the current secure session.
+
+B.	 “Reports" Sidebar (Incoming Data)
+●	Reports Data Table: Fetches a list of all "Pending" road damage reports submitted by Barangays.
+●	Review Button (Action): Opens the Assessment Modal for a specific Report ID.
+•	Assessment Overview: Displays GPS coordinates, date, and the Audit Trail ("Submitted By" tag).
+•	Severity Assessment: Displays the "High/Critical/Low" severity. (Backend Note: This is where the Gemini API integration takes the image/description and generates the severity classification).
+•	Locate on Map Button: Passes GPS coordinates to the map rendering engine.
+•	Reject Button: Opens a feedback form for the Admin to type why the report is invalid, then sends a notification back to the Barangay.
+•	Accept & Validate Button: Updates the report status in the database from "Pending" to "Approved for Dispatch" and pushes it to the CEO queue.
+•	Generate Report (Drop Down)
+•	Priority List Button (Action): Triggers a specialized database query to fetch ONLY "High" and "Critical" severity roads.
+C.	"Repair Tracking" Sidebar (Ongoing Operations)
+●	Tracking Data Table: Fetches reports that are currently being handled by the CEO.
+●	Track Button (Action): Opens the Tracking Modal to monitor CEO progress.
+•	Live Status Indicator: Fetches current CEO status (e.g., "In Progress").
+•	Approve & Close Project Button: Once the CEO uploads the "After" photo, the
+ 
+Admin clicks this to officially close the ticket and archive the data.
+
+2.	BARANGAY OFFICIAL (e.g., Kapitan)
+A.	Authentication & Profile Management
+●	Barangay Profile Tab: Fetches assigned local details (Assigned Barangay, District, Contact Number).
+●	(Security & Logout behave exactly like the Admin).
+
+B.	"Add Report" Sidebar (Data Entry)
+●	Road Details Form: Collects physical data (City Road Name, ID, Length, Width, Terrain, etc.). (Backend Note: Road Names and IDs should ideally be fetched dynamically from a predefined database list so the user selects them via a dropdown).
+●	Damage Information Form:
+•	Upload Image: Handles the file upload for the photographic evidence (Requires image storage handling).
+•	GPS Coordinates: Captures the exact location data.
+●	Submit Report Button: Packages all text and image data into a single POST request, marking the new database entry as "Pending Review" for the CPDO Admin.
+3.	CITY ENGINEERING OFFICE (CEO)
+A.	" Repair Projects" Sidebar (Field Operations)
+●	Projects Data Table: Fetches ONLY the reports that the CPDO Admin has clicked "Accept & Validate" on.
+●	Manage Repair Button (Action): Opens the CEO Action Modal.
+•	Original Assessment Display: Shows the exact damage details, GPS, and the original Barangay Submitter for accountability.
+•	Mark as "In Progress" Button: Updates the global database status so the Admin knows a physical crew has been dispatched to the site.
+•	Repair Completion Log:
+■	Upload Photographic Proof: Allows the engineer to upload the "After" photo of the fixed road.
+■	Repair Notes: Text area for materials used or engineering notes.
+•	Mark Project as Completed Button: Submits the proof and notes, changing the status to "Awaiting Final Admin Approval."
