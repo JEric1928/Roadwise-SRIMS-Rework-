@@ -2,6 +2,7 @@ package com.roadwise.backend.service;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -31,6 +32,7 @@ public class EmailService {
      * Dispatches transactional emails via Brevo HTTPS REST API (Port 443).
      * Bypasses cloud SMTP port blocking.
      */
+    @Async("taskExecutor")
     public void sendEmail(String toEmail, String subject, String body) {
         if (apiKey == null || apiKey.trim().isEmpty()) {
             System.err.println("⚠️ [BREVO] API key is missing. Email dispatch skipped.");

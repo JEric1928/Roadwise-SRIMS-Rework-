@@ -10,6 +10,8 @@ import com.roadwise.backend.repository.UserRepository;
 import com.roadwise.backend.service.ActivityLogService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -55,6 +57,7 @@ public class BarangayController {
     // 1. ADD NEW BARANGAY (WITH VALIDATION)
     // ==========================================
     @PostMapping
+    @CacheEvict(value = "barangays", allEntries = true)
     public ResponseEntity<?> createBarangay(
             @RequestBody Barangay barangay,
             @RequestParam(value = "userId", required = false) Long userId,
@@ -87,6 +90,7 @@ public class BarangayController {
     }
 
     @GetMapping
+    @Cacheable("barangays")
     public ResponseEntity<List<Barangay>> getAllBarangays() {
         List<Barangay> barangays = barangayRepository.findAll();
         return ResponseEntity.ok(barangays);
@@ -164,6 +168,7 @@ public class BarangayController {
     // UPDATE / RENAME A BARANGAY
     // ==========================================
     @PutMapping("/{id}")
+    @CacheEvict(value = "barangays", allEntries = true)
     public ResponseEntity<?> updateBarangay(
             @PathVariable Long id,
             @RequestBody Barangay updatedInfo,

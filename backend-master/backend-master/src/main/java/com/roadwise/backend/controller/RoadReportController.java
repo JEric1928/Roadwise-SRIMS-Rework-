@@ -2,6 +2,7 @@ package com.roadwise.backend.controller;
 
 import com.roadwise.backend.dto.PageResponseDto;
 import com.roadwise.backend.dto.ReportCreateDto;
+import com.roadwise.backend.dto.ReportListDto;
 import com.roadwise.backend.model.*;
 import com.roadwise.backend.repository.BarangayRepository;
 import com.roadwise.backend.repository.RoadReportRepository;
@@ -70,6 +71,9 @@ public class RoadReportController {
 
     @Autowired
     private ReportWorkflowService reportWorkflowService;
+
+    @Autowired
+    private DuplicateDetectionService duplicateDetectionService;
 
     private User getAuthenticatedUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -154,6 +158,13 @@ public class RoadReportController {
             report.setStatus(ReportStatus.PENDING_VALIDATION.getLabel());
             RoadReport savedReport = repository.save(report);
 
+            // Duplicate detection check
+            Optional<RoadReport> duplicateOpt = duplicateDetectionService.findPotentialDuplicate(savedReport);
+            if (duplicateOpt.isPresent()) {
+                RoadReport existingDup = duplicateOpt.get();
+                System.out.println("⚠️ [DUPLICATE FLAGGED] Report PRJ-" + savedReport.getId() + " is near existing PRJ-" + existingDup.getId());
+            }
+
             reportStatusLogService.log(
                     savedReport,
                     "SUBMITTED",
@@ -216,7 +227,7 @@ public class RoadReportController {
     @GetMapping
     public ResponseEntity<?> getAllReports(
             @RequestParam(value = "page", defaultValue = "0") int page,
-            @RequestParam(value = "size", defaultValue = "100") int size,
+            @RequestParam(value = "size", defaultValue = "50") int size,
             @RequestParam(value = "status", required = false) String status,
             @RequestParam(value = "barangayId", required = false) Long barangayId,
             @RequestParam(value = "severity", required = false) String severity,
@@ -224,6 +235,9 @@ public class RoadReportController {
             @RequestParam(value = "sort", defaultValue = "id,desc") String sort) {
 
         User currentUser = getAuthenticatedUser();
+
+        // Enforce maximum page size limit
+        int cappedSize = Math.min(Math.max(1, size), 100);
 
         Specification<RoadReport> spec = (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -258,11 +272,21 @@ public class RoadReportController {
         String sortProperty = sortParts[0];
         Sort.Direction sortDirection = (sortParts.length > 1 && sortParts[1].equalsIgnoreCase("asc")) ? Sort.Direction.ASC : Sort.Direction.DESC;
 
-        Pageable pageable = PageRequest.of(page, size, Sort.by(sortDirection, sortProperty));
+        // Stable tie-breaker ordering
+        Sort stableSort = Sort.by(sortDirection, sortProperty);
+        if (!sortProperty.equalsIgnoreCase("id")) {
+            stableSort = stableSort.and(Sort.by(Sort.Direction.DESC, "id"));
+        }
+
+        Pageable pageable = PageRequest.of(page, cappedSize, stableSort);
         Page<RoadReport> reportPage = repository.findAll(spec, pageable);
 
-        PageResponseDto<RoadReport> response = new PageResponseDto<>(
-                reportPage.getContent(),
+        List<ReportListDto> dtoList = reportPage.getContent().stream()
+                .map(ReportListDto::fromEntity)
+                .toList();
+
+        PageResponseDto<ReportListDto> response = new PageResponseDto<>(
+                dtoList,
                 reportPage.getNumber(),
                 reportPage.getSize(),
                 reportPage.getTotalElements(),
@@ -271,6 +295,31 @@ public class RoadReportController {
         );
 
         return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/dashboard-stats")
+    public ResponseEntity<?> getDashboardStats() {
+        Map<String, Object> stats = new HashMap<>();
+
+        Map<String, Long> statusCounts = new HashMap<>();
+        for (Object[] row : repository.countReportsGroupByStatus()) {
+            if (row[0] != null) {
+                statusCounts.put(row[0].toString(), (Long) row[1]);
+            }
+        }
+
+        Map<String, Long> severityCounts = new HashMap<>();
+        for (Object[] row : repository.countReportsGroupBySeverity()) {
+            if (row[0] != null) {
+                severityCounts.put(row[0].toString(), (Long) row[1]);
+            }
+        }
+
+        stats.put("statusCounts", statusCounts);
+        stats.put("severityCounts", severityCounts);
+        stats.put("totalReports", repository.count());
+
+        return ResponseEntity.ok(stats);
     }
 
     @GetMapping("/{id}")

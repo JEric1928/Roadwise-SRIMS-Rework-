@@ -13,6 +13,9 @@ public class RoadReport {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @Version
+    private Long version;
+
     // --- 1. Road Details (From Frontend) ---
     private String cityRoadName;
     private String cityRoadId;
@@ -121,6 +124,14 @@ public class RoadReport {
 
     public void setId(Long id) {
         this.id = id;
+    }
+
+    public Long getVersion() {
+        return version;
+    }
+
+    public void setVersion(Long version) {
+        this.version = version;
     }
 
     public String getCityRoadName() {
