@@ -3,8 +3,17 @@ import numpy as np
 import onnxruntime as ort
 from PIL import Image
 from fastapi import FastAPI, File, UploadFile, HTTPException
+from pydantic import BaseModel, Field
+from typing import Optional, List, Dict
 
-app = FastAPI(title="RoadWise AI Service", version="1.0.0")
+import forecasting_engines as fe
+from csjdm_parameters import CSJDM_GEOMORPHIC_PROFILE
+
+app = FastAPI(
+    title="RoadWise AI & Advanced Mathematical Forecasting Service",
+    version="2.0.0",
+    description="ISO/IEC 25010 compliant analytical microservice hosting 5 continuous-time stochastic and differential forecasting engines."
+)
 
 # 1. Load ONNX Model on Startup
 MODEL_PATH = "rdd2022_d4_resnet38.onnx"
@@ -20,42 +29,26 @@ except Exception as e:
     session = None
 
 SEVERITY_LEVELS = ["Low", "Medium", "High"]
-
-# Confidence floor: random guessing across 3 classes is 33.3%.
-# Threshold is set at 40% so challenging field photos (wet/dusty) are not discarded.
 CONFIDENCE_FLOOR = 0.40
 
 
 def is_non_road_upload(img: Image.Image) -> tuple[bool, str]:
-    """
-    Lightweight, targeted filter that ONLY intercepts non-road items
-    (like printed paper, school documents, or digital clip art).
-    Allows all real asphalt, concrete, rain puddles, and gravel to pass through.
-    """
     rgb = np.array(img.convert("RGB"), dtype=np.float32)
     gray = np.array(img.convert("L"), dtype=np.float32)
     total_pixels = gray.size
 
-    # 1. Pure White Document Trap (Catches bond paper / worksheets)
-    # Documents are dominated by light background paper (> 200).
-    # Real roads (even concrete under sunlight) rarely exceed 35% pure white pixels.
     white_ratio = float(np.sum(gray > 200.0) / total_pixels)
     if white_ratio > 0.45:
         return True, "Surface rejected: Document or paper surface detected."
 
-    # 2. Digital Graphic / Pure Color Saturation Trap (Catches vector art / UI graphics)
-    # We only check the CENTER 60% of the image to ignore roadside greenery/sky at the borders.
     h, w = gray.shape
     center_rgb = rgb[int(h * 0.2):int(h * 0.8), int(w * 0.2):int(w * 0.8)]
     r, g, b = center_rgb[:, :, 0], center_rgb[:, :, 1], center_rgb[:, :, 2]
     center_saturation = float(np.mean(np.maximum.reduce([r, g, b]) - np.minimum.reduce([r, g, b])))
 
-    # Road centers (even with yellow paint or cones) stay under 35 saturation.
-    # Digital vector graphics easily exceed 45-55.
     if center_saturation > 42.0:
         return True, "Surface rejected: High-saturation digital graphic detected."
 
-    # 3. Blank / Blackout Check
     mean_brightness = float(np.mean(gray))
     if mean_brightness < 20.0:
         return True, "Image is too dark to inspect."
@@ -63,12 +56,58 @@ def is_non_road_upload(img: Image.Image) -> tuple[bool, str]:
     return False, "Passed"
 
 
+# ==============================================================================
+# REQUEST & RESPONSE PYDANTIC MODELS
+# ==============================================================================
+class PavementDecayRequest(BaseModel):
+    road_id: str = Field(default="RD-001", description="Road Identifier")
+    soil_type: str = Field(default="Sibul_Clay", description="Subgrade soil type")
+    initial_pci: float = Field(default=100.0, ge=0.0, le=100.0)
+    years_horizon: int = Field(default=10, ge=1, le=30)
+    fractional_alpha: float = Field(default=0.35, ge=0.01, le=0.99)
+
+
+class HydrologicalShockRequest(BaseModel):
+    road_id: str = Field(default="RD-102")
+    soil_type: str = Field(default="Sibul_Clay")
+    rainfall_mm: float = Field(default=180.0, ge=0.0)
+    slope_degrees: float = Field(default=22.0, ge=0.0, le=90.0)
+    drainage_capacity_mm: float = Field(default=50.0, ge=0.0)
+
+
+class DefectPropagationRequest(BaseModel):
+    num_nodes: int = Field(default=10, ge=3, le=50)
+    timesteps: int = Field(default=24, ge=1, le=120)
+    diffusion_rate: float = Field(default=0.15, ge=0.0, le=1.0)
+    growth_rate: float = Field(default=0.08, ge=0.0, le=1.0)
+
+
+class FinancialRiskRequest(BaseModel):
+    base_budget_php: float = Field(default=15000000.0, ge=100000.0)
+    confidence_level: float = Field(default=0.95, ge=0.80, le=0.999)
+    alpha_tail: float = Field(default=1.4, ge=1.01, le=2.0)
+    beta_skew: float = Field(default=0.75, ge=-1.0, le=1.0)
+    num_simulations: int = Field(default=5000, ge=500, le=20000)
+
+
+class DataAssimilationRequest(BaseModel):
+    vision_score: float = Field(default=0.65, ge=0.0, le=1.0)
+    vision_confidence: float = Field(default=0.85, ge=0.0, le=1.0)
+    sensor_telemetry_score: float = Field(default=0.40, ge=0.0, le=1.0)
+    geomechanical_baseline: float = Field(default=0.50, ge=0.0, le=1.0)
+    tradeoff_alpha: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+# ==============================================================================
+# API ENDPOINTS
+# ==============================================================================
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "service": "RoadWise AI Inference",
-        "model_loaded": session is not None
+        "service": "RoadWise AI Inference & Mathematical Forecasting Engine",
+        "model_loaded": session is not None,
+        "csjdm_profile": CSJDM_GEOMORPHIC_PROFILE
     }
 
 
@@ -83,13 +122,8 @@ async def predict_severity(file: UploadFile = File(...)):
 
     try:
         raw_image = Image.open(io.BytesIO(contents))
-
-        # ------------------------------------------------------------------
-        # GUARD: Filter ONLY obvious non-road files (Documents / Vector Art)
-        # ------------------------------------------------------------------
         is_invalid, reason = is_non_road_upload(raw_image)
         if is_invalid:
-            print(f">>> [REJECTED NON-ROAD] {reason}")
             return {
                 "severity": "Unassessed",
                 "confidence": 0.0,
@@ -97,9 +131,6 @@ async def predict_severity(file: UploadFile = File(...)):
                 "message": reason
             }
 
-        # ------------------------------------------------------------------
-        # Model Preprocessing & Inference (ResNet-38)
-        # ------------------------------------------------------------------
         image_resized = raw_image.convert("RGB").resize((224, 224))
         img_np = np.array(image_resized, dtype=np.float32) / 255.0
         img_np = np.transpose(img_np, (2, 0, 1))
@@ -108,18 +139,13 @@ async def predict_severity(file: UploadFile = File(...)):
         outputs = session.run(None, {input_name: img_np})
         logits = outputs[0][0]
 
-        # Numerically stable Softmax
         exp_logits = np.exp(logits - np.max(logits))
         probs = exp_logits / np.sum(exp_logits)
         max_idx = int(np.argmax(probs))
         top_confidence = float(probs[max_idx])
         predicted_severity = SEVERITY_LEVELS[max_idx]
 
-        # ------------------------------------------------------------------
-        # Statistical Confidence Floor Check
-        # ------------------------------------------------------------------
         if top_confidence < CONFIDENCE_FLOOR:
-            print(f">>> [LOW CONFIDENCE] Score {top_confidence:.2f} below {CONFIDENCE_FLOOR}")
             return {
                 "severity": "Unassessed",
                 "confidence": round(top_confidence * 100.0, 1),
@@ -135,3 +161,77 @@ async def predict_severity(file: UploadFile = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")
+
+
+# --- ENGINE 1 ENDPOINT ---
+@app.post("/api/v1/forecasting/pavement-decay")
+def predict_pavement_decay(req: PavementDecayRequest):
+    try:
+        return fe.simulate_pavement_lifecycle(
+            road_id=req.road_id,
+            soil_type=req.soil_type,
+            initial_pci=req.initial_pci,
+            years_horizon=req.years_horizon,
+            fractional_alpha=req.fractional_alpha
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Pavement decay engine error: {str(e)}")
+
+
+# --- ENGINE 2 ENDPOINT ---
+@app.post("/api/v1/forecasting/hydrological-shock")
+def predict_hydrological_shock(req: HydrologicalShockRequest):
+    try:
+        return fe.simulate_hydrological_shock(
+            road_id=req.road_id,
+            soil_type=req.soil_type,
+            rainfall_mm=req.rainfall_mm,
+            slope_degrees=req.slope_degrees,
+            drainage_capacity_mm=req.drainage_capacity_mm
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Hydrological shock engine error: {str(e)}")
+
+
+# --- ENGINE 3 ENDPOINT ---
+@app.post("/api/v1/forecasting/defect-propagation")
+def predict_defect_propagation(req: DefectPropagationRequest):
+    try:
+        return fe.simulate_defect_propagation(
+            num_nodes=req.num_nodes,
+            timesteps=req.timesteps,
+            diffusion_rate=req.diffusion_rate,
+            growth_rate=req.growth_rate
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Defect propagation engine error: {str(e)}")
+
+
+# --- ENGINE 4 ENDPOINT ---
+@app.post("/api/v1/forecasting/financial-var")
+def predict_financial_risk(req: FinancialRiskRequest):
+    try:
+        return fe.simulate_financial_risk_var(
+            base_budget_php=req.base_budget_php,
+            confidence_level=req.confidence_level,
+            alpha_tail=req.alpha_tail,
+            beta_skew=req.beta_skew,
+            num_simulations=req.num_simulations
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Financial risk engine error: {str(e)}")
+
+
+# --- ENGINE 5 ENDPOINT ---
+@app.post("/api/v1/forecasting/data-assimilation")
+def assimilate_sensor_data(req: DataAssimilationRequest):
+    try:
+        return fe.assimilate_multi_sensor_data(
+            vision_score=req.vision_score,
+            vision_confidence=req.vision_confidence,
+            sensor_telemetry_score=req.sensor_telemetry_score,
+            geomechanical_baseline=req.geomechanical_baseline,
+            tradeoff_alpha=req.tradeoff_alpha
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Data assimilation engine error: {str(e)}")
