@@ -3,4 +3,8 @@ uvicorn
 onnxruntime
 pillow
 numpy
+scipy
+pydantic
 python-multipart
+pytest
+requests
