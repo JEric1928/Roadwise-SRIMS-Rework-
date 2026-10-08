@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 @Repository
 public interface NotificationRepository extends JpaRepository<Notification, Long> {
@@ -18,4 +19,7 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     // Counts unread notifications via recipient.id
     @Query("SELECT COUNT(n) FROM Notification n WHERE n.recipient.id = :recipientId AND n.isRead = false")
     long countByRecipientIdAndIsReadFalse(@Param("recipientId") Long recipientId);
+
+    @Query("SELECT n FROM Notification n WHERE n.id = :id AND n.recipient.id = :recipientId")
+    Optional<Notification> findByIdAndRecipientId(@Param("id") Long id, @Param("recipientId") Long recipientId);
 }

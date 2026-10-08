@@ -11,14 +11,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.time.Duration;
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/api/users")
@@ -39,6 +37,9 @@ public class UserController {
 
     @Autowired
     private ActivityLogService activityLogService;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     // 🚀 INJECTED SUPABASE CLOUD STORAGE SERVICE
     @Autowired
@@ -138,16 +139,6 @@ public class UserController {
         }
     }
 
-    // ==========================================
-    // 3. SECURE PASSWORD UPDATE (1-HOUR LOCKOUT)
-    // ==========================================
-    private static class AttemptTracker {
-        int attempts = 0;
-        LocalDateTime lockoutTime = null;
-    }
-
-    private static final Map<Long, AttemptTracker> securityTracker = new ConcurrentHashMap<>();
-
     @PutMapping("/{id}/password")
     public ResponseEntity<?> updatePassword(
             @PathVariable Long id,
@@ -160,43 +151,18 @@ public class UserController {
         User user = userOpt.get();
         String currentPassword = payload.get("currentPassword");
         String newPassword = payload.get("newPassword");
-
-        AttemptTracker tracker = securityTracker.computeIfAbsent(id, k -> new AttemptTracker());
-
-        if (tracker.attempts >= 5 && tracker.lockoutTime != null) {
-            Duration duration = Duration.between(tracker.lockoutTime, LocalDateTime.now());
-            if (duration.toMinutes() < 60) {
-                long minutesLeft = 60 - duration.toMinutes();
-                return ResponseEntity.status(429).body(Map.of("error", "Security lockout active. Please try again in " + minutesLeft + " minute(s)."));
-            } else {
-                tracker.attempts = 0;
-                tracker.lockoutTime = null;
-            }
+        if (currentPassword == null || currentPassword.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Current password is required."));
+        }
+        if (newPassword == null || newPassword.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "New password is required."));
         }
 
-        if (!user.getPassword().equals(currentPassword)) {
-            tracker.attempts++;
-            if (tracker.attempts >= 5) {
-                tracker.lockoutTime = LocalDateTime.now();
-
-                activityLogService.log(
-                        user,
-                        "AUTH",
-                        "PASSWORD_CHANGE_LOCKED",
-                        "#USR-" + user.getId(),
-                        "Password update locked for 1 hour due to multiple incorrect password attempts.",
-                        "WARNING",
-                        request
-                );
-
-                return ResponseEntity.status(429).body(Map.of("error", "Maximum attempts reached! Account locked for 1 hour for security."));
-            }
-            int remaining = 5 - tracker.attempts;
-            return ResponseEntity.status(401).body(Map.of("error", "Incorrect current password. " + remaining + " attempt(s) remaining."));
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            return ResponseEntity.status(401).body(Map.of("error", "Incorrect current password."));
         }
 
-        securityTracker.remove(id);
-        user.setPassword(newPassword);
+        user.setPassword(passwordEncoder.encode(newPassword));
         userRepository.save(user);
 
         activityLogService.log(
@@ -466,7 +432,7 @@ public class UserController {
         User currentAdmin = currentAdminOpt.get();
 
         // 🛡️ 1. SECURITY CHECK: Verify Outgoing Admin Password
-        if (!currentAdmin.getPassword().equals(currentPassword)) {
+        if (!passwordEncoder.matches(currentPassword, currentAdmin.getPassword())) {
             activityLogService.log(
                     currentAdmin,
                     "SECURITY",
@@ -499,7 +465,7 @@ public class UserController {
         newAdmin.setEmail(newEmail != null ? newEmail.trim() : "");
         newAdmin.setUsername(newUsername != null ? newUsername.trim() : "");
         newAdmin.setPhoneNumber(newPhone != null ? newPhone.trim() : "");
-        newAdmin.setPassword(tempPassword);
+        newAdmin.setPassword(passwordEncoder.encode(tempPassword));
         newAdmin.setRole("CPDO Admin");
         newAdmin.setStatus("Active");
         newAdmin.setFailedLoginAttempts(0);
@@ -584,7 +550,7 @@ public class UserController {
         User currentCeo = currentCeoOpt.get();
 
         // 🛡️ 1. SECURITY CHECK: Verify Outgoing CEO Password
-        if (!currentCeo.getPassword().equals(currentPassword)) {
+        if (!passwordEncoder.matches(currentPassword, currentCeo.getPassword())) {
             activityLogService.log(
                     currentCeo,
                     "SECURITY",
@@ -617,7 +583,7 @@ public class UserController {
         newCeo.setEmail(newEmail != null ? newEmail.trim() : "");
         newCeo.setUsername(newUsername != null ? newUsername.trim() : "");
         newCeo.setPhoneNumber(newPhone != null ? newPhone.trim() : "");
-        newCeo.setPassword(tempPassword);
+        newCeo.setPassword(passwordEncoder.encode(tempPassword));
         newCeo.setRole(currentCeo.getRole() != null ? currentCeo.getRole() : "ENGINEER");
         newCeo.setStatus("Active");
         newCeo.setFailedLoginAttempts(0);

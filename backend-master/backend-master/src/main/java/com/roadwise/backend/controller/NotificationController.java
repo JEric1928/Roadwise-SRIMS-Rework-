@@ -1,72 +1,101 @@
 package com.roadwise.backend.controller;
 
 import com.roadwise.backend.model.Notification;
+import com.roadwise.backend.model.User;
 import com.roadwise.backend.repository.NotificationRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/notifications")
-@CrossOrigin(origins = "*") // Adjust based on your security settings
+@CrossOrigin(origins = "${frontend.url}")
 public class NotificationController {
 
-    @Autowired
-    private NotificationRepository notificationRepository;
+    private final NotificationRepository notificationRepository;
 
-    // ==========================================
-    // 1. GET ALL NOTIFICATIONS FOR A USER
-    // ==========================================
+    public NotificationController(NotificationRepository notificationRepository) {
+        this.notificationRepository = notificationRepository;
+    }
+
+    private User getAuthenticatedUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof User user) {
+            return user;
+        }
+        throw new AccessDeniedException("User is not authenticated.");
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<List<Notification>> getMyNotifications() {
+        User user = getAuthenticatedUser();
+        return ResponseEntity.ok(notificationRepository.findByRecipientIdOrderByCreatedAtDesc(user.getId()));
+    }
+
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<Notification>> getUserNotifications(@PathVariable Long userId) {
-        List<Notification> notifications = notificationRepository.findByRecipientIdOrderByCreatedAtDesc(userId);
-        return ResponseEntity.ok(notifications);
+        User user = getAuthenticatedUser();
+        if (!user.getId().equals(userId)) {
+            throw new AccessDeniedException("Cannot access another user's notifications.");
+        }
+        return getMyNotifications();
     }
 
-    // ==========================================
-    // 2. GET UNREAD BADGE COUNT
-    // ==========================================
+    @GetMapping("/me/unread-count")
+    public ResponseEntity<Long> getMyUnreadCount() {
+        User user = getAuthenticatedUser();
+        return ResponseEntity.ok(notificationRepository.countByRecipientIdAndIsReadFalse(user.getId()));
+    }
+
     @GetMapping("/user/{userId}/unread-count")
     public ResponseEntity<Long> getUnreadCount(@PathVariable Long userId) {
-        long count = notificationRepository.countByRecipientIdAndIsReadFalse(userId);
-        return ResponseEntity.ok(count);
+        User user = getAuthenticatedUser();
+        if (!user.getId().equals(userId)) {
+            throw new AccessDeniedException("Cannot access another user's notifications.");
+        }
+        return getMyUnreadCount();
     }
 
-    // ==========================================
-    // 3. MARK A SINGLE NOTIFICATION AS READ
-    // ==========================================
     @PutMapping("/{id}/read")
     public ResponseEntity<?> markAsRead(@PathVariable Long id) {
-        Optional<Notification> notifOpt = notificationRepository.findById(id);
-        if (notifOpt.isPresent()) {
-            Notification notif = notifOpt.get();
-            notif.setRead(true);
-            notificationRepository.save(notif);
-            return ResponseEntity.ok("Notification marked as read.");
+        User user = getAuthenticatedUser();
+        Optional<Notification> notifOpt = notificationRepository.findByIdAndRecipientId(id, user.getId());
+        if (notifOpt.isEmpty()) {
+            return ResponseEntity.status(404).body(Map.of("error", "Notification not found."));
         }
-        return ResponseEntity.notFound().build();
+
+        Notification notif = notifOpt.get();
+        notif.setRead(true);
+        notificationRepository.save(notif);
+        return ResponseEntity.ok(Map.of("message", "Notification marked as read."));
     }
 
-    // ==========================================
-    // 4. MARK ALL AS READ (For the Dropdown Button)
-    // ==========================================
-    @PutMapping("/user/{userId}/read-all")
-    public ResponseEntity<?> markAllAsRead(@PathVariable Long userId) {
-        // Fetch all notifications, filter for only unread ones, and mark them read
-        List<Notification> unreadNotifs = notificationRepository.findByRecipientIdOrderByCreatedAtDesc(userId)
+    @PutMapping("/me/read-all")
+    public ResponseEntity<?> markAllAsRead() {
+        User user = getAuthenticatedUser();
+        List<Notification> unreadNotifs = notificationRepository.findByRecipientIdOrderByCreatedAtDesc(user.getId())
                 .stream()
                 .filter(n -> !n.isRead())
                 .collect(Collectors.toList());
 
-        for (Notification notif : unreadNotifs) {
-            notif.setRead(true);
-        }
-
+        unreadNotifs.forEach(notif -> notif.setRead(true));
         notificationRepository.saveAll(unreadNotifs);
-        return ResponseEntity.ok("All notifications marked as read.");
+        return ResponseEntity.ok(Map.of("message", "All notifications marked as read."));
+    }
+
+    @PutMapping("/user/{userId}/read-all")
+    public ResponseEntity<?> markAllAsRead(@PathVariable Long userId) {
+        User user = getAuthenticatedUser();
+        if (!user.getId().equals(userId)) {
+            throw new AccessDeniedException("Cannot modify another user's notifications.");
+        }
+        return markAllAsRead();
     }
 }

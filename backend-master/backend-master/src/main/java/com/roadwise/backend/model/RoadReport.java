@@ -18,6 +18,7 @@ public class RoadReport {
 
     // --- 1. Road Details (From Frontend) ---
     private String cityRoadName;
+    @Column(name = "city_road_code")
     private String cityRoadId;
     private String roadImportance;
     private String roadType;

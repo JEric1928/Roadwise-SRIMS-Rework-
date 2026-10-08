@@ -1,13 +1,17 @@
 package com.roadwise.backend.model;
 
+import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 
 @Entity
+@Table(name = "system_settings")
 public class SystemSettings {
     @Id
     private Long id = 1L; // We only ever need one row of settings
 
+    @Column(name = "maintenance_mode", nullable = false)
     private boolean maintenanceMode = false;
 
     public Long getId() { return id; }

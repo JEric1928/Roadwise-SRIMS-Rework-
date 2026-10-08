@@ -9,9 +9,9 @@ async function triggerForecastingUpdate() {
 
   // 1. Fetch Engine 1: Pavement Decay
   try {
-    const res = await fetch("http://localhost:8000/api/v1/forecasting/pavement-decay", {
+    const res = await fetch(`${API_BASE_URL}/api/v1/forecasting/pavement-decay`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: API_HEADERS,
       body: JSON.stringify({
         road_id: "RD-001",
         soil_type: soilType,
@@ -31,9 +31,9 @@ async function triggerForecastingUpdate() {
 
   // 2. Fetch Engine 4: Financial Risk
   try {
-    const res = await fetch("http://localhost:8000/api/v1/forecasting/financial-var", {
+    const res = await fetch(`${API_BASE_URL}/api/v1/forecasting/financial-var`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: API_HEADERS,
       body: JSON.stringify({
         base_budget_php: 15000000.0,
         confidence_level: 0.95,
@@ -118,9 +118,9 @@ async function updateDataAssimilationUI(alphaVal) {
   if (label) label.innerText = `Trade-off α = ${parseFloat(alphaVal).toFixed(2)}`;
 
   try {
-    const res = await fetch("http://localhost:8000/api/v1/forecasting/data-assimilation", {
+    const res = await fetch(`${API_BASE_URL}/api/v1/forecasting/data-assimilation`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: API_HEADERS,
       body: JSON.stringify({
         vision_score: 0.75,
         vision_confidence: 0.88,

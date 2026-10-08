@@ -440,7 +440,19 @@ async function apiFetch(endpoint, options = {}) {
     throw new Error(`API request failed with status: ${response.status}`);
   }
 
-  return response.json();
+  const payload = await response.json();
+  if (payload && Array.isArray(payload.content) && endpoint.startsWith('/api/reports')) {
+    const reports = payload.content;
+    reports._pageMeta = {
+      page: payload.page,
+      size: payload.size,
+      totalElements: payload.totalElements,
+      totalPages: payload.totalPages,
+      last: payload.last
+    };
+    return reports;
+  }
+  return payload;
 }
 // ==========================================
 // 🚀 SECURE IMAGE FETCHER (SUPABASE + LOCAL COMPATIBLE)
@@ -10579,7 +10591,7 @@ function timeAgo(dateString) {
 // 2. HELPER: Fetch Unread Badge Count
 window.fetchUnreadBadgeCount = function() {
   if (!currentUserId) return;
-  apiFetch(`/api/notifications/user/${currentUserId}/unread-count`)
+  apiFetch(`/api/notifications/me/unread-count`)
     .then(count => {
       const badge = document.getElementById('notification-badge');
       if (badge) {
@@ -10599,7 +10611,7 @@ window.loadNotifications = function() {
   if (!currentUserId) return;
   fetchUnreadBadgeCount();
 
-  apiFetch(`/api/notifications/user/${currentUserId}`)
+  apiFetch(`/api/notifications/me`)
     .then(notifications => {
       const listContainer = document.getElementById('notification-list');
       if (!listContainer) return;
@@ -10675,7 +10687,7 @@ window.openSingleNotification = function(notifId, element) {
   if (titleEl) titleEl.style.fontWeight = '600';
 
   // F. Send the read request to the backend silently
-  fetch(`${API_BASE_URL}/api/notifications/${notifId}/read`, { method: 'PUT' })
+  fetch(`${API_BASE_URL}/api/notifications/${notifId}/read`, { method: 'PUT', headers: API_HEADERS })
     .then(() => fetchUnreadBadgeCount())
     .catch(err => console.error("Error marking as read:", err));
 };
@@ -10687,7 +10699,7 @@ window.markAllAsRead = function() {
   const markAllBtn = document.getElementById('btn-mark-all-read');
   if (markAllBtn) markAllBtn.innerText = "Marking...";
 
-  fetch(`${API_BASE_URL}/api/notifications/user/${currentUserId}/read-all`, { method: 'PUT' })
+  fetch(`${API_BASE_URL}/api/notifications/me/read-all`, { method: 'PUT', headers: API_HEADERS })
     .then(res => {
       if (res.ok) loadNotifications();
     })
@@ -10709,7 +10721,7 @@ window.viewAllActivity = function() {
     const modalList = document.getElementById('all-notifications-list');
     modalList.innerHTML = '<div style="padding: 30px; text-align: center; color: #64748b;">Loading history...</div>';
 
-    apiFetch(`/api/notifications/user/${currentUserId}`)
+    apiFetch(`/api/notifications/me`)
       .then(notifications => {
         if (!notifications || notifications.length === 0) {
           modalList.innerHTML = '<div style="padding: 40px 20px; text-align: center; color: #94a3b8;">No notification history found.</div>';
@@ -10918,10 +10930,7 @@ window.loadDynamicInventoryYears = function() {
     endpoint = `/api/reports/barangay/${barangayId}`;
   }
 
-  fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: { "ngrok-skip-browser-warning": "true" }
-  })
-    .then(res => res.json())
+  apiFetch(endpoint)
     .then(reports => {
       if (!Array.isArray(reports)) return;
 
@@ -10965,13 +10974,7 @@ window.openAnnualReportPreview = function() {
     endpoint = `/api/reports/barangay/${barangayId}`;
   }
 
-  fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: { "ngrok-skip-browser-warning": "true" }
-  })
-    .then(res => {
-      if (!res.ok) throw new Error("Failed to fetch reports.");
-      return res.json();
-    })
+  apiFetch(endpoint)
     .then(reports => {
       if (!Array.isArray(reports) || reports.length === 0) {
         if (typeof showToast === 'function') showToast("No reports found to generate preview.", "info");
@@ -11804,10 +11807,7 @@ window.loadDynamicInventoryYears = function() {
     endpoint = `/api/reports/barangay/${barangayId}`;
   }
 
-  fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: { "ngrok-skip-browser-warning": "true" }
-  })
-    .then(res => res.json())
+  apiFetch(endpoint)
     .then(reports => {
       if (!Array.isArray(reports)) return;
 
@@ -11911,13 +11911,7 @@ window.openAnnualReportPreview = async function() {
     endpoint = `/api/reports/barangay/${barangayId}`;
   }
 
-  fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: { "ngrok-skip-browser-warning": "true" }
-  })
-    .then(res => {
-      if (!res.ok) throw new Error("Failed to fetch reports.");
-      return res.json();
-    })
+  apiFetch(endpoint)
     .then(reports => {
       if (!Array.isArray(reports) || reports.length === 0) {
         if (typeof showToast === 'function') showToast("No reports found to generate preview.", "info");
