@@ -68,6 +68,9 @@ public class ReportListDto {
     public LocalDate getDateSubmitted() { return dateSubmitted; }
     public void setDateSubmitted(LocalDate dateSubmitted) { this.dateSubmitted = dateSubmitted; }
 
+    public LocalDate getTargetCompletionDate() { return targetCompletionDate; }
+    public void setTargetCompletionDate(LocalDate targetCompletionDate) { this.targetCompletionDate = targetCompletionDate; }
+
     public Double getCvConfidenceScore() { return cvConfidenceScore; }
     public void setCvConfidenceScore(Double cvConfidenceScore) { this.cvConfidenceScore = cvConfidenceScore; }
 

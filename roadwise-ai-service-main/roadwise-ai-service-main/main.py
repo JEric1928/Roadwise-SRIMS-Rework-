@@ -4,6 +4,8 @@ import numpy as np
 import onnxruntime as ort
 from PIL import Image
 from fastapi import FastAPI, File, UploadFile, HTTPException
+from collections import OrderedDict
+import threading
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
 
@@ -33,20 +35,38 @@ SEVERITY_LEVELS = ["Low", "Medium", "High"]
 CONFIDENCE_FLOOR = 0.40
 MODEL_VERSION = "rdd2022-d4-resnet38-v2"
 MAX_CACHE_SIZE = 1000
-PREDICTION_CACHE: Dict[str, dict] = {}
+
+CACHE_LOCK = threading.Lock()
+PREDICTION_CACHE: OrderedDict[str, dict] = OrderedDict()
+
+
+def cache_get(key: str) -> Optional[dict]:
+    with CACHE_LOCK:
+        if key in PREDICTION_CACHE:
+            PREDICTION_CACHE.move_to_end(key)
+            return PREDICTION_CACHE[key]
+        return None
 
 
 def cache_set(key: str, value: dict):
-    if len(PREDICTION_CACHE) >= MAX_CACHE_SIZE:
-        # Evict first inserted key (FIFO)
-        first_key = next(iter(PREDICTION_CACHE))
-        PREDICTION_CACHE.pop(first_key, None)
-    PREDICTION_CACHE[key] = value
+    with CACHE_LOCK:
+        if key in PREDICTION_CACHE:
+            PREDICTION_CACHE.move_to_end(key)
+        PREDICTION_CACHE[key] = value
+        if len(PREDICTION_CACHE) > MAX_CACHE_SIZE:
+            PREDICTION_CACHE.popitem(last=False)  # Evict LRU item
 
 
 def is_non_road_upload(img: Image.Image) -> tuple[bool, str, str]:
-    rgb = np.array(img.convert("RGB"), dtype=np.float32)
-    gray = np.array(img.convert("L"), dtype=np.float32)
+    w_orig, h_orig = img.size
+    if w_orig > 512 or h_orig > 512:
+        img_val = img.copy()
+        img_val.thumbnail((512, 512))
+    else:
+        img_val = img
+
+    rgb = np.array(img_val.convert("RGB"), dtype=np.float32)
+    gray = np.array(img_val.convert("L"), dtype=np.float32)
     total_pixels = gray.size
 
     white_ratio = float(np.sum(gray > 200.0) / total_pixels)
@@ -134,8 +154,9 @@ async def predict_severity(file: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
     img_hash = hashlib.sha256(contents).hexdigest()
-    if img_hash in PREDICTION_CACHE:
-        return PREDICTION_CACHE[img_hash]
+    cached_res = cache_get(img_hash)
+    if cached_res is not None:
+        return cached_res
 
     try:
         raw_image = Image.open(io.BytesIO(contents))

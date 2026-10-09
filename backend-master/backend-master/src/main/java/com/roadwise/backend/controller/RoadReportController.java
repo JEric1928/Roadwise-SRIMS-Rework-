@@ -11,6 +11,8 @@ import com.roadwise.backend.service.*;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.data.domain.*;
@@ -89,19 +91,14 @@ public class RoadReportController {
     }
 
     private Long getAdminId() {
-        return userRepository.findAll().stream()
-                .filter(user -> user.getRole() != null && (user.getRole().equalsIgnoreCase("CPDO Admin") || user.getRole().equalsIgnoreCase("Admin")))
+        return userRepository.findFirstByRoleInIgnoreCase(List.of("cpdo admin", "admin"))
                 .map(User::getId)
-                .findFirst()
                 .orElse(1L);
     }
 
     private Long getCeoId() {
-        return userRepository.findAll().stream()
-                .filter(user -> user.getRole() != null &&
-                        (user.getRole().equalsIgnoreCase("ENGINEER") || user.getRole().equalsIgnoreCase("City Engineer")))
+        return userRepository.findFirstByRoleInIgnoreCase(List.of("engineer", "city engineer"))
                 .map(User::getId)
-                .findFirst()
                 .orElse(null);
     }
 
@@ -110,7 +107,7 @@ public class RoadReportController {
     // ==========================================
     @PostMapping(consumes = {"multipart/form-data"})
     @PreAuthorize("hasAnyRole('BARANGAY', 'ADMIN', 'CPDO Admin')")
-    @Transactional
+    @CacheEvict(value = "dashboardStats", allEntries = true)
     public RoadReport createReport(
             @ModelAttribute ReportCreateDto createDto,
             @RequestParam(value = "imageFile", required = false) MultipartFile imageFile,
@@ -297,6 +294,7 @@ public class RoadReportController {
     }
 
     @GetMapping("/dashboard-stats")
+    @Cacheable("dashboardStats")
     public ResponseEntity<?> getDashboardStats() {
         Map<String, Object> stats = new HashMap<>();
 
@@ -346,9 +344,7 @@ public class RoadReportController {
                 throw new AccessDeniedException("Access denied: You can only view reports from your own barangay.");
             }
         }
-        List<RoadReport> reports = repository.findByBarangay_Id(barangayId);
-        reports.sort((a, b) -> b.getId().compareTo(a.getId()));
-        return reports;
+        return repository.findByBarangay_IdOrderByIdDesc(barangayId);
     }
 
     // ==========================================
@@ -357,6 +353,7 @@ public class RoadReportController {
     @PutMapping("/{id}/status")
     @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin', 'ENGINEER', 'City Engineer')")
     @Transactional
+    @CacheEvict(value = "dashboardStats", allEntries = true)
     public ResponseEntity<String> updateReportStatus(
             @PathVariable Long id,
             @RequestBody Map<String, String> payload,
@@ -454,6 +451,7 @@ public class RoadReportController {
     @PutMapping("/update/{id}")
     @PreAuthorize("hasAnyRole('BARANGAY', 'ADMIN', 'CPDO Admin')")
     @Transactional
+    @CacheEvict(value = "dashboardStats", allEntries = true)
     public ResponseEntity<?> updateReport(@PathVariable Long id,
                                           @RequestParam(value = "damageDescription", required = false) String description,
                                           @RequestParam(value = "length", required = false) Double length,
@@ -550,57 +548,59 @@ public class RoadReportController {
     @PutMapping("/dispatch-masterlist")
     @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     @Transactional
+    @CacheEvict(value = "dashboardStats", allEntries = true)
     public ResponseEntity<String> dispatchMasterlistToCEO(HttpServletRequest request) {
         User currentUser = getAuthenticatedUser();
-        List<RoadReport> allReports = repository.findAll();
+        List<RoadReport> validatedReports = repository.findByStatusIgnoreCase("Validated");
         int dispatchedCount = 0;
 
-        for (RoadReport report : allReports) {
-            if ("Validated".equalsIgnoreCase(report.getStatus().trim())) {
-                boolean hasValidImage = report.getDamageImage() != null &&
-                        !report.getDamageImage().trim().isEmpty() &&
-                        !report.getDamageImage().trim().equalsIgnoreCase("no_image.jpg");
+        for (RoadReport report : validatedReports) {
+            boolean hasValidImage = report.getDamageImage() != null &&
+                    !report.getDamageImage().trim().isEmpty() &&
+                    !report.getDamageImage().trim().equalsIgnoreCase("no_image.jpg");
 
-                String prev = report.getStatus();
-                if (hasValidImage) {
-                    report.setStatus(ReportStatus.DISPATCHED_TO_CEO.getLabel());
-                    dispatchedCount++;
+            String prev = report.getStatus();
+            if (hasValidImage) {
+                report.setStatus(ReportStatus.DISPATCHED_TO_CEO.getLabel());
+                dispatchedCount++;
 
-                    reportStatusLogService.log(
-                            report,
-                            "DISPATCHED",
-                            prev,
-                            ReportStatus.DISPATCHED_TO_CEO.getLabel(),
-                            "Dispatched by CPDO to the City Engineer priority pool.",
-                            currentUser,
-                            currentUser.getFirstName() + " " + currentUser.getLastName(),
-                            "ADMIN",
-                            null
-                    );
-                } else {
-                    report.setStatus(ReportStatus.ARCHIVED.getLabel());
-                    LocalDateTime nowPst = LocalDateTime.now(ZoneId.of("Asia/Manila"));
-                    report.setDateArchived(nowPst);
-                    report.setActualCompletionDate(nowPst.toLocalDate());
-                    report.setAdminRemarks("Auto-archived during dispatch: No photographic damage evidence.");
+                reportStatusLogService.log(
+                        report,
+                        "DISPATCHED",
+                        prev,
+                        ReportStatus.DISPATCHED_TO_CEO.getLabel(),
+                        "Dispatched by CPDO to the City Engineer priority pool.",
+                        currentUser,
+                        currentUser.getFirstName() + " " + currentUser.getLastName(),
+                        "ADMIN",
+                        null
+                );
+            } else {
+                report.setStatus(ReportStatus.ARCHIVED.getLabel());
+                LocalDateTime nowPst = LocalDateTime.now(ZoneId.of("Asia/Manila"));
+                report.setDateArchived(nowPst);
+                report.setActualCompletionDate(nowPst.toLocalDate());
+                report.setAdminRemarks("Auto-archived during dispatch: No photographic damage evidence.");
 
-                    reportStatusLogService.log(
-                            report,
-                            "ARCHIVED_NO_DAMAGE",
-                            prev,
-                            ReportStatus.ARCHIVED.getLabel(),
-                            "Auto-archived during dispatch filter.",
-                            currentUser,
-                            currentUser.getFirstName() + " " + currentUser.getLastName(),
-                            "ADMIN",
-                            null
-                    );
-                }
+                reportStatusLogService.log(
+                        report,
+                        "ARCHIVED_NO_DAMAGE",
+                        prev,
+                        ReportStatus.ARCHIVED.getLabel(),
+                        "Auto-archived during dispatch filter.",
+                        currentUser,
+                        currentUser.getFirstName() + " " + currentUser.getLastName(),
+                        "ADMIN",
+                        null
+                );
             }
         }
 
+        if (!validatedReports.isEmpty()) {
+            repository.saveAll(validatedReports);
+        }
+
         if (dispatchedCount > 0) {
-            repository.saveAll(allReports);
             activityLogService.log(
                     currentUser,
                     "PROJECT",
@@ -613,7 +613,6 @@ public class RoadReportController {
             sendLiveUpdate();
             return ResponseEntity.ok("Successfully dispatched " + dispatchedCount + " prioritized reports to the CEO!");
         } else {
-            repository.saveAll(allReports);
             sendLiveUpdate();
             return ResponseEntity.badRequest().body("No 'Validated' reports found to dispatch.");
         }
@@ -625,6 +624,7 @@ public class RoadReportController {
     @PostMapping("/batch/defer")
     @PreAuthorize("hasAnyRole('ENGINEER', 'City Engineer', 'ADMIN', 'CPDO Admin')")
     @Transactional
+    @CacheEvict(value = "dashboardStats", allEntries = true)
     public ResponseEntity<?> batchDeferReports(@RequestBody Map<String, Object> payload, HttpServletRequest request) {
         User currentUser = getAuthenticatedUser();
         String reason = (String) payload.get("repairRemarks");
@@ -686,6 +686,7 @@ public class RoadReportController {
     @PostMapping(value = "/{id}/complete", consumes = {"multipart/form-data"})
     @PreAuthorize("hasAnyRole('ENGINEER', 'City Engineer', 'ADMIN', 'CPDO Admin')")
     @Transactional
+    @CacheEvict(value = "dashboardStats", allEntries = true)
     public ResponseEntity<?> completeReport(
             @PathVariable Long id,
             @RequestParam(value = "repairRemarks", required = false) String repairRemarks,
@@ -750,6 +751,7 @@ public class RoadReportController {
     @PutMapping("/{id}/defer")
     @PreAuthorize("hasAnyRole('ENGINEER', 'City Engineer', 'ADMIN', 'CPDO Admin')")
     @Transactional
+    @CacheEvict(value = "dashboardStats", allEntries = true)
     public ResponseEntity<?> deferReport(
             @PathVariable Long id,
             @RequestBody Map<String, String> payload,
@@ -957,6 +959,7 @@ public class RoadReportController {
     @PostMapping("/batch/archive")
     @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     @Transactional
+    @CacheEvict(value = "dashboardStats", allEntries = true)
     public ResponseEntity<?> batchArchiveReports(@RequestBody Map<String, Object> payload, HttpServletRequest request) {
         User currentUser = getAuthenticatedUser();
         Object idsObj = payload.get("reportIds");
@@ -1017,6 +1020,7 @@ public class RoadReportController {
     @PostMapping("/rollover-annual-cycle")
     @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     @Transactional
+    @CacheEvict(value = "dashboardStats", allEntries = true)
     public ResponseEntity<?> executeAnnualRollover(HttpServletRequest request) {
         User currentUser = getAuthenticatedUser();
         int archivedCount = repository.archiveAnnualCycleReports();

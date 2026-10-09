@@ -41,8 +41,22 @@ public class DuplicateDetectionService {
             return Optional.empty();
         }
 
-        List<RoadReport> recentReports = repository.findAll();
         LocalDate candidateDate = candidate.getDateSubmitted() != null ? candidate.getDateSubmitted() : LocalDate.now();
+        LocalDate minDate = candidateDate.minusDays(7);
+        LocalDate maxDate = candidateDate.plusDays(7);
+
+        double lat = candidate.getLatitude();
+        double lng = candidate.getLongitude();
+        double minLat = lat - 0.001;
+        double maxLat = lat + 0.001;
+        double minLng = lng - 0.001;
+        double maxLng = lng + 0.001;
+
+        Long barangayId = candidate.getBarangay() != null ? candidate.getBarangay().getId() : null;
+        String cityRoadName = candidate.getCityRoadName();
+
+        List<RoadReport> recentReports = repository.findCandidateDuplicates(
+                minDate, maxDate, minLat, maxLat, minLng, maxLng, barangayId, cityRoadName);
 
         for (RoadReport existing : recentReports) {
             if (candidate.getId() != null && candidate.getId().equals(existing.getId())) {
