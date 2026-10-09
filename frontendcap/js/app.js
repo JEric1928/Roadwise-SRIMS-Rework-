@@ -10579,7 +10579,7 @@ function timeAgo(dateString) {
 // 2. HELPER: Fetch Unread Badge Count
 window.fetchUnreadBadgeCount = function() {
   if (!currentUserId) return;
-  apiFetch(`/api/notifications/user/${currentUserId}/unread-count`)
+  apiFetch(`/api/notifications/me/unread-count`)
     .then(count => {
       const badge = document.getElementById('notification-badge');
       if (badge) {
@@ -10599,7 +10599,7 @@ window.loadNotifications = function() {
   if (!currentUserId) return;
   fetchUnreadBadgeCount();
 
-  apiFetch(`/api/notifications/user/${currentUserId}`)
+  apiFetch(`/api/notifications/me`)
     .then(notifications => {
       const listContainer = document.getElementById('notification-list');
       if (!listContainer) return;
@@ -10687,7 +10687,7 @@ window.markAllAsRead = function() {
   const markAllBtn = document.getElementById('btn-mark-all-read');
   if (markAllBtn) markAllBtn.innerText = "Marking...";
 
-  fetch(`${API_BASE_URL}/api/notifications/user/${currentUserId}/read-all`, { method: 'PUT' })
+  fetch(`${API_BASE_URL}/api/notifications/me/read-all`, { method: 'PUT' })
     .then(res => {
       if (res.ok) loadNotifications();
     })
@@ -10709,7 +10709,7 @@ window.viewAllActivity = function() {
     const modalList = document.getElementById('all-notifications-list');
     modalList.innerHTML = '<div style="padding: 30px; text-align: center; color: #64748b;">Loading history...</div>';
 
-    apiFetch(`/api/notifications/user/${currentUserId}`)
+    apiFetch(`/api/notifications/me`)
       .then(notifications => {
         if (!notifications || notifications.length === 0) {
           modalList.innerHTML = '<div style="padding: 40px 20px; text-align: center; color: #94a3b8;">No notification history found.</div>';

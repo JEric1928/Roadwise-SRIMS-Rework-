@@ -5,6 +5,7 @@ import com.roadwise.backend.model.User;
 import com.roadwise.backend.repository.ActivityLogRepository;
 import com.roadwise.backend.repository.UserRepository;
 import com.roadwise.backend.service.ActivityLogService;
+import com.roadwise.backend.util.SecurityUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -15,7 +16,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/activity-logs")
-@CrossOrigin(origins = "${frontend.url}")
 public class ActivityLogController {
 
     @Autowired
@@ -45,16 +45,15 @@ public class ActivityLogController {
     @PostMapping("/log-action")
     public ResponseEntity<?> recordClientAction(@RequestBody Map<String, Object> payload, HttpServletRequest request) {
         try {
-            Long userId = payload.get("userId") != null ? Long.valueOf(payload.get("userId").toString()) : null;
+            // Identity is derived from the authenticated principal (JWT). Any
+            // client-supplied "userId" in the payload is intentionally ignored,
+            // because a caller could otherwise impersonate another user in the audit trail.
             String category = (String) payload.getOrDefault("category", "EXPORT");
             String action = (String) payload.getOrDefault("action", "EXPORT_AUDIT_LOG");
             String targetEntity = (String) payload.getOrDefault("targetEntity", "SYSTEM");
             String description = (String) payload.getOrDefault("description", "User performed export action.");
 
-            User actor = null;
-            if (userId != null) {
-                actor = userRepository.findById(userId).orElse(null);
-            }
+            User actor = SecurityUtils.getCurrentUser();
 
             ActivityLog savedLog = activityLogService.log(actor, category, action, targetEntity, description, "SUCCESS", request);
             return ResponseEntity.ok(savedLog);

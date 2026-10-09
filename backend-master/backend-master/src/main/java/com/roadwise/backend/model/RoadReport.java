@@ -6,25 +6,38 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "reports")
+@Table(name = "road_reports")
 public class RoadReport {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // Optimistic locking for concurrent workflow transitions (validate/dipatch/close).
+    // Backed by the road_reports.version column added in V6.
     @Version
     private Long version;
 
     // --- 1. Road Details (From Frontend) ---
     private String cityRoadName;
+
+    // Denormalized snapshot of the linked CityRoad's human-readable ID
+    // (e.g. "3142000000 01"). The authoritative FK lives in the city_road_id column.
+    @Column(name = "city_road_code")
     private String cityRoadId;
+
+    // Denormalized snapshots of the linked CityRoad attributes, captured at
+    // submission time so reports stay stable even if the road record changes.
     private String roadImportance;
     private String roadType;
     private String terrainType;
     private Double width;
     private Double length;
+
+    @Column(name = "number_of_bridges")
     private Integer numberOfBridges;
+
+    @Column(name = "length_of_culverts")
     private Double lengthOfCulverts;
 
     // --- 2. Damage Information (From Frontend) ---
@@ -62,12 +75,23 @@ public class RoadReport {
     @Column(name = "target_completion_date")
     private LocalDate targetCompletionDate;
 
+    // Aligned with the database: completion is tracked at day granularity.
     @Column(name = "actual_completion_date")
-    private LocalDateTime actualCompletionDate;
+    private LocalDate actualCompletionDate;
 
     // AI Classification
+    @Column(name = "cv_damage_classification")
     private String cvDamageClassification;
+
+    @Column(name = "cv_confidence_score")
     private Double cvConfidenceScore;
+
+    // Authoritative FK to the registered city road (the human-readable snapshot
+    // code lives in city_road_code above). Mapped as a plain numeric column so
+    // this entity does not depend on columns that are absent from the baseline
+    // schema (road_id / road_importance / terrain_type / road_type on city_roads).
+    @Column(name = "city_road_id", insertable = false, updatable = false)
+    private Long cityRoadFkId;
 
     // Relationships
     @JsonIgnoreProperties({"reports", "hibernateLazyInitializer", "handler"})
@@ -122,16 +146,16 @@ public class RoadReport {
         return id;
     }
 
-    public void setId(Long id) {
-        this.id = id;
-    }
-
     public Long getVersion() {
         return version;
     }
 
     public void setVersion(Long version) {
         this.version = version;
+    }
+
+    public void setId(Long id) {
+        this.id = id;
     }
 
     public String getCityRoadName() {
@@ -406,11 +430,11 @@ public class RoadReport {
         this.targetCompletionDate = targetCompletionDate;
     }
 
-    public LocalDateTime getActualCompletionDate() {
+    public LocalDate getActualCompletionDate() {
         return actualCompletionDate;
     }
 
-    public void setActualCompletionDate(LocalDateTime actualCompletionDate) {
+    public void setActualCompletionDate(LocalDate actualCompletionDate) {
         this.actualCompletionDate = actualCompletionDate;
     }
 }

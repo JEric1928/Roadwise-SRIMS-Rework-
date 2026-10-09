@@ -14,7 +14,7 @@ public class ReportListDto {
     private String barangayName;
     private String reportedBy;
     private LocalDate dateSubmitted;
-    private LocalDateTime targetCompletionDate;
+    private LocalDate targetCompletionDate;
     private Double cvConfidenceScore;
     private String damageType;
     private String damageImage;
@@ -34,6 +34,7 @@ public class ReportListDto {
         }
         dto.setReportedBy(r.getReportedBy());
         dto.setDateSubmitted(r.getDateSubmitted());
+        dto.setTargetCompletionDate(r.getTargetCompletionDate());
         dto.setCvConfidenceScore(r.getCvConfidenceScore());
         dto.setDamageType(r.getDamageType());
         dto.setDamageImage(r.getDamageImage());
