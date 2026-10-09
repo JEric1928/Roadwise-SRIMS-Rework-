@@ -1,5 +1,6 @@
 package com.roadwise.backend.config;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.cors.CorsConfiguration;
@@ -25,12 +26,18 @@ public class WebConfig implements WebMvcConfigurer {
     }
 
     @Bean
-    public CorsFilter corsFilter() {
+    public CorsFilter corsFilter(
+            @Value("${frontend.url:http://localhost:63342}") String frontendUrl) {
         CorsConfiguration config = new CorsConfiguration();
         config.setAllowCredentials(true);
 
-        // Use patterns to allow all origins safely
-        config.setAllowedOriginPatterns(Arrays.asList("*"));
+        // Centralized CORS policy: only the configured frontend origin may call
+        // the API. Override per-environment with the FRONTEND_URL env var.
+        // Comma-separated values are supported (e.g. two production domains).
+        Arrays.stream(frontendUrl.split(","))
+              .map(String::trim)
+              .filter(s -> !s.isEmpty())
+              .forEach(config::addAllowedOriginPattern);
 
         config.setAllowedHeaders(Arrays.asList("*"));
         config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));

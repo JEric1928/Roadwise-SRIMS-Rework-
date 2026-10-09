@@ -15,7 +15,6 @@ import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/roads") // Kept your exact mapping!
-@CrossOrigin(origins = "${frontend.url}")
 public class CityRoadController {
 
     @Autowired

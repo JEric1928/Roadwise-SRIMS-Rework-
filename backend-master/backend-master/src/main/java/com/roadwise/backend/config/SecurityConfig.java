@@ -30,7 +30,9 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/**", "/api/health/**", "/health", "/ws/**", "/actuator/health").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/barangays/**", "/api/city-roads/**").permitAll()
+                // CityRoadController is mapped at /api/roads — the old /api/city-roads
+                // rule never matched any endpoint. Keep both for backwards compatibility.
+                .requestMatchers(HttpMethod.GET, "/api/barangays/**", "/api/roads/**", "/api/city-roads/**").permitAll()
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

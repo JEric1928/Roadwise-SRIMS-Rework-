@@ -36,7 +36,6 @@ import java.util.*;
 
 @RestController
 @RequestMapping("/api/reports")
-@CrossOrigin(origins = "${frontend.url}")
 public class RoadReportController {
 
     @Autowired
@@ -408,7 +407,7 @@ public class RoadReportController {
                 targetStatusEnum == ReportStatus.ARCHIVED || targetStatusEnum == ReportStatus.COMPLETED) {
             LocalDateTime nowPst = LocalDateTime.now(ZoneId.of("Asia/Manila"));
             report.setDateArchived(nowPst);
-            report.setActualCompletionDate(nowPst);
+            report.setActualCompletionDate(nowPst.toLocalDate());
         }
 
         if (adminRemarks != null) {
@@ -582,7 +581,7 @@ public class RoadReportController {
                     report.setStatus(ReportStatus.ARCHIVED.getLabel());
                     LocalDateTime nowPst = LocalDateTime.now(ZoneId.of("Asia/Manila"));
                     report.setDateArchived(nowPst);
-                    report.setActualCompletionDate(nowPst);
+                    report.setActualCompletionDate(nowPst.toLocalDate());
                     report.setAdminRemarks("Auto-archived during dispatch: No photographic damage evidence.");
 
                     reportStatusLogService.log(
@@ -714,7 +713,7 @@ public class RoadReportController {
 
         LocalDateTime completionTime = LocalDateTime.now(ZoneId.of("Asia/Manila"));
         report.setDateArchived(completionTime);
-        report.setActualCompletionDate(completionTime);
+        report.setActualCompletionDate(completionTime.toLocalDate());
         repository.save(report);
 
         sendStatusUpdateEmail(report, ReportStatus.COMPLETED.getLabel(), repairRemarks);

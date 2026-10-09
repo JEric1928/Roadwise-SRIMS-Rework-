@@ -8,6 +8,7 @@ import com.roadwise.backend.repository.CityRoadRepository;
 import com.roadwise.backend.repository.RoadReportRepository;
 import com.roadwise.backend.repository.UserRepository;
 import com.roadwise.backend.service.ActivityLogService;
+import com.roadwise.backend.util.SecurityUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
@@ -23,7 +24,6 @@ import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/barangays")
-@CrossOrigin(origins = "${frontend.url}")
 public class BarangayController {
 
     @Autowired
@@ -60,7 +60,6 @@ public class BarangayController {
     @CacheEvict(value = "barangays", allEntries = true)
     public ResponseEntity<?> createBarangay(
             @RequestBody Barangay barangay,
-            @RequestParam(value = "userId", required = false) Long userId,
             HttpServletRequest request) {
 
         String cleanedName = barangay.getBarangayName().trim();
@@ -72,9 +71,14 @@ public class BarangayController {
         barangay.setBarangayName(cleanedName);
         Barangay savedBarangay = barangayRepository.save(barangay);
 
-        // ⏱️ AUDIT LOG: Attributed to Admin
-        Long adminId = (userId != null) ? userId : getAdminId();
-        User adminActor = userRepository.findById(adminId).orElse(null);
+        // ⏱️ AUDIT LOG: Attributed to the authenticated administrator from the
+        // SecurityContext. The client-supplied userId parameter was removed so a
+        // caller cannot forge audit attribution. Falls back to the admin lookup
+        // only for legacy unauthenticated callers.
+        User adminActor = SecurityUtils.getCurrentUser();
+        if (adminActor == null) {
+            adminActor = userRepository.findById(getAdminId()).orElse(null);
+        }
 
         activityLogService.log(
                 adminActor,
@@ -172,7 +176,6 @@ public class BarangayController {
     public ResponseEntity<?> updateBarangay(
             @PathVariable Long id,
             @RequestBody Barangay updatedInfo,
-            @RequestParam(value = "userId", required = false) Long userId,
             HttpServletRequest request) {
 
         Optional<Barangay> existingOpt = barangayRepository.findById(id);
@@ -190,9 +193,12 @@ public class BarangayController {
         existingBarangay.setBarangayName(cleanedName);
         Barangay savedBarangay = barangayRepository.save(existingBarangay);
 
-        // ⏱️ AUDIT LOG: Attributed to Admin
-        Long adminId = (userId != null) ? userId : getAdminId();
-        User adminActor = userRepository.findById(adminId).orElse(null);
+        // ⏱️ AUDIT LOG: Attributed to the authenticated administrator (SecurityContext),
+        // never to a client-supplied userId.
+        User adminActor = SecurityUtils.getCurrentUser();
+        if (adminActor == null) {
+            adminActor = userRepository.findById(getAdminId()).orElse(null);
+        }
 
         activityLogService.log(
                 adminActor,

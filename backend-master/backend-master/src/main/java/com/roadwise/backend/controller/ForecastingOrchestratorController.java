@@ -12,7 +12,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/forecasting")
-@CrossOrigin(origins = "*")
 public class ForecastingOrchestratorController {
 
     private final RestTemplate restTemplate = new RestTemplate();

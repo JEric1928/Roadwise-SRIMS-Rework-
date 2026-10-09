@@ -7,10 +7,12 @@ import com.roadwise.backend.service.ActivityLogService;
 import com.roadwise.backend.service.EmailService;
 import com.roadwise.backend.service.NotificationService;
 import com.roadwise.backend.service.SupabaseStorageService;
+import com.roadwise.backend.util.SecurityUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -18,15 +20,16 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 @RestController
 @RequestMapping("/api/users")
-@CrossOrigin(origins = "${frontend.url}")
 public class UserController {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
 
     @Autowired
     private EmailService emailService;
@@ -140,13 +143,32 @@ public class UserController {
 
     // ==========================================
     // 3. SECURE PASSWORD UPDATE (1-HOUR LOCKOUT)
+    //    Lockout state is persisted on the user row (failed_login_attempts /
+    //    lockout_until), consistent with the database-backed security model in
+    //    AuthController. The old in-memory securityTracker map was removed:
+    //    it leaked entries and reset on every restart / across instances.
     // ==========================================
-    private static class AttemptTracker {
-        int attempts = 0;
-        LocalDateTime lockoutTime = null;
-    }
 
-    private static final Map<Long, AttemptTracker> securityTracker = new ConcurrentHashMap<>();
+    /**
+     * Verifies a plaintext candidate password against the stored hash, transparently
+     * migrating legacy plaintext rows to BCrypt on successful match (same strategy
+     * as AuthController login).
+     */
+    private boolean verifyAndMigratePassword(User user, String rawPassword) {
+        String stored = user.getPassword();
+        if (stored == null || rawPassword == null) {
+            return false;
+        }
+        if (stored.startsWith("$2a$") || stored.startsWith("$2b$") || stored.startsWith("$2y$")) {
+            return passwordEncoder.matches(rawPassword, stored);
+        }
+        // Legacy plaintext row: compare and upgrade to BCrypt on success.
+        if (stored.equals(rawPassword)) {
+            user.setPassword(passwordEncoder.encode(rawPassword));
+            return true;
+        }
+        return false;
+    }
 
     @PutMapping("/{id}/password")
     public ResponseEntity<?> updatePassword(
@@ -161,23 +183,17 @@ public class UserController {
         String currentPassword = payload.get("currentPassword");
         String newPassword = payload.get("newPassword");
 
-        AttemptTracker tracker = securityTracker.computeIfAbsent(id, k -> new AttemptTracker());
-
-        if (tracker.attempts >= 5 && tracker.lockoutTime != null) {
-            Duration duration = Duration.between(tracker.lockoutTime, LocalDateTime.now());
-            if (duration.toMinutes() < 60) {
-                long minutesLeft = 60 - duration.toMinutes();
-                return ResponseEntity.status(429).body(Map.of("error", "Security lockout active. Please try again in " + minutesLeft + " minute(s)."));
-            } else {
-                tracker.attempts = 0;
-                tracker.lockoutTime = null;
-            }
+        if (user.getLockoutUntil() != null && LocalDateTime.now().isBefore(user.getLockoutUntil())) {
+            long minutesLeft = Duration.between(LocalDateTime.now(), user.getLockoutUntil()).toMinutes() + 1;
+            return ResponseEntity.status(429).body(Map.of("error", "Security lockout active. Please try again in " + minutesLeft + " minute(s)."));
         }
 
-        if (!user.getPassword().equals(currentPassword)) {
-            tracker.attempts++;
-            if (tracker.attempts >= 5) {
-                tracker.lockoutTime = LocalDateTime.now();
+        if (!verifyAndMigratePassword(user, currentPassword)) {
+            int attempts = user.getFailedLoginAttempts() + 1;
+            user.setFailedLoginAttempts(attempts);
+            if (attempts >= 5) {
+                user.setLockoutUntil(LocalDateTime.now().plusHours(1));
+                userRepository.save(user);
 
                 activityLogService.log(
                         user,
@@ -191,12 +207,14 @@ public class UserController {
 
                 return ResponseEntity.status(429).body(Map.of("error", "Maximum attempts reached! Account locked for 1 hour for security."));
             }
-            int remaining = 5 - tracker.attempts;
+            userRepository.save(user);
+            int remaining = 5 - attempts;
             return ResponseEntity.status(401).body(Map.of("error", "Incorrect current password. " + remaining + " attempt(s) remaining."));
         }
 
-        securityTracker.remove(id);
-        user.setPassword(newPassword);
+        user.setFailedLoginAttempts(0);
+        user.setLockoutUntil(null);
+        user.setPassword(passwordEncoder.encode(newPassword));
         userRepository.save(user);
 
         activityLogService.log(
@@ -249,7 +267,9 @@ public class UserController {
         newUser.setLastName(payload.get("lastName"));
         newUser.setEmail(payload.get("email"));
         newUser.setUsername(username);
-        newUser.setPassword(payload.get("password"));
+        // Store credentials hashed (BCrypt), consistent with AuthController.
+        String rawPassword = payload.get("password");
+        newUser.setPassword(passwordEncoder.encode(rawPassword));
         newUser.setRole(payload.get("role"));
         newUser.setStatus("Active");
 
@@ -284,7 +304,7 @@ public class UserController {
             String emailBody = "Hello " + savedUser.getFirstName() + ",\n\n" +
                     "Your official RoadWise Barangay Official account has been provisioned.\n\n" +
                     "Username: " + savedUser.getUsername() + "\n" +
-                    "Temporary Password: " + savedUser.getPassword() + "\n\n" +
+                    "Temporary Password: " + rawPassword + "\n\n" +
                     "Please log in here: " + frontendUrl + "/login.html\n\n" +
                     "For security purposes, please change your password immediately after logging in.\n\n" +
                     "Best regards,\nCPDO Administrator - RoadWise SJDM";
@@ -408,7 +428,8 @@ public class UserController {
         }
 
         User user = userOpt.get();
-        user.setPassword("RoadWise2026!");
+        // Reset to the default password, stored hashed like every other credential.
+        user.setPassword(passwordEncoder.encode("RoadWise2026!"));
         userRepository.save(user);
 
         notificationService.sendNotification(
@@ -418,9 +439,12 @@ public class UserController {
                 "SECURITY"
         );
 
-        String adminIdStr = (payload != null) ? payload.get("adminId") : null;
-        Long adminId = (adminIdStr != null && !adminIdStr.isEmpty()) ? Long.valueOf(adminIdStr) : getAdminId();
-        User adminActor = userRepository.findById(adminId).orElse(null);
+        // ⏱️ AUDIT: actor resolved from the authenticated principal; the client-supplied
+        // adminId in the payload is ignored so audit attribution cannot be forged.
+        User adminActor = SecurityUtils.getCurrentUser();
+        if (adminActor == null) {
+            adminActor = userRepository.findById(getAdminId()).orElse(null);
+        }
 
         activityLogService.log(
                 adminActor,
@@ -465,8 +489,9 @@ public class UserController {
 
         User currentAdmin = currentAdminOpt.get();
 
-        // 🛡️ 1. SECURITY CHECK: Verify Outgoing Admin Password
-        if (!currentAdmin.getPassword().equals(currentPassword)) {
+        // 🛡️ 1. SECURITY CHECK: Verify Outgoing Admin Password (BCrypt-aware)
+        if (!verifyAndMigratePassword(currentAdmin, currentPassword)) {
+            userRepository.save(currentAdmin);
             activityLogService.log(
                     currentAdmin,
                     "SECURITY",
@@ -499,7 +524,7 @@ public class UserController {
         newAdmin.setEmail(newEmail != null ? newEmail.trim() : "");
         newAdmin.setUsername(newUsername != null ? newUsername.trim() : "");
         newAdmin.setPhoneNumber(newPhone != null ? newPhone.trim() : "");
-        newAdmin.setPassword(tempPassword);
+        newAdmin.setPassword(passwordEncoder.encode(tempPassword));
         newAdmin.setRole("CPDO Admin");
         newAdmin.setStatus("Active");
         newAdmin.setFailedLoginAttempts(0);
@@ -584,7 +609,8 @@ public class UserController {
         User currentCeo = currentCeoOpt.get();
 
         // 🛡️ 1. SECURITY CHECK: Verify Outgoing CEO Password
-        if (!currentCeo.getPassword().equals(currentPassword)) {
+        if (!verifyAndMigratePassword(currentCeo, currentPassword)) {
+            userRepository.save(currentCeo);
             activityLogService.log(
                     currentCeo,
                     "SECURITY",
@@ -617,7 +643,7 @@ public class UserController {
         newCeo.setEmail(newEmail != null ? newEmail.trim() : "");
         newCeo.setUsername(newUsername != null ? newUsername.trim() : "");
         newCeo.setPhoneNumber(newPhone != null ? newPhone.trim() : "");
-        newCeo.setPassword(tempPassword);
+        newCeo.setPassword(passwordEncoder.encode(tempPassword));
         newCeo.setRole(currentCeo.getRole() != null ? currentCeo.getRole() : "ENGINEER");
         newCeo.setStatus("Active");
         newCeo.setFailedLoginAttempts(0);
