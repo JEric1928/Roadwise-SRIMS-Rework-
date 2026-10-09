@@ -1,5 +1,6 @@
 package com.roadwise.backend.repository;
 
+import java.time.LocalDate;
 import java.util.List;
 import com.roadwise.backend.model.RoadReport;
 import org.springframework.data.domain.Page;
@@ -9,6 +10,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,6 +18,26 @@ import org.springframework.transaction.annotation.Transactional;
 public interface RoadReportRepository extends JpaRepository<RoadReport, Long>, JpaSpecificationExecutor<RoadReport> {
 
     List<RoadReport> findByBarangay_Id(Long barangayId);
+
+    List<RoadReport> findByBarangay_IdOrderByIdDesc(Long barangayId);
+
+    List<RoadReport> findByStatusIgnoreCase(String status);
+
+    @Query("SELECT r FROM RoadReport r WHERE " +
+            "(r.dateSubmitted >= :minDate AND r.dateSubmitted <= :maxDate) AND " +
+            "(r.latitude >= :minLat AND r.latitude <= :maxLat) AND " +
+            "(r.longitude >= :minLng AND r.longitude <= :maxLng) AND " +
+            "((:barangayId IS NOT NULL AND r.barangay.id = :barangayId) OR " +
+            " (:cityRoadName IS NOT NULL AND LOWER(r.cityRoadName) = LOWER(:cityRoadName)))")
+    List<RoadReport> findCandidateDuplicates(
+            @Param("minDate") LocalDate minDate,
+            @Param("maxDate") LocalDate maxDate,
+            @Param("minLat") Double minLat,
+            @Param("maxLat") Double maxLat,
+            @Param("minLng") Double minLng,
+            @Param("maxLng") Double maxLng,
+            @Param("barangayId") Long barangayId,
+            @Param("cityRoadName") String cityRoadName);
 
     // Database-side aggregations for dashboard statistics
     @Query("SELECT r.status, COUNT(r) FROM RoadReport r GROUP BY r.status")

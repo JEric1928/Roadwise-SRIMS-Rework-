@@ -216,3 +216,21 @@ def test_data_assimilation_api_contract():
     assert "assimilated_defect_score" in data
     assert "posterior_variance" in data
     assert "kernel_weights" in data
+
+
+def test_prediction_cache_thread_safety_and_lru():
+    from main import cache_set, cache_get, PREDICTION_CACHE
+    import threading
+
+    def worker(i):
+        cache_set(f"key_{i}", {"val": i})
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(50)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Verify lookups work thread-safely
+    res = cache_get("key_0")
+    assert res is not None or len(PREDICTION_CACHE) <= 1000

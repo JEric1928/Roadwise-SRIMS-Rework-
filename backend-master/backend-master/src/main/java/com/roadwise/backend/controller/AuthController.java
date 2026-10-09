@@ -65,10 +65,8 @@ public class AuthController {
     private final SecureRandom secureRandom = new SecureRandom();
 
     private Long getAdminId() {
-        return userRepository.findAll().stream()
-                .filter(user -> user.getRole() != null && (user.getRole().equalsIgnoreCase("CPDO Admin") || user.getRole().equalsIgnoreCase("Admin")))
+        return userRepository.findFirstByRoleInIgnoreCase(List.of("cpdo admin", "admin"))
                 .map(User::getId)
-                .findFirst()
                 .orElse(1L);
     }
 

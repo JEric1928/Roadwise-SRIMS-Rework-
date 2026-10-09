@@ -95,12 +95,12 @@ public class RoadReport {
 
     // Relationships
     @JsonIgnoreProperties({"reports", "hibernateLazyInitializer", "handler"})
-    @ManyToOne(fetch = FetchType.EAGER)
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "barangay_id")
     private Barangay barangay;
 
     @JsonIgnoreProperties({"hibernateLazyInitializer", "handler", "password"})
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
     private User user;
 

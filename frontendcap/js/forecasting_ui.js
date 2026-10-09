@@ -4,11 +4,7 @@
 // ==============================================================================
 let pavementDecayChartInstance = null;
 
-async function triggerForecastingUpdate() {
-  const soilType = document.getElementById("forecasting-soil-select") ? document.getElementById("forecasting-soil-select").value : "Sibul_Clay";
-
-  // 1. Fetch Engine 1: Pavement Decay (routed through the Spring backend,
-  //    which forwards to the Python AI service via AI_SERVICE_URL)
+async function fetchPavementDecay(soilType) {
   try {
     const res = await fetch(`${API_BASE_URL}/api/v1/forecasting/pavement-decay`, {
       method: "POST",
@@ -24,13 +20,16 @@ async function triggerForecastingUpdate() {
     if (res.ok) {
       const data = await res.json();
       renderPavementDecayChart(data);
+    } else {
+      renderPavementDecayChartFallback(soilType);
     }
   } catch (err) {
     console.warn("Forecasting API unreachable, rendering fallback simulation:", err);
     renderPavementDecayChartFallback(soilType);
   }
+}
 
-  // 2. Fetch Engine 4: Financial Risk (via Spring backend orchestrator)
+async function fetchFinancialRisk() {
   try {
     const res = await fetch(`${API_BASE_URL}/api/v1/forecasting/financial-var`, {
       method: "POST",
@@ -45,15 +44,31 @@ async function triggerForecastingUpdate() {
     });
     if (res.ok) {
       const data = await res.json();
-      document.getElementById("var-amount-text").innerText = "₱" + Number(data.value_at_risk_var_php).toLocaleString();
-      document.getElementById("es-amount-text").innerText = "₱" + Number(data.expected_shortfall_es_php).toLocaleString();
-      document.getElementById("reserve-amount-text").innerText = "₱" + Number(data.required_contingency_reserve_php).toLocaleString();
+      const varEl = document.getElementById("var-amount-text");
+      const esEl = document.getElementById("es-amount-text");
+      const reserveEl = document.getElementById("reserve-amount-text");
+      if (varEl) varEl.innerText = "₱" + Number(data.value_at_risk_var_php).toLocaleString();
+      if (esEl) esEl.innerText = "₱" + Number(data.expected_shortfall_es_php).toLocaleString();
+      if (reserveEl) reserveEl.innerText = "₱" + Number(data.required_contingency_reserve_php).toLocaleString();
     }
   } catch (err) {
-    document.getElementById("var-amount-text").innerText = "₱21,450,000";
-    document.getElementById("es-amount-text").innerText = "₱28,900,000";
-    document.getElementById("reserve-amount-text").innerText = "₱13,900,000";
+    const varEl = document.getElementById("var-amount-text");
+    const esEl = document.getElementById("es-amount-text");
+    const reserveEl = document.getElementById("reserve-amount-text");
+    if (varEl) varEl.innerText = "₱21,450,000";
+    if (esEl) esEl.innerText = "₱28,900,000";
+    if (reserveEl) reserveEl.innerText = "₱13,900,000";
   }
+}
+
+async function triggerForecastingUpdate() {
+  const soilType = document.getElementById("forecasting-soil-select") ? document.getElementById("forecasting-soil-select").value : "Sibul_Clay";
+
+  // Run independent forecasting network calls concurrently using Promise.all
+  await Promise.all([
+    fetchPavementDecay(soilType),
+    fetchFinancialRisk()
+  ]);
 
   // 3. Trigger Engine 5 Assimilation Initial Slider Update
   const slider = document.getElementById("assimilation-slider");
@@ -66,14 +81,18 @@ function renderPavementDecayChart(data) {
   const ctx = document.getElementById("pavementDecayChart");
   if (!ctx) return;
 
-  if (pavementDecayChartInstance) {
-    pavementDecayChartInstance.destroy();
-  }
-
   const badge = document.getElementById("pavement-ttf-badge");
   if (badge) {
     badge.innerText = `Predicted Time-To-Failure (PCI < 40): ${data.time_to_failure_years} Years (${data.status})`;
     badge.style.color = data.status === "CRITICAL" ? "#dc2626" : "#059669";
+  }
+
+  if (pavementDecayChartInstance) {
+    pavementDecayChartInstance.data.labels = data.time_axis_years;
+    pavementDecayChartInstance.data.datasets[0].label = `PCI Condition Score (${data.soil_type})`;
+    pavementDecayChartInstance.data.datasets[0].data = data.pci_trajectory;
+    pavementDecayChartInstance.update();
+    return;
   }
 
   pavementDecayChartInstance = new Chart(ctx, {
@@ -114,10 +133,7 @@ function renderPavementDecayChartFallback(soilType) {
   });
 }
 
-async function updateDataAssimilationUI(alphaVal) {
-  const label = document.getElementById("assimilation-alpha-label");
-  if (label) label.innerText = `Trade-off α = ${parseFloat(alphaVal).toFixed(2)}`;
-
+const debouncedFetchDataAssimilation = (typeof debounce === 'function') ? debounce(async (alphaVal) => {
   try {
     const res = await fetch(`${API_BASE_URL}/api/v1/forecasting/data-assimilation`, {
       method: "POST",
@@ -132,12 +148,51 @@ async function updateDataAssimilationUI(alphaVal) {
     });
     if (res.ok) {
       const data = await res.json();
-      document.getElementById("assimilated-score-val").innerText = data.assimilated_defect_score;
-      document.getElementById("posterior-var-val").innerText = data.posterior_variance;
+      const scoreEl = document.getElementById("assimilated-score-val");
+      const varEl = document.getElementById("posterior-var-val");
+      if (scoreEl) scoreEl.innerText = data.assimilated_defect_score;
+      if (varEl) varEl.innerText = data.posterior_variance;
     }
   } catch (err) {
-    document.getElementById("assimilated-score-val").innerText = (0.5 + alphaVal * 0.25).toFixed(3);
-    document.getElementById("posterior-var-val").innerText = (0.04 * (1 - alphaVal) + 0.01 * alphaVal).toFixed(4);
+    const scoreEl = document.getElementById("assimilated-score-val");
+    const varEl = document.getElementById("posterior-var-val");
+    if (scoreEl) scoreEl.innerText = (0.5 + alphaVal * 0.25).toFixed(3);
+    if (varEl) varEl.innerText = (0.04 * (1 - alphaVal) + 0.01 * alphaVal).toFixed(4);
+  }
+}, 300) : null;
+
+async function updateDataAssimilationUI(alphaVal) {
+  const label = document.getElementById("assimilation-alpha-label");
+  if (label) label.innerText = `Trade-off α = ${parseFloat(alphaVal).toFixed(2)}`;
+
+  if (debouncedFetchDataAssimilation) {
+    debouncedFetchDataAssimilation(alphaVal);
+  } else {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/v1/forecasting/data-assimilation`, {
+        method: "POST",
+        headers: API_HEADERS,
+        body: JSON.stringify({
+          vision_score: 0.75,
+          vision_confidence: 0.88,
+          sensor_telemetry_score: 0.45,
+          geomechanical_baseline: 0.50,
+          tradeoff_alpha: parseFloat(alphaVal)
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const scoreEl = document.getElementById("assimilated-score-val");
+        const varEl = document.getElementById("posterior-var-val");
+        if (scoreEl) scoreEl.innerText = data.assimilated_defect_score;
+        if (varEl) varEl.innerText = data.posterior_variance;
+      }
+    } catch (err) {
+      const scoreEl = document.getElementById("assimilated-score-val");
+      const varEl = document.getElementById("posterior-var-val");
+      if (scoreEl) scoreEl.innerText = (0.5 + alphaVal * 0.25).toFixed(3);
+      if (varEl) varEl.innerText = (0.04 * (1 - alphaVal) + 0.01 * alphaVal).toFixed(4);
+    }
   }
 }
 
