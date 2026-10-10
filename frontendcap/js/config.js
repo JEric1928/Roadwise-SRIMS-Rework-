@@ -38,3 +38,23 @@ function cancellableFetch(url, options = {}) {
   const promise = fetch(url, { ...options, signal: controller.signal });
   return { promise, cancel: () => controller.abort() };
 }
+
+// Utility: Fetch with timeout
+function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(id));
+}
+
+// Utility: User-friendly API error formatter
+function getErrorMessage(status, fallbackText = "Request failed") {
+  switch (status) {
+    case 401: return "Authentication required. Please log in again.";
+    case 403: return "Access denied. You do not have permission for this action.";
+    case 404: return "Requested resource or endpoint was not found.";
+    case 409: return "A conflict occurred with the existing data.";
+    case 500: return "Server error. Please try again or contact system support.";
+    default: return fallbackText;
+  }
+}

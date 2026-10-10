@@ -5866,50 +5866,212 @@ window.goToAddReport = function() {
 };
 
 // ==========================================
+// 📱 MOBILE SIDEBAR & RESPONSIVE DRAWER CONTROLLER
+// ==========================================
+window.toggleMobileSidebar = function(forceState) {
+  const sidebar = document.getElementById('app-sidebar') || document.querySelector('.sidebar');
+  const backdrop = document.getElementById('sidebar-backdrop');
+  if (!sidebar) return;
+
+  const isOpen = sidebar.classList.contains('open');
+  const newState = forceState !== undefined ? forceState : !isOpen;
+
+  if (newState) {
+    sidebar.classList.add('open');
+    if (backdrop) backdrop.classList.add('active');
+  } else {
+    sidebar.classList.remove('open');
+    if (backdrop) backdrop.classList.remove('active');
+  }
+};
+
+// ==========================================
+// 🎹 GLOBAL KEYBOARD INTERACTION & FOCUS MANAGEMENT
+// ==========================================
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (typeof closeFullscreenImage === 'function') closeFullscreenImage();
+    toggleMobileSidebar(false);
+    const dropdown = document.getElementById('notification-dropdown');
+    if (dropdown) dropdown.classList.add('hidden');
+    document.querySelectorAll('.modal-overlay, .bd-modal-overlay').forEach(modal => {
+      modal.classList.add('hidden');
+      modal.style.display = 'none';
+    });
+  }
+});
+
+// ==========================================
+// 🔮 ADVANCED ANALYTICS EXPANDABLE ACCORDION
+// ==========================================
+window.toggleAdvancedAnalyticsAccordion = function() {
+  const content = document.getElementById('advanced-analytics-content');
+  const arrow = document.getElementById('analytics-accordion-arrow');
+  if (!content) return;
+
+  const isHidden = content.classList.contains('hidden');
+  if (isHidden) {
+    content.classList.remove('hidden');
+    if (arrow) arrow.textContent = '▲ Collapse';
+    if (typeof triggerForecastingUpdate === 'function') {
+      triggerForecastingUpdate();
+    }
+  } else {
+    content.classList.add('hidden');
+    if (arrow) arrow.textContent = '▼ Expand';
+  }
+};
+
+// ==========================================
+// 📋 BARANGAY FIELD REPORT STEP INDICATOR ENGINE
+// ==========================================
+window.currentReportStep = 1;
+
+window.goToFormStep = function(stepNum) {
+  if (stepNum > window.currentReportStep) {
+    if (window.currentReportStep === 1) {
+      const roadName = document.getElementById('cityRoadName')?.value;
+      const length = document.getElementById('length')?.value;
+      const width = document.getElementById('width')?.value;
+
+      if (!roadName || !length || !width || parseFloat(length) <= 0 || parseFloat(width) <= 0) {
+        showToast("Please select a road name and enter valid road dimensions.", "warning");
+        return;
+      }
+    } else if (window.currentReportStep === 2) {
+      const damageType = document.getElementById('damageType')?.value;
+      if (!damageType) {
+        showToast("Please select a damage classification before proceeding.", "warning");
+        return;
+      }
+    }
+  }
+
+  window.currentReportStep = stepNum;
+
+  for (let i = 1; i <= 4; i++) {
+    const panel = document.getElementById(`step-panel-${i}`);
+    const node = document.getElementById(`step-node-${i}`);
+    if (panel) {
+      if (i === stepNum) panel.classList.remove('hidden');
+      else panel.classList.add('hidden');
+    }
+    if (node) {
+      if (i === stepNum) {
+        node.classList.add('active');
+        node.classList.remove('completed');
+      } else if (i < stepNum) {
+        node.classList.remove('active');
+        node.classList.add('completed');
+      } else {
+        node.classList.remove('active');
+        node.classList.remove('completed');
+      }
+    }
+  }
+
+  if (stepNum === 4) {
+    const roadSelect = document.getElementById('cityRoadName');
+    const roadText = (roadSelect && roadSelect.selectedIndex >= 0) ? roadSelect.options[roadSelect.selectedIndex].text : '-';
+    const roadId = document.getElementById('cityRoadId')?.value || '-';
+    const len = document.getElementById('length')?.value || '0';
+    const wid = document.getElementById('width')?.value || '0';
+    const dmgType = document.getElementById('damageType')?.value || '-';
+    const lat = document.getElementById('latitude')?.value;
+    const lng = document.getElementById('longitude')?.value;
+    const fileInput = document.getElementById('damageImageFile');
+
+    const summaryRoad = document.getElementById('summary-road-name');
+    const summaryId = document.getElementById('summary-road-id');
+    const summaryDims = document.getElementById('summary-dimensions');
+    const summaryDmg = document.getElementById('summary-damage-type');
+    const summaryGps = document.getElementById('summary-gps');
+    const summaryPhoto = document.getElementById('summary-photo-status');
+
+    if (summaryRoad) summaryRoad.textContent = roadText;
+    if (summaryId) summaryId.textContent = roadId;
+    if (summaryDims) summaryDims.textContent = `L: ${len} km × W: ${wid} m`;
+    if (summaryDmg) summaryDmg.textContent = dmgType;
+    if (summaryGps) summaryGps.textContent = (lat && lng) ? `${parseFloat(lat).toFixed(5)}°, ${parseFloat(lng).toFixed(5)}°` : 'Not Selected';
+    if (summaryPhoto) summaryPhoto.textContent = (fileInput && fileInput.files && fileInput.files.length > 0) ? `Attached (${fileInput.files[0].name})` : 'No Photo Attached';
+  }
+};
+
+window.goToAddReport = function() {
+  if (typeof switchView === 'function') {
+    switchView('view-reports');
+  }
+  goToFormStep(1);
+};
+
+// ==========================================
 // UNIFIED TOAST NOTIFICATION SYSTEM
 // ==========================================
 let toastTimeout = null;
 
-function showToast(message, type = 'success', duration = 4000) {
-  const toast = document.getElementById('toast-notification');
-  const toastMsg = document.getElementById('toast-message');
-  const toastIcon = document.getElementById('toast-icon');
+window.showToast = function(message, type = 'success', duration = 4000) {
+  let toast = document.getElementById('toast-notification');
+  let toastMsg = document.getElementById('toast-message');
+  let toastIcon = document.getElementById('toast-icon');
 
-  if (!toast || !toastMsg || !toastIcon) {
-    console.warn("Warning: Could not find toast HTML elements.");
-    return;
+  if (!toast) {
+    const toastHtml = `
+      <div id="toast-notification" style="position: fixed; top: 20px; right: 20px; padding: 14px 20px; border-radius: 8px; color: white; transition: all 0.3s ease; z-index: 999999; opacity: 0; transform: translateY(-20px); pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 10px; max-width: 380px;">
+        <span id="toast-icon" style="font-size: 18px;">ℹ️</span>
+        <span id="toast-message" style="font-weight: 600; font-size: 13px;"></span>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', toastHtml);
+    toast = document.getElementById('toast-notification');
+    toastMsg = document.getElementById('toast-message');
+    toastIcon = document.getElementById('toast-icon');
   }
 
-  // Clear any existing hide timer so new toasts get the full duration
   if (toastTimeout) {
     clearTimeout(toastTimeout);
   }
 
-  // 1. Set the text and icon
-  toastMsg.textContent = message;
-  toastIcon.textContent = (type === 'success') ? '✅' : '⚠️';
+  if (toastMsg) toastMsg.textContent = message;
 
-  // 2. Set the background color
-  toast.style.backgroundColor = (type === 'success') ? "#28a745" : "#dc3545";
+  let bg = '#16a34a';
+  let icon = '✅';
 
-  // 3. Force it to display and slide in
-  toast.style.display = "flex";
-  setTimeout(() => {
-    toast.style.opacity = "1";
-    toast.style.transform = "translateY(0)";
-  }, 10);
+  const t = String(type).toLowerCase();
+  if (t === 'success' || t === 'true' || type === false) {
+    bg = '#16a34a';
+    icon = '✅';
+  } else if (t === 'warning') {
+    bg = '#d97706';
+    icon = '⚠️';
+  } else if (t === 'error' || t === 'danger' || type === true) {
+    bg = '#dc2626';
+    icon = '🚨';
+  } else if (t === 'loading' || t === 'info') {
+    bg = '#0f172a';
+    icon = '⏳';
+  }
 
-  // 4. Hide it smoothly after the specified duration (default: 4000ms / 4s)
-  toastTimeout = setTimeout(() => {
-    toast.style.opacity = "0";
-    toast.style.transform = "translateY(-20px)";
+  if (toastIcon) toastIcon.textContent = icon;
+  if (toast) toast.style.backgroundColor = bg;
+
+  if (toast) {
+    toast.style.display = 'flex';
     setTimeout(() => {
-      if (toast.style.opacity === "0") {
-        toast.style.display = "none";
+      toast.style.opacity = '1';
+      toast.style.transform = 'translateY(0)';
+      toast.style.pointerEvents = 'auto';
+    }, 10);
+  }
+
+  if (t !== 'loading') {
+    toastTimeout = setTimeout(() => {
+      if (toast) {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-20px)';
+        toast.style.pointerEvents = 'none';
       }
-    }, 400);
-  }, duration);
-}
+    }, duration);
+  }
+};
 // ==========================================
 // 0. FETCH ROADS FOR DROPDOWN
 // ==========================================

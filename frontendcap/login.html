@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>City Road Inspection and Monitoring System | Login</title>
+  <link rel="manifest" href="site.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -30,98 +31,90 @@
 
     <form id="form-login">
 
-      <!-- ========================================== -->
-      <!-- STEP 1: CREDENTIALS (USERNAME & PASSWORD)  -->
-      <!-- ========================================== -->
+      <!-- STEP 1: CREDENTIALS -->
       <div id="login-step-1">
         <div class="form-group input-icon-wrapper">
-          <span class="input-icon">👤</span>
-          <input type="text" id="username" name="username" placeholder="Official ID / Email" required autocomplete="username">
+          <span class="input-icon" aria-hidden="true">👤</span>
+          <input type="text" id="username" name="username" placeholder="Official ID / Email" required autocomplete="username" aria-label="Official ID or Email">
         </div>
 
         <div class="form-group input-icon-wrapper">
-          <span class="input-icon">🔒</span>
-          <input type="password" id="password" name="password" placeholder="••••••••" required autocomplete="current-password">
-          <span class="input-icon-right" id="togglePassword" style="cursor: pointer;">👁️</span>
+          <span class="input-icon" aria-hidden="true">🔒</span>
+          <input type="password" id="password" name="password" placeholder="••••••••" required autocomplete="current-password" aria-label="Password">
+          <button type="button" class="input-icon-right" id="togglePassword" aria-label="Show password" style="background:none; border:none; cursor:pointer;">👁️</button>
         </div>
 
         <div class="form-options">
           <label class="remember-label">
             <input type="checkbox" id="remember-me" name="remember"> Remember me
           </label>
-          <a href="#" onclick="showForgotPassword()">FORGOT PASSWORD?</a>
+          <button type="button" onclick="showForgotPassword()" style="background:none; border:none; color:var(--color-primary); font-weight:700; font-size:11.5px; cursor:pointer;">FORGOT PASSWORD?</button>
         </div>
 
         <button type="button" id="login-btn" class="btn-login" onclick="handleLogin()">Log in ➔</button>
       </div>
 
-      <!-- ========================================== -->
-      <!-- STEP 2: MFA VERIFICATION (HIDDEN BY DEFAULT)-->
-      <!-- ========================================== -->
-      <div id="login-step-2" style="display: none; text-align: center;">
+      <!-- STEP 2: MFA VERIFICATION -->
+      <div id="login-step-2" class="hidden" style="text-align: center;">
         <div class="step-badge">Security Check</div>
         <h3 class="step-title">2-Step Verification</h3>
         <p class="step-desc">Enter the 6-digit authentication code dispatched to your official email.</p>
 
         <div class="form-group">
-          <input type="text" id="mfa-code" placeholder="• • • • • •" maxlength="6" class="otp-input" required>
+          <input type="text" id="mfa-code" placeholder="• • • • • •" maxlength="6" class="otp-input" required aria-label="MFA verification code">
         </div>
 
         <button type="button" id="verify-btn" class="btn-login" onclick="handleVerifyMfa()">Verify Code ➔</button>
 
         <div class="form-options back-link-wrap">
-          <a href="#" onclick="backToLogin()">← Back to Login</a>
+          <button type="button" onclick="backToLogin()" style="background:none; border:none; color:var(--color-primary); font-weight:700; font-size:12px; cursor:pointer;">← Back to Login</button>
         </div>
       </div>
 
-      <!-- ========================================== -->
-      <!-- FORGOT PASSWORD: STEP 1 (REQUEST CODE)     -->
-      <!-- ========================================== -->
-      <div id="forgot-step-1" style="display: none; text-align: center;">
+      <!-- FORGOT PASSWORD: STEP 1 -->
+      <div id="forgot-step-1" class="hidden" style="text-align: center;">
         <div class="step-badge">Account Recovery</div>
         <h3 class="step-title">Reset Password</h3>
         <p class="step-desc">Enter your registered government email to receive a secure recovery code.</p>
 
         <div class="form-group input-icon-wrapper">
-          <span class="input-icon">✉️</span>
-          <input type="email" id="reset-email" placeholder="Official Email Address" required autocomplete="email">
+          <span class="input-icon" aria-hidden="true">✉️</span>
+          <input type="email" id="reset-email" placeholder="Official Email Address" required autocomplete="email" aria-label="Official Email Address">
         </div>
 
         <button type="button" id="request-reset-btn" class="btn-login" onclick="handleForgotPasswordRequest()">Send Code ➔</button>
 
         <div class="form-options back-link-wrap">
-          <a href="#" onclick="backToLogin()">← Back to Login</a>
+          <button type="button" onclick="backToLogin()" style="background:none; border:none; color:var(--color-primary); font-weight:700; font-size:12px; cursor:pointer;">← Back to Login</button>
         </div>
       </div>
 
-      <!-- ========================================== -->
-      <!-- FORGOT PASSWORD: STEP 2 (VERIFY & RESET)   -->
-      <!-- ========================================== -->
-      <div id="forgot-step-2" style="display: none; text-align: center;">
+      <!-- FORGOT PASSWORD: STEP 2 -->
+      <div id="forgot-step-2" class="hidden" style="text-align: center;">
         <div class="step-badge">Security Update</div>
         <h3 class="step-title">Create New Password</h3>
         <p class="step-desc">Enter the 6-digit code and your new credentials below.</p>
 
         <div class="form-group">
-          <input type="text" id="reset-code" placeholder="• • • • • •" maxlength="6" class="otp-input" style="margin-bottom: 15px;" required>
+          <input type="text" id="reset-code" placeholder="• • • • • •" maxlength="6" class="otp-input" style="margin-bottom: 15px;" required aria-label="Reset Code">
         </div>
 
         <div class="form-group input-icon-wrapper">
-          <span class="input-icon">🔒</span>
-          <input type="password" id="new-password" placeholder="New Password" required>
-          <span class="input-icon-right" onclick="togglePasswordVisibility('new-password', this)" style="cursor: pointer;">👁️</span>
+          <span class="input-icon" aria-hidden="true">🔒</span>
+          <input type="password" id="new-password" placeholder="New Password" required aria-label="New Password">
+          <button type="button" class="input-icon-right" onclick="togglePasswordVisibility('new-password', this)" aria-label="Show new password" style="background:none; border:none; cursor:pointer;">👁️</button>
         </div>
 
         <div class="form-group input-icon-wrapper">
-          <span class="input-icon">🔒</span>
-          <input type="password" id="confirm-new-password" placeholder="Confirm New Password" required>
-          <span class="input-icon-right" onclick="togglePasswordVisibility('confirm-new-password', this)" style="cursor: pointer;">👁️</span>
+          <span class="input-icon" aria-hidden="true">🔒</span>
+          <input type="password" id="confirm-new-password" placeholder="Confirm New Password" required aria-label="Confirm New Password">
+          <button type="button" class="input-icon-right" onclick="togglePasswordVisibility('confirm-new-password', this)" aria-label="Show confirm new password" style="background:none; border:none; cursor:pointer;">👁️</button>
         </div>
 
         <button type="button" id="submit-reset-btn" class="btn-login" onclick="handlePasswordReset()">Confirm & Reset ➔</button>
 
         <div class="form-options back-link-wrap">
-          <a href="#" onclick="backToLogin()">← Cancel</a>
+          <button type="button" onclick="backToLogin()" style="background:none; border:none; color:var(--color-primary); font-weight:700; font-size:12px; cursor:pointer;">← Cancel</button>
         </div>
       </div>
 
@@ -134,7 +127,7 @@
   </div>
 </div>
 
-<!-- RIGHT COLUMN: CIVIC TECH / GOVERNMENT SHOWCASE -->
+<!-- RIGHT COLUMN: CIVIC TECH SHOWCASE -->
 <div class="login-info-side">
   <div class="gis-grid-overlay"></div>
 
@@ -152,7 +145,7 @@
       An official monitoring portal designed to inspect road conditions, evaluate damage, and coordinate maintenance across local government offices.
     </p>
 
-    <!-- Government Feature Cards -->
+    <!-- Feature Cards -->
     <div class="feature-card-stack">
 
       <div class="tech-card">
@@ -183,9 +176,7 @@
 
   </div>
 </div>
-</div>
 
-<!-- Eye toggle script preserved -->
 <script>
   const togglePassword = document.querySelector('#togglePassword');
   const password = document.querySelector('#password');
@@ -195,11 +186,11 @@
       const type = password.getAttribute('type') === 'password' ? 'text' : 'password';
       password.setAttribute('type', type);
       this.textContent = type === 'password' ? '👁️' : '🙈';
+      this.setAttribute('aria-label', type === 'password' ? 'Show password' : 'Hide password');
     });
   }
 </script>
 
-<!-- Notification toast preserved -->
 <div id="toast-notification" style="position: fixed; top: 20px; right: 20px; padding: 15px 20px; border-radius: 8px; color: white; transition: all 0.3s ease; z-index: 999999; opacity: 0; transform: translateY(-20px); pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 10px;">
   <span id="toast-icon" style="font-size: 20px;"></span>
   <span id="toast-message" style="font-weight: bold;"></span>

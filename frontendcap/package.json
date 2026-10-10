@@ -1,15 +1,17 @@
 {
-  "name": " ",
+  "name": "roadwise-frontend",
   "version": "0.0.1",
-  "description": "",
+  "description": "RoadWise City Road Inspection and Monitoring System Frontend",
   "private": true,
   "keywords": [
-    ""
+    "roadwise",
+    "gis",
+    "infrastructure"
   ],
-  "license": "",
+  "license": "UNLICENSED",
   "author": "",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node test.js",
     "start": "webpack serve --open --config webpack.config.dev.js",
     "build": "webpack --config webpack.config.prod.js"
   },

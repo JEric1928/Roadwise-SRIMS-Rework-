@@ -8,6 +8,8 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
+
+  <link rel="manifest" href="site.webmanifest">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -18,9 +20,11 @@
 </head>
 <body class="ceo-theme">
 
+<div id="sidebar-backdrop" class="sidebar-backdrop" onclick="toggleMobileSidebar(false)"></div>
+
 <div class="app-layout">
 
-  <aside class="sidebar">
+  <aside class="sidebar" id="app-sidebar" aria-label="Engineering Menu">
     <div class="brand">
       <img src="img/logo.png" alt="RoadWise Logo" class="brand-logo">
     </div>
@@ -28,468 +32,100 @@
     <nav class="nav-menu">
       <span class="menu-label">ENGINEERING MENU</span>
       <ul>
-        <li class="active" data-target="view-dashboard"><a href="#"><span class="icon">⊞</span> Dashboard</a></li>
-        <li data-target="view-repair"><a href="#"><span class="icon">🚧</span> Repair Projects</a></li>
-
-        <li data-target="view-ceo-map"><a href="#"><span class="icon">🗺️</span> Map View</a></li>
-
-        <li data-target="view-settings"><a href="#"><span class="icon">⚙️</span> Settings</a></li>
+        <li class="active" data-target="view-dashboard"><button type="button" aria-current="page"><span class="icon">⊞</span> Dashboard</button></li>
+        <li data-target="view-repair"><button type="button"><span class="icon">🚧</span> Repair Projects</button></li>
+        <li data-target="view-ceo-map"><button type="button"><span class="icon">🗺️</span> Map View</button></li>
+        <li data-target="view-settings"><button type="button"><span class="icon">⚙️</span> Settings</button></li>
       </ul>
     </nav>
   </aside>
 
   <div class="main-content">
-    <header class="top-header" style="display: flex; justify-content: space-between; align-items: center; padding: 0 40px; background-color: #ffffff; box-shadow: 0 4px 20px rgba(0,0,0,0.03); height: 75px; z-index: 10; position: relative; border-bottom: none;">
+    <header class="top-header">
 
-      <div>
-        <h1 style="margin: 0; font-size: 22px; color: #1e293b; font-weight: 700; letter-spacing: -0.5px;">Engineering Overview</h1>
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <button type="button" class="sidebar-toggle-btn" aria-label="Toggle navigation menu" onclick="toggleMobileSidebar()">☰ Menu</button>
+        <h1>Engineering Overview</h1>
       </div>
 
-      <!-- 🚀 RIGHT SIDE: Grouped Clock, Bell & Profile -->
-      <div style="display: flex; align-items: center; gap: 25px;">
+      <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
 
-        <!-- 🕒 LIVE CLOCK DISPLAY (Moved inside the container!) -->
-        <div style="background: white; border: 1px solid #eaeaea; padding: 8px 16px; border-radius: 30px; display: inline-flex; align-items: center; gap: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
-          <span style="font-size: 16px;">⏱️</span>
-          <div id="live-clock-display" style="font-family: 'Segoe UI', Tahoma, sans-serif;">
+        <!-- LIVE CLOCK -->
+        <div style="background: white; border: 1px solid var(--color-border); padding: 8px 16px; border-radius: 30px; display: inline-flex; align-items: center; gap: 8px;">
+          <span style="font-size: 16px;" aria-hidden="true">⏱️</span>
+          <div id="live-clock-display">
             <span style="font-size: 14px; font-weight: 700; color: #1e293b;">Loading time...</span>
           </div>
         </div>
 
-        <!-- ========================================== -->
-        <!-- 🔔 NOTIFICATION BELL SYSTEM -->
-        <!-- ========================================== -->
+        <!-- NOTIFICATION BELL -->
         <div class="notification-wrapper" style="position: relative; display: inline-block;">
-          <button id="btn-notification" style="background: none; border: none; font-size: 22px; cursor: pointer; position: relative; padding: 5px; transition: 0.2s; outline: none;">
+          <button type="button" id="btn-notification" aria-label="View notifications" aria-expanded="false" style="background: none; border: none; font-size: 22px; cursor: pointer; position: relative; padding: 5px;">
             🔔
-            <span id="notification-badge" style="position: absolute; top: 0px; right: -2px; background: #ef4444; color: white; font-size: 10px; font-weight: bold; height: 16px; width: 16px; display: none; justify-content: center; align-items: center; border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">0</span>
+            <span id="notification-badge" class="hidden" style="position: absolute; top: 0px; right: -2px; background: var(--color-danger); color: white; font-size: 10px; font-weight: bold; height: 16px; width: 16px; display: flex; justify-content: center; align-items: center; border-radius: 50%; border: 2px solid white;">0</span>
           </button>
 
-          <div id="notification-dropdown" class="hidden" style="position: absolute; right: 0; top: 45px; width: 340px; background: white; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.15); border: 1px solid #e2e8f0; z-index: 9999; overflow: hidden;">
-            <div style="padding: 14px 18px; border-bottom: 1px solid #e2e8f0; background: #f8fafc; display: flex; justify-content: space-between; align-items: center;">
+          <div id="notification-dropdown" class="hidden" style="position: absolute; right: 0; top: 45px; width: 340px; max-width: 90vw; background: white; border-radius: 10px; box-shadow: var(--shadow-modal); border: 1px solid var(--color-border); z-index: 9999; overflow: hidden;">
+            <div style="padding: 14px 18px; border-bottom: 1px solid var(--color-border); background: #f8fafc; display: flex; justify-content: space-between; align-items: center;">
               <h4 style="margin: 0; font-size: 15px; color: #0f172a; font-weight: 700;">Notifications</h4>
-              <button id="btn-mark-all-read" onclick="markAllAsRead()" style="background: none; border: none; font-size: 12px; color: #e67e22; cursor: pointer; font-weight: 600; padding: 0; transition: 0.2s;">
+              <button type="button" id="btn-mark-all-read" onclick="markAllAsRead()" style="background: none; border: none; font-size: 12px; color: var(--color-warning); cursor: pointer; font-weight: 600; padding: 0;">
                 Mark all as read
               </button>
             </div>
             <div id="notification-list" style="max-height: 320px; overflow-y: auto;"></div>
-            <div style="padding: 12px; text-align: center; border-top: 1px solid #e2e8f0; background: #f8fafc;">
-              <button onclick="viewAllActivity()" style="background: none; border: none; font-size: 13px; color: #64748b; font-weight: 600; cursor: pointer; transition: 0.2s; padding: 0;">
+            <div style="padding: 12px; text-align: center; border-top: 1px solid var(--color-border); background: #f8fafc;">
+              <button type="button" onclick="viewAllActivity()" style="background: none; border: none; font-size: 13px; color: var(--color-muted); font-weight: 600; cursor: pointer; padding: 0;">
                 View all activity
               </button>
             </div>
           </div>
         </div>
-        <!-- ========================================== -->
 
-        <!-- 👷 CEO PROFILE BUTTON -->
-        <button class="header-profile-btn profile-pill" style="background: #fff7ed; border: 1px solid #fed7aa; padding: 6px 16px 6px 6px; border-radius: 50px; cursor: pointer; display: flex; align-items: center; gap: 12px; font-weight: 600; color: #c2410c; box-shadow: 0 2px 4px rgba(0,0,0,0.02); transition: 0.2s;">
-          <div id="header-avatar-box" style="background: linear-gradient(135deg, #e67e22, #d35400); color: white; border-radius: 50%; width: 34px; height: 34px; display: flex; justify-content: center; align-items: center; font-size: 15px; box-shadow: 0 2px 6px rgba(211,84,0,0.4); overflow: hidden; position: relative; flex-shrink: 0;">
+        <!-- CEO PROFILE BUTTON -->
+        <button type="button" class="header-profile-btn profile-pill" aria-label="Open profile settings" style="background: #fff7ed; border: 1px solid #fed7aa; padding: 6px 16px 6px 6px; border-radius: 50px; cursor: pointer; display: flex; align-items: center; gap: 12px; font-weight: 600; color: #c2410c;">
+          <div id="header-avatar-box" style="background: linear-gradient(135deg, #e67e22, #d35400); color: white; border-radius: 50%; width: 34px; height: 34px; display: flex; justify-content: center; align-items: center; font-size: 15px; overflow: hidden; position: relative; flex-shrink: 0;">
             <img id="header-profile-img" src="" alt="Avatar" style="display: none; width: 100%; height: 100%; object-fit: cover;">
             <span id="header-profile-fallback">👷</span>
           </div>
           <div style="display: flex; flex-direction: column; align-items: flex-start; line-height: 1.2;">
             <span id="header-display-name" style="font-size: 14px; font-weight: 700; color: #c2410c;">Loading...</span>
-            <span id="header-display-role" style="font-size: 11px; font-weight: 600; color: #64748b;">Loading...</span>
+            <span id="header-display-role" style="font-size: 11px; font-weight: 600; color: var(--color-muted);">Loading...</span>
           </div>
         </button>
 
       </div>
     </header>
-    <main class="content-area" style="padding: 12px 35px 30px 35px;">
 
-      <!-- ========================================== -->
-      <!-- 👷 CEO PROFILE VIEW -->
-      <!-- ========================================== -->
-      <div id="view-profile" class="content-section hidden ceo-profile-theme">
-
-        <div class="section-header-flex" style="margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-          <div>
-            <h2 style="margin: 0; font-size: 24px; color: var(--text-main);">Engineering Office Settings</h2>
-            <p style="color: var(--text-muted); font-size: 13px; margin-top: 5px;">Manage your CEO account details and security settings.</p>
-          </div>
-          <button id="btn-back-dashboard" style="background: white; border: 1px solid #cbd5e1; padding: 8px 16px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-weight: 600; color: #475569; box-shadow: 0 1px 3px rgba(0,0,0,0.05); transition: 0.2s;">
-            <span style="font-size: 14px;">⬅️</span> Back to Dashboard
-          </button>
-        </div>
-
-        <div class="profile-split-container">
-
-          <!-- LEFT SIDEBAR -->
-          <div class="profile-sidebar">
-            <div class="profile-header-mini">
-
-              <!-- 🚀 Interactive Profile Picture Container -->
-              <div class="profile-avatar-wrapper" style="display: flex; flex-direction: column; align-items: center; margin-bottom: 15px;">
-                <div class="profile-avatar-mini" id="main-profile-avatar" style="background: linear-gradient(135deg, #e67e22, #d35400); width: 80px; height: 80px; font-size: 35px; margin-bottom: 8px; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: white;">👷</div>
-
-                <!-- View & Change Buttons -->
-                <div style="display: flex; gap: 8px;">
-                  <!-- 🚀 THE FIX: Calls openProfilePicViewer() -->
-                  <button onclick="openProfilePicViewer()" style="font-size: 11px; padding: 4px 10px; border: 1px solid #cbd5e1; background: white; border-radius: 4px; cursor: pointer; color: #475569; font-weight: 600;">👁️ View</button>
-                  <label style="font-size: 11px; padding: 4px 10px; border: none; background: #d35400; color: white; border-radius: 4px; cursor: pointer; font-weight: 600;">
-                    📷 Change <input type="file" hidden id="profile-pic-upload" accept="image/*">
-                  </label>
-                </div>
-              </div>
-
-              <h4 id="side-profile-name" style="margin: 0; color: #d35400; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Loading...</h4>
-              <p id="side-profile-role" style="margin: 5px 0 0 0; font-size: 13px; font-weight: bold; color: var(--text-muted);">Loading...</p>
-            </div>
-
-            <ul class="profile-nav" id="profile-nav-menu">
-              <li class="active" data-target="tab-identity">Official Details</li>
-              <li data-target="tab-security">Security & Password</li>
-              <!-- 🚀 NEW: CEO OFFICE TURNOVER TAB -->
-              <li data-target="tab-turnover" style="color: #c2410c; font-weight: 600;">🏛️ Office Turnover</li>
-              <li class="logout-btn" style="margin-top: auto; background-color: #fef2f2; color: #dc3545; border: 1px solid #fecaca; border-radius: 8px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 2px 4px rgba(220, 53, 69, 0.05);">
-                <span><span class="icon" style="margin-right: 8px;">🚪</span> Log Out</span>
-                <span style="font-size: 14px;">➔</span>
-              </li>
-            </ul>
-          </div>
-
-          <!-- RIGHT CONTENT -->
-          <div class="profile-content">
-
-            <!-- TAB 1: IDENTITY -->
-            <div id="tab-identity" class="profile-tab active">
-
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; border-bottom: 2px solid #eee; padding-bottom: 10px;">
-                <h3 class="profile-tab-title" style="margin: 0; color: #d35400; border: none; padding: 0;">👷 Engineering Profile</h3>
-                <!-- 🚀 THE FIX: Removed the hardcoded onclick so app.js can pre-fill the form! -->
-                <button id="btn-edit-profile" style="background: #fff3ec; border: 1px solid #fbd8c4; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-weight: 600; color: #d35400; font-size: 13px; transition: 0.2s;">
-                  ✏️ Edit Information
-                </button>
-              </div>
-
-              <div class="profile-detail-row"><strong>Full Name:</strong> <span id="profile-full-name">Loading...</span></div>
-              <div class="profile-detail-row"><strong>Official Email:</strong> <span id="profile-email">Loading...</span></div>
-              <div class="profile-detail-row"><strong>Phone Number:</strong> <span id="profile-phone">Loading...</span></div>
-              <div class="profile-detail-row"><strong>Date of Birth:</strong> <span id="profile-birthday">Loading...</span></div>
-              <div class="profile-detail-row"><strong>Age:</strong> <span id="profile-age">Loading...</span></div>
-              <div class="profile-detail-row"><strong>Gender:</strong> <span id="profile-gender">Loading...</span></div>
-              <div class="profile-detail-row"><strong>Username:</strong> <span id="profile-username">Loading...</span></div>
-              <div class="profile-detail-row"><strong>Department:</strong> <span id="profile-barangay">City Engineering Office</span></div>
-              <div class="profile-detail-row"><strong>System Role:</strong> <span id="profile-role">Loading...</span></div>
-              <div class="profile-detail-row" style="border-bottom: none;"><strong>Account Status:</strong> <span class="status-badge validated" style="color: #28a745; font-weight: bold;">Active</span></div>
-            </div>
-
-            <!-- TAB 2: SECURITY -->
-            <div id="tab-security" class="profile-tab hidden">
-              <h3 class="profile-tab-title" style="color: #d35400;">🔒 Change Password</h3>
-              <p style="font-size: 13px; color: #666; margin-bottom: 20px;">Ensure your account remains secure by using a strong password.</p>
-
-              <form id="form-change-password" onsubmit="event.preventDefault();">
-                <div class="form-group-vertical" style="margin-bottom: 15px;">
-                  <label style="display:block; margin-bottom:5px; font-size: 13px; color: #333; font-weight: 600;">Current Password</label>
-                  <div style="position: relative; width: 100%;">
-                    <input type="password" id="sec-current-pass" required class="profile-input" placeholder="Enter current password" style="width: 100%; padding: 8px 35px 8px 8px; border-radius: 4px; border: 1px solid #cbd5e1; box-sizing: border-box;">
-                    <span onclick="togglePasswordVisibility('sec-current-pass', this)" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; user-select: none; font-size: 14px;">👁️</span>
-                  </div>
-                </div>
-
-                <div class="form-group-vertical" style="margin-bottom: 15px;">
-                  <label style="display:block; margin-bottom:5px; font-size: 13px; color: #333; font-weight: 600;">New Password</label>
-                  <div style="position: relative; width: 100%;">
-                    <input type="password" id="sec-new-pass" required class="profile-input" placeholder="Enter new password" style="width: 100%; padding: 8px 35px 8px 8px; border-radius: 4px; border: 1px solid #cbd5e1; box-sizing: border-box;">
-                    <span onclick="togglePasswordVisibility('sec-new-pass', this)" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; user-select: none; font-size: 14px;">👁️</span>
-                  </div>
-                  <p style="margin: 5px 0 0 0; font-size: 11px; color: #64748b;">
-                    🔒 Must be at least 8 characters long, contain 1 uppercase letter, 1 number, and 1 special character (@$!%*?&).
-                  </p>
-                </div>
-
-                <div class="form-group-vertical" style="margin-bottom: 25px;">
-                  <label style="display:block; margin-bottom:5px; font-size: 13px; color: #333; font-weight: 600;">Confirm New Password</label>
-                  <div style="position: relative; width: 100%;">
-                    <input type="password" id="sec-confirm-pass" required class="profile-input" placeholder="Confirm new password" style="width: 100%; padding: 8px 35px 8px 8px; border-radius: 4px; border: 1px solid #cbd5e1; box-sizing: border-box;">
-                    <span onclick="togglePasswordVisibility('sec-confirm-pass', this)" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; user-select: none; font-size: 14px;">👁️</span>
-                  </div>
-                </div>
-
-                <button type="submit" id="btn-submit-password" class="btn-submit" style="width: 100%; padding: 10px; background: #d35400; color: white; border: none; border-radius: 4px; font-weight: 600; cursor: pointer;">Update Password</button>
-              </form>
-            </div>
-
-            <!-- TAB 3: CEO TURNOVER / SUCCESSION -->
-            <div id="tab-turnover" class="profile-tab hidden">
-              <div style="border-bottom: 2px solid #fed7aa; padding-bottom: 10px; margin-bottom: 20px;">
-                <h3 class="profile-tab-title" style="margin: 0; color: #c2410c; border: none; padding: 0;">🏛️ Engineering Office Turnover</h3>
-                <p style="font-size: 13px; color: #64748b; margin: 5px 0 0 0;">Transfer City Engineer administrative authority of RoadWise to your appointed successor.</p>
-              </div>
-
-              <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 16px; margin-bottom: 25px;">
-                <h4 style="margin: 0 0 8px 0; color: #9a3412; font-size: 14px; display: flex; align-items: center; gap: 6px;">
-                  ⚠️ Executive Handover Guidelines
-                </h4>
-                <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #7c2d12; line-height: 1.6;">
-                  <li>All your past inspection reviews, road repair dispatches, and completions will remain permanently attributed to your name in city audit records.</li>
-                  <li>All ongoing repair queues will seamlessly transfer to the incoming City Engineer.</li>
-                  <li><strong>Your current session will terminate immediately</strong> upon confirmation.</li>
-                </ul>
-              </div>
-
-              <button type="button" onclick="openCeoHandoverModal()" style="background: #d35400; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 2px 4px rgba(211, 84, 0, 0.25);">
-                <span>📜</span> Initiate Office Handover
-              </button>
-            </div>
-
-          </div>
-        </div>
-      </div>
-
-      <!-- ========================================== -->
-      <!-- ✏️ EDIT PROFILE INFORMATION MODAL -->
-      <!-- ========================================== -->
-      <div id="edit-profile-modal" class="modal-overlay hidden" style="z-index: 9999;">
-        <div class="modal-content" style="max-width: 700px;">
-
-          <div class="modal-header">
-            <h2 style="margin: 0; font-size: 18px;">✏️ Edit Profile Information</h2>
-            <button class="close-modal-btn" onclick="document.getElementById('edit-profile-modal').classList.add('hidden')" style="background: none; border: none; font-size: 20px; cursor: pointer;">✕</button>
-          </div>
-
-          <div class="modal-body" style="padding: 20px;">
-            <form id="form-edit-profile" onsubmit="event.preventDefault(); submitProfileEdit();">
-
-              <!-- SECTION 1: LOCKED OFFICIAL RECORDS -->
-              <div class="report-section" style="background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 25px; border: 1px solid #e2e8f0;">
-                <h3 class="section-title" style="margin: 0 0 15px 0; font-size: 13px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">🔒 Official Government Records (Read-Only)</h3>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 15px;">
-                  <div class="form-group-vertical">
-                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #475569;">First Name</label>
-                    <input type="text" id="edit-prof-first" class="profile-input" disabled style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; background-color: #e2e8f0; cursor: not-allowed; color: #64748b;">
-                  </div>
-                  <div class="form-group-vertical">
-                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #475569;">Middle Name</label>
-                    <input type="text" id="edit-prof-middle" class="profile-input" disabled style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; background-color: #e2e8f0; cursor: not-allowed; color: #64748b;">
-                  </div>
-                  <div class="form-group-vertical">
-                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #475569;">Last Name</label>
-                    <input type="text" id="edit-prof-last" class="profile-input" disabled style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; background-color: #e2e8f0; cursor: not-allowed; color: #64748b;">
-                  </div>
-                </div>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                  <div class="form-group-vertical">
-                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #475569;">System Role</label>
-                    <input type="text" id="edit-prof-role" class="profile-input" disabled style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; background-color: #e2e8f0; cursor: not-allowed; color: #64748b;">
-                  </div>
-                  <div class="form-group-vertical">
-                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #475569;">Department</label>
-                    <input type="text" id="edit-prof-brgy" class="profile-input" disabled style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; background-color: #e2e8f0; cursor: not-allowed; color: #64748b;">
-                  </div>
-                </div>
-              </div>
-
-              <!-- SECTION 2: EDITABLE PERSONAL DETAILS -->
-              <div class="report-section" style="padding: 15px; border: 1px solid #cbd5e1; border-radius: 8px; background: white;">
-                <h3 class="section-title" style="margin: 0 0 15px 0; font-size: 13px; color: #d35400; text-transform: uppercase; letter-spacing: 0.5px;">📝 Personal Details</h3>
-
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
-                  <div class="form-group-vertical">
-                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #333;">Phone Number</label>
-                    <input type="tel" id="edit-prof-phone" class="profile-input" placeholder="e.g. 09123456789" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1;">
-                  </div>
-                  <div class="form-group-vertical">
-                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #333;">Official Email</label>
-                    <input type="email" id="edit-prof-email" class="profile-input" placeholder="e.g. ceo@sjdm.gov.ph" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1;">
-                  </div>
-                  <div class="form-group-vertical">
-                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #333;">Date of Birth</label>
-                    <input type="date" id="edit-prof-birthday" class="profile-input" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1;">
-                  </div>
-                  <div class="form-group-vertical">
-                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: #333;">Gender</label>
-                    <select id="edit-prof-gender" class="profile-input" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #cbd5e1; background: white;">
-                      <option value="" disabled selected>Select Gender...</option>
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                      <option value="Other">Other</option>
-                      <option value="Prefer not to say">Prefer not to say</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <!-- MODAL ACTIONS -->
-              <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px;">
-                <button type="button" onclick="document.getElementById('edit-profile-modal').classList.add('hidden')" style="padding: 8px 16px; border-radius: 4px; border: 1px solid #94a3b8; background: white; cursor: pointer; font-weight: 600; color: #475569;">Cancel</button>
-                <button type="submit" style="padding: 8px 20px; border-radius: 4px; background: #d35400; color: white; border: none; cursor: pointer; font-weight: 600;">💾 Save Changes</button>
-              </div>
-
-            </form>
-          </div>
-        </div>
-      </div>
-
-      <!-- ========================================== -->
-      <!-- 🖼️ VIEW PROFILE PICTURE MODAL -->
-      <!-- ========================================== -->
-      <div id="view-profile-pic-modal" class="modal-overlay hidden" style="z-index: 9999;">
-        <div class="modal-content" style="max-width: 500px; text-align: center; background: #1e293b; padding: 15px; border-radius: 12px; border: 1px solid #334155;">
-          <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
-            <button onclick="document.getElementById('view-profile-pic-modal').classList.add('hidden')" style="background: none; border: none; font-size: 24px; color: #cbd5e1; cursor: pointer; transition: 0.2s;">✕</button>
-          </div>
-          <img id="full-size-profile-pic" src="" alt="Profile Picture" style="max-width: 100%; max-height: 70vh; border-radius: 8px; object-fit: contain; background: #0f172a;">
-        </div>
-      </div>
-
-      <!-- ========================================== -->
-      <!-- 🚪 LOGOUT CONFIRMATION MODAL -->
-      <!-- ========================================== -->
-      <div id="logout-confirm-modal" class="modal-overlay hidden" style="z-index: 9999;">
-        <div class="modal-content" style="max-width: 400px; text-align: center; padding: 30px 20px; border-radius: 12px; background: white; border: 1px solid #cbd5e1;">
-          <div style="font-size: 45px; margin-bottom: 15px;">👋</div>
-          <h3 style="margin: 0 0 10px 0; font-size: 20px; color: #1e293b;">Ready to leave?</h3>
-          <p style="color: #64748b; font-size: 14px; margin-bottom: 25px;">Are you sure you want to log out of your account?</p>
-
-          <div style="display: flex; justify-content: center; gap: 15px;">
-            <!-- Cancel Button -->
-            <button type="button" onclick="document.getElementById('logout-confirm-modal').classList.add('hidden')" style="padding: 10px 20px; border-radius: 6px; border: 1px solid #94a3b8; background: white; color: #475569; font-weight: 600; cursor: pointer; transition: 0.2s;">Cancel</button>
-
-            <!-- Confirm Logout Button -->
-            <button type="button" id="btn-confirm-logout" style="padding: 10px 20px; border-radius: 6px; border: none; background: #dc3545; color: white; font-weight: 600; cursor: pointer; transition: 0.2s; box-shadow: 0 2px 4px rgba(220, 53, 69, 0.2);">Yes, Log Out</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ========================================== -->
-      <!-- 🏛️ MODAL: CEO SUCCESSION FORM -->
-      <!-- ========================================== -->
-      <div id="ceo-handover-modal" class="modal-overlay hidden" style="z-index: 9999;">
-        <div class="modal-content" style="max-width: 650px;">
-          <div class="modal-header" style="background: #fff7ed; border-bottom: 1px solid #fed7aa; padding: 15px 20px;">
-            <h2 style="margin: 0; font-size: 17px; color: #9a3412; display: flex; align-items: center; gap: 8px;">
-              🏛️ City Engineer Succession Form
-            </h2>
-            <button onclick="closeCeoHandoverModal()" style="background: none; border: none; font-size: 20px; cursor: pointer; color: #64748b;">✕</button>
-          </div>
-
-          <form id="form-ceo-handover" onsubmit="event.preventDefault(); submitCeoHandover();" style="padding: 20px;">
-
-            <!-- SECTION 1: INCOMING SUCCESSOR -->
-            <div style="margin-bottom: 20px;">
-              <h4 style="margin: 0 0 12px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #d35400;">
-                👷 Appointed City Engineer Information
-              </h4>
-              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-                <div>
-                  <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">First Name *</label>
-                  <input type="text" id="ceo-succ-first" required placeholder="Juan" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
-                </div>
-                <div>
-                  <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Middle Name</label>
-                  <input type="text" id="ceo-succ-middle" placeholder="Reyes" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
-                </div>
-                <div>
-                  <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Last Name *</label>
-                  <input type="text" id="ceo-succ-last" required placeholder="Santos" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
-                </div>
-              </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
-                <div>
-                  <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Official Government Email *</label>
-                  <input type="email" id="ceo-succ-email" required placeholder="engineer@sjdm.gov.ph" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
-                </div>
-                <div>
-                  <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Contact Number *</label>
-                  <input type="tel" id="ceo-succ-phone" required maxlength="11" placeholder="09123456789" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
-                </div>
-              </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
-                <div>
-                  <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Assign System Username *</label>
-                  <input type="text" id="ceo-succ-user" required placeholder="ceo_jsantos" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
-                </div>
-                <div>
-                  <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Appointment Memo / Special Order # *</label>
-                  <input type="text" id="ceo-succ-memo" required placeholder="e.g. CEO-2026-042" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
-                </div>
-              </div>
-            </div>
-
-            <!-- SECTION 2: SECURITY AUTHORIZATION -->
-            <div style="background: #fff7ed; border: 1px solid #fed7aa; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
-              <label style="display: block; font-size: 12px; font-weight: 700; color: #c2410c; margin-bottom: 6px;">
-                🔒 Re-enter YOUR Current Password to Authorize Transfer *
-              </label>
-              <input type="password" id="ceo-current-pass" required placeholder="Enter your current password" style="width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box;">
-            </div>
-
-            <!-- MODAL ACTIONS -->
-            <div style="display: flex; justify-content: flex-end; gap: 10px;">
-              <button type="button" onclick="closeCeoHandoverModal()" style="padding: 8px 16px; border: 1px solid #cbd5e1; background: white; border-radius: 4px; cursor: pointer; font-weight: 600;">Cancel</button>
-              <button type="submit" id="btn-confirm-ceo-handover" style="padding: 8px 20px; background: #d35400; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 700;">
-                Confirm & Execute Handover ➔
-              </button>
-            </div>
-
-          </form>
-        </div>
-      </div>
-
-      <!-- ========================================== -->
-      <!-- 👷 MODAL: SUCCESSFUL CEO TURNOVER -->
-      <!-- ========================================== -->
-      <div id="ceo-handover-success-modal" class="modal-overlay hidden" style="z-index: 10000;">
-        <div class="modal-content" style="max-width: 500px; text-align: center; padding: 25px;">
-          <div style="font-size: 45px; margin-bottom: 10px;">👷</div>
-          <h2 style="margin: 0 0 10px 0; color: #9a3412; font-size: 20px;">Turnover Completed</h2>
-          <p style="font-size: 13px; color: #475569; margin-bottom: 20px;">
-            City Engineering authority has been officially transferred to your appointed successor.
-          </p>
-
-          <div style="background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; padding: 15px; text-align: left; margin-bottom: 20px; font-size: 13px;">
-            <p style="margin: 0 0 6px 0;"><strong>Successor:</strong> <span id="disp-ceo-succ-name">Loading...</span></p>
-            <p style="margin: 0 0 6px 0;"><strong>System Username:</strong> <span id="disp-ceo-succ-user" style="font-family: monospace; color: #9a3412; font-weight: bold;">Loading...</span></p>
-            <p style="margin: 0;"><strong>Credential Delivery:</strong> <span style="color: #9a3412; font-weight: 600;">Dispatched securely to registered government email</span></p>
-          </div>
-
-          <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 10px; font-size: 12px; color: #92400e; margin-bottom: 20px; text-align: left;">
-            🔒 <strong>Security Policy:</strong> Engineering administrative credentials have been transmitted directly to the appointee. Your active session has now ended.
-          </div>
-
-          <button onclick="terminateCeoHandoverSession()" style="width: 100%; padding: 10px; background: #d35400; color: white; border: none; border-radius: 6px; font-weight: 700; cursor: pointer;">
-            Proceed to Login Portal ➔
-          </button>
-        </div>
-      </div>
+    <main class="content-area">
 
       <div id="view-dashboard" class="content-section ad-dashboard-container">
 
-        <!-- 🎯 1. ANNUAL REPAIR ACCOMPLISHMENT PROGRESS BANNER -->
+        <!-- ACCOMPLISHMENT PROGRESS BANNER -->
         <div class="ceo-progress-container">
-          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
             <div>
               <div style="display: flex; align-items: center; gap: 8px;">
-                <h3 style="margin: 0; color: #0f172a; font-size: 18px; font-weight: 800; letter-spacing: -0.3px;">Repair Accomplishment</h3>
-                <span style="font-size: 11px; background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 12px; font-weight: 700;">Active Cycle</span>
+                <h3 style="margin: 0; color: #0f172a; font-size: 18px; font-weight: 800;">Repair Accomplishment</h3>
+                <span class="status-badge progress">Active Cycle</span>
               </div>
-              <p style="margin: 4px 0 0 0; color: #64748b; font-size: 13.5px;" id="ceo-progress-text">Calculating road repair accomplishment...</p>
+              <p style="margin: 4px 0 0 0; color: var(--color-muted); font-size: 13.5px;" id="ceo-progress-text">Calculating road repair accomplishment...</p>
             </div>
             <div style="text-align: right;">
-              <span style="font-size: 10.5px; color: #94a3b8; font-weight: 700; text-transform: uppercase; display: block; letter-spacing: 0.5px;">Accomplishment</span>
-              <div style="font-size: 30px; font-weight: 900; color: #16a34a; line-height: 1;" id="ceo-progress-percentage">0%</div>
+              <span style="font-size: 10.5px; color: var(--color-muted); font-weight: 700; text-transform: uppercase; display: block;">Accomplishment</span>
+              <div style="font-size: 30px; font-weight: 900; color: var(--color-success); line-height: 1;" id="ceo-progress-percentage">0%</div>
             </div>
           </div>
 
-          <div style="width: 100%; background-color: #f1f5f9; border-radius: 10px; height: 12px; overflow: hidden; box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);">
+          <div style="width: 100%; background-color: #f1f5f9; border-radius: 10px; height: 12px; overflow: hidden;">
             <div id="ceo-progress-bar-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #16a34a, #22c55e); border-radius: 10px; transition: width 1.2s ease-in-out;"></div>
           </div>
         </div>
 
-        <!-- 📊 2. TOP SECTION: 4-METRICS GRID + WORK ORDER STATUS CHART -->
+        <!-- 4-METRICS GRID + WORK ORDER STATUS CHART -->
         <div class="ceo-top-section">
 
-          <!-- 4 KPI Cards Grid -->
           <div class="ceo-metrics-grid">
-
-            <!-- 1. Awaiting Action (Dispatched) -->
+            <!-- 1. Awaiting Action -->
             <div class="ceo-metric-card" style="border-top-color: #0284c7;">
               <div class="ceo-metric-header">
                 <span>Awaiting Action</span>
@@ -499,7 +135,7 @@
               <div class="ceo-metric-sub">Newly dispatched by CPDO</div>
             </div>
 
-            <!-- 2. Active Repairs (In Progress) -->
+            <!-- 2. Active Repairs -->
             <div class="ceo-metric-card" style="border-top-color: #ea580c;">
               <div class="ceo-metric-header">
                 <span>Active Repairs</span>
@@ -509,7 +145,7 @@
               <div class="ceo-metric-sub">Field crews deployed on-site</div>
             </div>
 
-            <!-- 3. Rework Required (QA Feedback) -->
+            <!-- 3. Rework Required -->
             <div class="ceo-metric-card" style="border-top-color: #dc2626;">
               <div class="ceo-metric-header">
                 <span>Rework Required</span>
@@ -519,7 +155,7 @@
               <div class="ceo-metric-sub">QA feedback returned by CPDO</div>
             </div>
 
-            <!-- 4. Pending Budget (Deferred by CEO) -->
+            <!-- 4. Pending Budget -->
             <div class="ceo-metric-card" style="border-top-color: #d97706;">
               <div class="ceo-metric-header">
                 <span>Pending Budget</span>
@@ -528,14 +164,12 @@
               <div class="ceo-metric-value" style="color: #d97706;" id="ceo-metric-budget">0</div>
               <div class="ceo-metric-sub">Deferred from current cycle</div>
             </div>
-
           </div>
 
-          <!-- Doughnut Chart Container -->
           <div class="ceo-chart-container">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-              <h3 style="margin: 0; font-size: 12.5px; color: #475569; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;">Work Order Lifecycle</h3>
-              <span style="font-size: 11px; background: #f1f5f9; color: #475569; padding: 2px 7px; border-radius: 4px; font-weight: 600;">Active Queue</span>
+              <h3 style="margin: 0; font-size: 12.5px; color: var(--color-muted); font-weight: 800; text-transform: uppercase;">Work Order Lifecycle</h3>
+              <span class="status-badge progress">Active Queue</span>
             </div>
             <div class="ceo-canvas-wrapper">
               <canvas id="ceoStatusChart"></canvas>
@@ -544,25 +178,24 @@
 
         </div>
 
-        <!-- 📋 3. ACTIVE REPAIR QUEUE TABLE WITH CONTROLS -->
+        <!-- ACTIVE REPAIR QUEUE TABLE -->
         <div class="ceo-table-box">
 
           <div class="ceo-table-toolbar">
             <div>
               <h3 style="margin: 0; font-size: 18px; color: #0f172a; font-weight: 800;">Active Repair Queue</h3>
-              <p style="margin: 2px 0 0 0; font-size: 12.5px; color: #64748b;">Actionable repair assignments for the current engineering cycle.</p>
+              <p style="margin: 2px 0 0 0; font-size: 12.5px; color: var(--color-muted);">Actionable repair assignments for the current engineering cycle.</p>
             </div>
 
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-              <!-- Search Input -->
               <input type="text"
                      id="ceo-dash-search"
                      placeholder="🔍 Search road, PRJ ID, or barangay..."
                      oninput="filterCEODashTable()"
-                     class="ceo-search-input">
+                     class="ceo-search-input"
+                     aria-label="Search active repair queue">
 
-              <!-- Status Filter -->
-              <select id="ceo-dash-filter" onchange="filterCEODashTable()" class="ceo-filter-select">
+              <select id="ceo-dash-filter" onchange="filterCEODashTable()" class="ceo-filter-select" aria-label="Filter repair status">
                 <option value="ALL">All Active Statuses</option>
                 <option value="REWORK">⚠️ Rework Required</option>
                 <option value="PROGRESS">🚧 In Progress</option>
@@ -570,28 +203,26 @@
                 <option value="BUDGET">⏳ Pending Budget</option>
               </select>
 
-              <!-- View Masterlist Button -->
-              <button onclick="document.getElementById('view-dashboard').classList.add('hidden'); document.getElementById('view-repair').classList.remove('hidden');" class="ceo-btn-masterlist">
+              <button type="button" onclick="document.getElementById('view-dashboard').classList.add('hidden'); document.getElementById('view-repair').classList.remove('hidden');" class="ceo-btn-masterlist">
                 View Masterlist ➔
               </button>
             </div>
           </div>
 
-          <!-- Table Frame -->
-          <div style="overflow-x: auto;">
-            <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13.5px;">
+          <div class="table-responsive">
+            <table class="data-table">
               <thead>
-              <tr style="background-color: #0b2545; color: white; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">
-                <th style="padding: 13px 15px; border-radius: 6px 0 0 0; white-space: nowrap; width: 110px;">Project ID</th>
-                <th style="padding: 13px 15px; width: 130px;">Barangay</th>
-                <th style="padding: 13px 15px;">Road Name & Scope</th>
-                <th style="padding: 13px 15px; white-space: nowrap; width: 100px;">Est. Area</th>
-                <th style="padding: 13px 15px; width: 110px; text-align: center;">Priority</th>
-                <th style="padding: 13px 15px; width: 140px; text-align: center;">Status</th>
-                <th style="padding: 13px 15px; border-radius: 0 6px 0 0; text-align: center; width: 90px;">Action</th>
+              <tr>
+                <th>Project ID</th>
+                <th>Barangay</th>
+                <th>Road Name & Scope</th>
+                <th style="white-space: nowrap;">Est. Area</th>
+                <th style="text-align: center;">Priority</th>
+                <th style="text-align: center;">Status</th>
+                <th style="text-align: center;">Action</th>
               </tr>
               </thead>
-              <tbody id="ultimate-ceo-dash-table" style="color: #334155;">
+              <tbody id="ultimate-ceo-dash-table">
               <tr>
                 <td colspan="7" style="text-align: center; padding: 40px; color: #94a3b8; font-style: italic;">
                   Fetching active repairs...
@@ -605,20 +236,18 @@
 
       </div>
 
+      <!-- REPAIR PROJECTS MASTERLIST VIEW -->
       <div id="view-repair" class="content-section hidden">
 
-        <!-- 🚀 Unified UI Header matching Admin & Barangay -->
-        <div class="bd-controls" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border: 1px solid #e0e0e0;">
+        <div class="bd-controls">
           <div>
             <h2 style="margin: 0; color: #333; font-size: 20px;">Active Repair Queue</h2>
           </div>
 
-          <div style="display: flex; gap: 15px; align-items: center;">
-            <!-- 🔍 The Search Bar (Left) -->
-            <input type="text" id="ceoSearch" class="bd-search-bar" placeholder="🔍 Search ID or Location..." style="padding: 10px; width: 250px; border: 1px solid #ccc; border-radius: 5px; outline: none;">
+          <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+            <input type="text" id="ceoSearch" class="bd-search-bar" placeholder="🔍 Search ID or Location..." aria-label="Search repair projects masterlist">
 
-            <!-- 📂 The Priority Dropdown (Right) -->
-            <select id="ceo-priority-filter" style="padding: 10px; border-radius: 5px; border: 1px solid #ccc; outline: none; cursor: pointer;">
+            <select id="ceo-priority-filter" class="bd-status-select" aria-label="Filter priority level">
               <option value="All">All Priorities</option>
               <option value="High">High Priority Only</option>
               <option value="Medium">Medium Priority</option>
@@ -627,33 +256,31 @@
           </div>
         </div>
 
-        <!-- 🚀 HIDDEN BATCH ACTION BAR -->
-        <div id="batch-action-bar" style="display: none; margin-bottom: 15px; background: #fffbeb; padding: 12px 20px; border-left: 5px solid #f59e0b; border-radius: 6px; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.05);">
-    <span style="color: #b45309; font-weight: 600; font-size: 14px;">
-      <span id="selected-count">0</span> reports selected
-    </span>
-          <button onclick="openBatchDeferModal()" style="background-color: #f59e0b; color: white; padding: 8px 16px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 8px;">
+        <div id="batch-action-bar" class="hidden" style="margin-bottom: 15px; background: #fffbeb; padding: 12px 20px; border-left: 5px solid #f59e0b; border-radius: 6px; display: flex; align-items: center; justify-content: space-between;">
+          <span style="color: #b45309; font-weight: 600; font-size: 14px;">
+            <span id="selected-count">0</span> reports selected
+          </span>
+          <button type="button" onclick="openBatchDeferModal()" class="btn-warning" style="background-color: #f59e0b; color: white; padding: 8px 16px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;">
             <span class="icon">⏳</span> Defer Selected
           </button>
         </div>
 
-        <div class="fresh-table-container table-container" style="display: block; visibility: visible; opacity: 1;">
-          <table class="data-table" style="width: 100%; border-collapse: collapse; display: table;">
+        <div class="table-responsive">
+          <table class="data-table">
             <thead>
             <tr>
-              <!-- Master Checkbox Column -->
-              <th style="width: 5%; text-align: center;">
-                <input type="checkbox" id="select-all-checkbox" onchange="toggleAllCheckboxes(this)" style="cursor: pointer; width: 16px; height: 16px;">
+              <th style="width: 40px; text-align: center;">
+                <input type="checkbox" id="select-all-checkbox" onchange="toggleAllCheckboxes(this)" aria-label="Select all repair projects">
               </th>
-              <th style="width: 12%;">Project ID</th>
-              <th style="width: 18%;">Location (Brgy)</th>
-              <th style="width: 25%;">Road Name</th>
-              <th style="width: 13%;">Est. Area</th>
-              <th style="width: 13%;">Priority Level</th>
-              <th style="width: 14%;">Action</th>
+              <th>Project ID</th>
+              <th>Location (Brgy)</th>
+              <th>Road Name</th>
+              <th>Est. Area</th>
+              <th>Priority Level</th>
+              <th>Action</th>
             </tr>
             </thead>
-            <tbody id="deploy-master-table" style="display: table-row-group;">
+            <tbody id="deploy-master-table">
             <tr><td colspan="7" style="text-align:center; padding: 20px;">Loading Masterlist...</td></tr>
             </tbody>
           </table>
@@ -661,644 +288,185 @@
 
       </div>
 
-      <!-- ========================================== -->
-      <!-- ⚙️ SETTINGS VIEW (CEO ENGINEER THEME)       -->
-      <!-- ========================================== -->
+      <!-- SETTINGS VIEW -->
       <div id="view-settings" class="content-section hidden">
-
-        <!-- SECTION HEADER -->
-        <div class="section-header" style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid #e2e8f0; padding-bottom: 16px;">
-          <div>
-            <h2 style="margin: 0; font-size: 22px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px;">Data Management & Backups</h2>
-            <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">Review, preview, print, and download annual engineering and repair records for official CEO compliance.</p>
+        <div class="section-card">
+          <h2>Engineering Data & Compliance Center</h2>
+          <p style="color: var(--color-muted); font-size: 13px; margin-top: 5px;">Export annual repair inventories and compliance logs.</p>
+          <div style="margin-top: 20px; display: flex; gap: 12px; flex-wrap: wrap;">
+            <select id="export-report-category" class="bd-status-select" aria-label="Export category">
+              <option value="ALL">Combined (All Assigned Projects)</option>
+              <option value="ACTIVE">Active Backlog</option>
+              <option value="ACCOMPLISHMENT">Accomplishment Report (Completed)</option>
+            </select>
+            <button type="button" class="btn-primary" onclick="openAnnualReportPreview()">Preview & Print Report</button>
           </div>
-          <span style="background: #fff7ed; border: 1px solid #fed7aa; color: #c2410c; padding: 5px 12px; border-radius: 20px; font-size: 11.5px; font-weight: 800; display: inline-flex; align-items: center; gap: 6px;">
-      👷 City Engineering Division
-    </span>
-        </div>
-
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 24px; width: 100%;">
-
-          <!-- 📊 CARD 1: ANNUAL EXPORT & PRINT CENTER -->
-          <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 26px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.03); display: flex; flex-direction: column; justify-content: space-between;">
-            <div>
-              <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 18px; border-bottom: 1.5px solid #f1f5f9; padding-bottom: 16px;">
-                <span style="display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; font-size: 22px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; line-height: 1;">📊</span>
-                <div>
-                  <h3 style="margin: 0; font-size: 16.5px; font-weight: 800; color: #0f172a;">Engineering Audit & Export Center</h3>
-                  <p style="margin: 2px 0 0 0; font-size: 12px; color: #64748b;">Filter and export engineering records by audit cycle</p>
-                </div>
-              </div>
-
-              <p style="color: #475569; font-size: 13.5px; line-height: 1.6; margin-bottom: 20px;">
-                Generate formal road repair inventories, project dimensions, and repair status sheets for local government records and verification.
-              </p>
-
-              <!-- Category Dropdown Container -->
-              <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 16px; margin-bottom: 12px;">
-                <label for="export-report-category" style="display: block; font-weight: 700; font-size: 12.5px; color: #334155; margin-bottom: 8px;">
-                  Select Report Category:
-                </label>
-                <select id="export-report-category" style="width: 100%; padding: 10px 14px; border: 1.5px solid #cbd5e1; border-radius: 6px; font-size: 13.5px; font-weight: 600; color: #0f172a; background: #ffffff; cursor: pointer; outline: none; transition: border-color 0.2s, box-shadow 0.2s;" onfocus="this.style.borderColor='#ea580c'; this.style.boxShadow='0 0 0 3px rgba(234,88,12,0.15)';" onblur="this.style.borderColor='#cbd5e1'; this.style.boxShadow='none';">
-                  <option value="ALL">Combined (All Assigned Projects)</option>
-                  <option value="ACTIVE">Active Backlog (Dispatched, In Progress, Pending)</option>
-                  <option value="ACCOMPLISHMENT">Accomplishment Report (Completed Only)</option>
-                </select>
-              </div>
-
-              <!-- Cycle Year Dropdown Container -->
-              <div style="background: #f8fafc; border: 1.5px solid #e2e8f0; border-radius: 10px; padding: 16px; margin-bottom: 20px;">
-                <label for="export-inventory-year" style="display: block; font-weight: 700; font-size: 12.5px; color: #334155; margin-bottom: 8px;">
-                  Select Inventory Cycle Year:
-                </label>
-                <select id="export-inventory-year" style="width: 100%; padding: 10px 14px; border: 1.5px solid #cbd5e1; border-radius: 6px; font-size: 13.5px; font-weight: 600; color: #0f172a; background: #ffffff; cursor: pointer; outline: none; transition: border-color 0.2s, box-shadow 0.2s;" onfocus="this.style.borderColor='#ea580c'; this.style.boxShadow='0 0 0 3px rgba(234,88,12,0.15)';" onblur="this.style.borderColor='#cbd5e1'; this.style.boxShadow='none';">
-                  <option value="ALL">All Recorded Years</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- Action Button -->
-            <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px;">
-              <button type="button" onclick="openAnnualReportPreview()" style="flex: 1; min-width: 180px; padding: 12px 20px; background-color: #ea580c; color: white; border: none; border-radius: 8px; font-weight: 700; font-size: 13.5px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 2px 6px rgba(234, 88, 12, 0.28); transition: background-color 0.2s ease;" onmouseover="this.style.backgroundColor='#c2410c'" onmouseout="this.style.backgroundColor='#ea580c'">
-                Preview & Print Report
-              </button>
-            </div>
-          </div>
-
-          <!-- 📋 CARD 2: AUDIT & RETENTION COMPLIANCE GUIDE -->
-          <div style="background: #ffffff; border: 1.5px solid #e2e8f0; border-radius: 12px; padding: 26px; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.03); display: flex; flex-direction: column; justify-content: space-between;">
-            <div>
-              <div style="display: flex; align-items: center; gap: 14px; margin-bottom: 18px; border-bottom: 1.5px solid #f1f5f9; padding-bottom: 16px;">
-                <span style="display: inline-flex; align-items: center; justify-content: center; width: 42px; height: 42px; font-size: 22px; background: #fff7ed; border: 1px solid #fed7aa; border-radius: 10px; line-height: 1;">🏛️</span>
-                <div>
-                  <h3 style="margin: 0; font-size: 16.5px; font-weight: 800; color: #0f172a;">Audit & Record Compliance</h3>
-                  <p style="margin: 2px 0 0 0; font-size: 12px; color: #64748b;">San Jose Del Monte RoadWise Engineering Protocol</p>
-                </div>
-              </div>
-
-              <div style="display: flex; flex-direction: column; gap: 16px; font-size: 13px; color: #475569; line-height: 1.5;">
-
-                <div style="display: flex; gap: 12px; align-items: flex-start;">
-                  <span style="display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; flex-shrink: 0;">📅</span>
-                  <div>
-                    <strong style="color: #0f172a; font-size: 13px; display: block; margin-bottom: 2px;">Annual Cycle Archiving</strong>
-                    <p style="margin: 0; color: #64748b; font-size: 12px; line-height: 1.45;">Past validated and resolved road projects remain queryable for historical review and audit verification.</p>
-                  </div>
-                </div>
-
-                <div style="display: flex; gap: 12px; align-items: flex-start;">
-                  <span style="display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; flex-shrink: 0;">📄</span>
-                  <div>
-                    <strong style="color: #0f172a; font-size: 13px; display: block; margin-bottom: 2px;">Print-Ready Document Layout</strong>
-                    <p style="margin: 0; color: #64748b; font-size: 12px; line-height: 1.45;">Automatically formats reports into a clean, landscape layout with official seals, dates, and account details for PDF export.</p>
-                  </div>
-                </div>
-
-                <div style="display: flex; gap: 12px; align-items: flex-start;">
-                  <span style="display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; flex-shrink: 0;">📊</span>
-                  <div>
-                    <strong style="color: #0f172a; font-size: 13px; display: block; margin-bottom: 2px;">Spreadsheet Compatibility</strong>
-                    <p style="margin: 0; color: #64748b; font-size: 12px; line-height: 1.45;">Exported CSV files contain complete physical dimensions (length, width, culverts, bridges) formatted for Excel.</p>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
-            <!-- Compliance Verification Status Indicator -->
-            <div style="margin-top: 20px; background: #fff7ed; border: 1px solid #fed7aa; padding: 9px 14px; border-radius: 6px; display: flex; align-items: center; justify-content: space-between;">
-              <span style="font-size: 11.5px; font-weight: 700; color: #9a3412;">🔒 Engineering Protocol:</span>
-              <span style="font-size: 11px; font-weight: 800; color: #c2410c; letter-spacing: 0.3px;">CEO VERIFIED & ACTIVE</span>
-            </div>
-
-          </div>
-
         </div>
       </div>
 
-      <div id="view-ceo-map" class="content-section hidden">
-        <div class="header-container" style="margin-bottom: 20px;">
-          <h2>🗺️ Active Projects Map</h2>
-          <p>Live geospatial view of all road repairs currently dispatched to the Engineering Office.</p>
+      <!-- PROFILE VIEW -->
+      <div id="view-profile" class="content-section hidden ceo-profile-theme">
+        <div class="section-header-flex" style="margin-bottom: 20px;">
+          <h2>Engineering Office Settings</h2>
+          <button type="button" id="btn-back-dashboard" class="btn-secondary">⬅ Back to Dashboard</button>
         </div>
 
-        <div id="ceo-global-map" style="height: 70vh; width: 100%; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); z-index: 1;"></div>
+        <div class="profile-split-container">
+          <div class="profile-sidebar">
+            <div class="profile-header-mini">
+              <div class="profile-avatar-mini" id="main-profile-avatar">👷</div>
+              <h4 id="sidebar-display-name">Loading...</h4>
+              <p id="sidebar-display-role">Loading...</p>
+            </div>
+          </div>
+          <div class="profile-content">
+            <div class="profile-detail-row"><strong>Full Name:</strong> <span id="profile-full-name">Loading...</span></div>
+            <div class="profile-detail-row"><strong>Official Email:</strong> <span id="profile-email">Loading...</span></div>
+            <div class="profile-detail-row"><strong>Department:</strong> <span>City Engineering Office</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MAP VIEW -->
+      <div id="view-ceo-map" class="content-section hidden">
+        <h2>🗺️ Active Projects Map</h2>
+        <div id="ceo-global-map" style="height: 70vh; width: 100%; border-radius: var(--radius-md); margin-top: 16px;"></div>
       </div>
 
     </main>
 
   </div>
 
-  <div id="manage-modal" class="modal-overlay hidden">
-    <div class="modal-content">
-
-      <div class="modal-header">
-        <h2>Manage Project <span class="highlight" id="ceo-modal-prj-id">#PRJ-0000</span></h2>
-        <button class="close-manage-btn close-modal-btn" onclick="document.getElementById('manage-modal').classList.add('hidden')">✕</button>
-      </div>
-
-      <div class="modal-body">
-
-        <!-- ⚠️ REWORK ALERT BANNER -->
-        <div id="ceo-rework-alert" style="display: none; background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 15px 20px; border-radius: 4px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
-          <h4 style="color: #856404; margin-top: 0; margin-bottom: 8px; font-size: 16px;">
-            <span class="icon">⚠️</span> Admin QA Rejected - Rework Required
-          </h4>
-          <p style="margin: 0; font-size: 13px; color: #533f03;">
-            <strong>Admin Instructions:</strong> <span id="ceo-modal-admin-remarks">Loading...</span>
-          </p>
-        </div>
-
-        <!-- ⏱️ TOP ACCORDION: FULL LIFECYCLE & AUDIT HISTORY -->
-        <div class="edit-timeline-accordion" style="margin-bottom: 20px; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; background: #ffffff;">
-          <button
-            type="button"
-            id="toggle-ceo-timeline-btn"
-            onclick="toggleCEOTimeline()"
-            style="width: 100%; padding: 10px 14px; background: #f8fafc; border: none; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 12.5px; font-weight: 700; color: #334155;"
-          >
-            <span>⏱️ View Full Lifecycle & Audit History</span>
-            <span id="ceo-timeline-arrow" style="font-size: 12px; transition: transform 0.2s ease;">▼</span>
-          </button>
-
-          <div id="ceo-manage-timeline-container" class="hidden" style="padding: 14px 20px; background: #ffffff; border-top: 1px solid #e2e8f0; max-height: 250px; overflow-y: auto;">
-            <div id="ceo-timeline-items" class="report-timeline">
-              <!-- Populated dynamically by loadReportTimeline -->
-            </div>
-          </div>
-        </div>
-
-        <!-- 🗺️ SECTION 1: ORIGINAL DAMAGE REPORT & MAP -->
-        <div class="report-section">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <h3 class="section-title" style="margin-bottom: 0;">Original Damage Report</h3>
-            <button class="btn-action" id="ceo-btn-locate-map" style="background-color: #4a4a4a;">
-              <span class="icon">🗺️</span> Locate on Map
-            </button>
-          </div>
-
-          <div id="ceo-manage-map-container" style="display: none; margin-bottom: 15px; border-radius: 8px; overflow: hidden; border: 1px solid #ccc;">
-            <div id="ceo-manage-map" style="height: 250px; width: 100%; z-index: 1;"></div>
-          </div>
-
-          <div class="report-detail-grid">
-            <div><strong>Barangay:</strong> <span id="ceo-modal-brgy">Loading...</span></div>
-            <div><strong>City Road Name:</strong> <span id="ceo-modal-road-name">Loading...</span></div>
-            <div><strong>City Road ID:</strong> <span id="ceo-modal-road-id">Loading...</span></div>
-            <div><strong>Road Importance:</strong> <span id="ceo-modal-importance">Loading...</span></div>
-
-            <div><strong>Terrain Type:</strong> <span id="ceo-modal-terrain">Loading...</span></div>
-            <div><strong>Road Type:</strong> <span id="ceo-modal-road-type">Loading...</span></div>
-            <div><strong>Road Length (km):</strong> <span id="ceo-modal-length">Loading...</span></div>
-            <div><strong>Road Width (m):</strong> <span id="ceo-modal-width">Loading...</span></div>
-            <div><strong>Length of Culverts (m):</strong> <span id="ceo-modal-culverts">Loading...</span></div>
-            <div><strong>Number of Bridges:</strong> <span id="ceo-modal-bridges">Loading...</span></div>
-
-            <div style="grid-column: 1 / -1; border-top: 1px dashed #ccc; margin-top: 5px; padding-top: 10px;"></div>
-            <div><strong>Damage Type:</strong> <span id="ceo-modal-damage-type">Loading...</span></div>
-            <div><strong>Damage Length (m):</strong> <span id="ceo-modal-damage-length">0</span></div>
-            <div><strong>Damage Width (m):</strong> <span id="ceo-modal-damage-width">0</span></div>
-            <div style="background: #fff3cd; padding: 4px 8px; border-radius: 4px;"><strong>Damage Area:</strong> <span id="ceo-modal-damage-area" style="font-weight: bold; color: #856404;">0 sq.m</span></div>
-
-            <div><strong>Priority Level:</strong> <span class="badge" id="ceo-modal-priority">LOADING</span></div>
-
-            <div style="grid-column: 1 / -1;"><strong>GPS Coordinates:</strong> <span id="ceo-modal-gps">Loading...</span></div>
-
-            <div style="grid-column: 1 / -1; border-top: 1px dashed #ccc; padding-top: 10px; margin-top: 5px;">
-              <strong>Originally Submitted By:</strong>
-              <span id="ceo-modal-submitter-name" style="color: var(--primary-blue); font-weight: bold;">Loading...</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 📸 SECTION 2: DAMAGE EVIDENCE -->
-        <div class="report-section">
-          <h3 class="section-title">Damage Evidence</h3>
-          <div class="report-image-placeholder" id="ceo-modal-image-container" style="text-align: center;">
-            <div class="modal-image-container">
-              <img id="ceo-modal-image" src="" alt="Damage Photo" onclick="openFullscreenImage(this)">
-            </div>
-            <div id="ceo-modal-image-placeholder-text">
-              <span class="icon">📷</span>
-              <p>Loading photo...</p>
-            </div>
-          </div>
-
-          <div class="report-description" style="margin-top: 15px;">
-            <strong>Damage Description:</strong>
-            <p id="ceo-modal-description">Loading description...</p>
-          </div>
-        </div>
-
-        <!-- ⏳ 1. DEFERRED NOTICE (Appears when project is on hold for budget) -->
-        <div id="ceo-deferred-alert" class="report-section" style="display: none; background-color: #fffbeb; border: 1px solid #fef3c7; border-left: 6px solid #f59e0b; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <h4 style="color: #92400e; margin: 0; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
-              <span>⏳</span> Project On Hold: Pending Budget Allocation
-            </h4>
-            <span class="badge" style="background-color: #f59e0b; color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">DEFERRED</span>
-          </div>
-          <p style="margin: 0; font-size: 13px; color: #78350f;">
-            <strong>Justification / Remarks:</strong> <span id="ceo-deferred-remarks">No remarks provided.</span>
-          </p>
-        </div>
-
-        <!-- 👷 2. DISPATCH CREW & SCHEDULING (Hidden when deferred or completed) -->
-        <div id="ceo-dispatch-section" class="report-section" style="background-color: #f4f6f8; padding: 18px; border-radius: 8px; margin-bottom: 20px;">
-          <h3 class="section-title" style="margin-bottom: 6px;">Dispatch Crew & Scheduling</h3>
-          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
-            Deploy on-site engineers or defer this project to a later budget cycle.
-          </p>
-
-          <!-- Button Row -->
-          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
-            <span class="status-badge pending" id="ceo-modal-current-status">Loading...</span>
-
-            <!-- Active Countdown Badge (Visible when In Progress) -->
-            <span id="ceo-target-countdown-badge" style="display: none; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 6px;"></span>
-
-            <!-- Buttons -->
-            <button class="btn-small" id="ceo-btn-start-repair" style="background-color: #ea580c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-              <span class="icon">👷</span> Mark as "In Progress"
-            </button>
-
-            <button class="btn-small" id="btn-pending-budget" onclick="markAsPendingBudget()" style="background-color: #f59e0b; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; display: flex; align-items: center; gap: 6px;">
-              <span class="icon">⏳</span> Defer (Pending Budget)
-            </button>
-          </div>
-
-          <!-- Target Date Picker (Only visible before dispatch) -->
-          <div id="ceo-target-date-container" style="display: none; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 14px; margin-top: 10px;">
-            <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-              <label for="ceo-target-date-input" style="font-size: 12.5px; font-weight: 700; color: #334155;">
-                📅 Target Completion Date:
-              </label>
-              <input type="date" id="ceo-target-date-input" style="padding: 5px 10px; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 13px; color: #1e293b;" />
-              <span id="ceo-target-date-hint" style="font-size: 11.5px; color: #0284c7; font-weight: 600;"></span>
-            </div>
-          </div>
-
-          <!-- ⏱️ CEO TIME EXTENSION REQUEST COMPONENT -->
-          <div id="ceo-extension-section" style="margin-top: 15px; display: none;">
-
-            <!-- 1. PENDING EXTENSION ALERT (Shown when extensionStatus === 'PENDING') -->
-            <div id="ceo-extension-pending-card" style="display: none; background: #fffbeb; border: 1px solid #fef3c7; border-left: 4px solid #f59e0b; padding: 12px 14px; border-radius: 6px; margin-bottom: 12px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <strong style="color: #92400e; font-size: 12.5px;">⏳ Extension Request Under CPDO Review</strong>
-                <span style="background: #f59e0b; color: white; padding: 2px 7px; border-radius: 4px; font-size: 10.5px; font-weight: 700;">AWAITING CPDO</span>
-              </div>
-              <div style="font-size: 12px; color: #78350f;">
-                <div>📅 <strong>Requested Target Date:</strong> <span id="ceo-extension-display-date" style="font-weight: 700;">-</span></div>
-                <div style="margin-top: 3px;">💬 <strong>Justification:</strong> <span id="ceo-extension-display-reason">-</span></div>
-              </div>
-            </div>
-
-            <!-- 2. REJECTED EXTENSION ALERT (Shown when extensionStatus === 'REJECTED') -->
-            <div id="ceo-extension-rejected-card" style="display: none; background: #fef2f2; border: 1px solid #fee2e2; border-left: 4px solid #ef4444; padding: 12px 14px; border-radius: 6px; margin-bottom: 12px;">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                <strong style="color: #991b1b; font-size: 12.5px;">❌ Previous Extension Request Denied</strong>
-                <span style="background: #ef4444; color: white; padding: 2px 7px; border-radius: 4px; font-size: 10.5px; font-weight: 700;">DENIED</span>
-              </div>
-              <p style="margin: 0; font-size: 12px; color: #7f1d1d;">
-                The CPDO Admin denied the requested extension. The active deadline remains unchanged. You may re-submit a revised justification if unforeseen site conditions persist.
-              </p>
-            </div>
-
-            <!-- 3. TOGGLE ACTION BUTTON -->
-            <div id="ceo-extension-btn-container" style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
-              <button
-                type="button"
-                id="btn-open-extension-form"
-                onclick="toggleCeoExtensionForm(true)"
-                style="background: #ffffff; border: 1px solid #cbd5e1; color: #334155; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: 0.2s;"
-                onmouseover="this.style.background='#f1f5f9'"
-                onmouseout="this.style.background='#ffffff'"
-              >
-                <span>⏱️</span> Request Schedule Extension
-              </button>
-            </div>
-
-            <!-- 4. SLIDE-DOWN REQUEST FORM -->
-            <div id="ceo-extension-form" class="hidden" style="background: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px; padding: 14px; margin-bottom: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-              <h4 style="margin: 0 0 8px 0; font-size: 13px; color: #0f172a; display: flex; align-items: center; gap: 6px;">
-                <span>⏱️</span> Formal Civil Works Schedule Extension
-              </h4>
-              <p style="margin: 0 0 12px 0; font-size: 11.5px; color: #64748b;">
-                Submit formal justification for civil works delay (e.g., continuous monsoon rain, concrete curing, material shipment delay) for CPDO administrative review.
-              </p>
-
-              <div style="margin-bottom: 10px;">
-                <label for="ceo-extension-target-date" style="display: block; font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;">
-                  Proposed New Target Completion Date <span style="color: #ef4444;">*</span>
-                </label>
-                <input
-                  type="date"
-                  id="ceo-extension-target-date"
-                  style="width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12.5px; font-family: inherit; background: white;"
-                >
-              </div>
-
-              <div style="margin-bottom: 12px;">
-                <label for="ceo-extension-reason-input" style="display: block; font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 4px;">
-                  Detailed Justification / Site Conditions <span style="color: #ef4444;">*</span>
-                </label>
-                <textarea
-                  id="ceo-extension-reason-input"
-                  placeholder="Explain site conditions causing the delay (e.g., Continuous heavy monsoon rains prevented PCCP asphalt pouring; concrete requires 4 extra curing days)..."
-                  style="width: 100%; min-height: 75px; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px; font-family: inherit; resize: vertical; background: white;"
-                ></textarea>
-              </div>
-
-              <div style="display: flex; justify-content: flex-end; gap: 8px;">
-                <button
-                  type="button"
-                  onclick="toggleCeoExtensionForm(false)"
-                  style="padding: 6px 12px; font-size: 12px; border-radius: 6px; cursor: pointer; border: 1px solid #cbd5e1; background: #f8fafc; color: #475569;"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  id="btn-submit-extension"
-                  onclick="submitCeoExtensionRequest()"
-                  style="background: #0284c7; border: none; padding: 6px 14px; font-size: 12px; border-radius: 6px; cursor: pointer; color: white; font-weight: 700;"
-                >
-                  Submit to CPDO
-                </button>
-              </div>
-            </div>
-
-          </div>
-
-        </div>
-
-        <!-- 🏁 SECTION 3: PROJECT RESOLUTION (UPLOAD COMPLETION) -->
-        <div id="ceo-completion-form" class="report-section" style="border-bottom: none; background-color: #f8fcf8; padding: 20px; border-radius: 8px; border: 1px solid #c3e6cb; margin-top: 20px;">
-          <h3 class="section-title" style="color: #28a745; margin-bottom: 10px;">Project Resolution</h3>
-          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 15px;">Please upload photographic proof of the completed road repair and provide optional remarks to officially close this project ticket.</p>
-
-          <strong style="display: block; margin-bottom: 10px; font-size: 13px; color: var(--text-main);">Upload Repair Image <span style="color: #dc3545;">(Required)*</span></strong>
-
-          <div id="ceo-dropzone-container" class="upload-dropzone" style="position: relative; cursor: pointer; border: 2px dashed #cbd5e1; padding: 30px; text-align: center; border-radius: 8px; transition: 0.3s; background: #f8fafc; margin-bottom: 15px;">
-            <input type="file" id="ceo-repair-image-upload" accept="image/*" style="display: none;" />
-
-            <div id="ceo-dropzone-default">
-              <span class="icon" style="font-size: 32px; color: var(--accent-blue);">📸</span>
-              <p style="margin: 10px 0 5px 0; color: #334155; font-weight: 500;">Click to upload or drag photo here</p>
-              <span style="font-size: 11px; color: #64748b;">JPG or PNG (Max 5MB)</span>
-            </div>
-
-            <div id="ceo-dropzone-preview" style="display: none; position: relative; margin-top: 10px;">
-              <img id="ceo-preview-img" src="" alt="Preview" onclick="openFullscreenImage(this)" style="width: 100%; height: 200px; object-fit: cover; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); cursor: zoom-in;" />
-
-              <button id="ceo-btn-remove-image" type="button" style="position: absolute; top: -10px; right: -10px; background: #ef4444; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.2); font-size: 14px; display: flex; align-items: center; justify-content: center;">✕</button>
-              <div id="ceo-repair-file-name" style="margin-top: 10px; font-size: 12px; color: #16a34a; font-weight: bold; text-align: center;"></div>
-            </div>
-          </div>
-
-          <label style="font-weight: bold; font-size: 13px; color: var(--text-main); display: block; margin-bottom: 5px;">Official Repair Remarks (Optional)</label>
-          <textarea id="ceo-repair-remarks" rows="3" style="width: 100%; padding: 10px; border-radius: 4px; border: 1px solid #cbd5e1; font-family: inherit; font-size: 13px;" placeholder="e.g., Applied 2 tons of hot mix asphalt. Drain cleared."></textarea>
-
-          <div class="form-actions" style="margin-top: 20px; display: flex; gap: 15px;">
-            <button type="button" class="btn-secondary" id="ceo-btn-cancel-repair" onclick="document.getElementById('manage-modal').classList.add('hidden')" style="background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; transition: 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 6px;">
-              <span class="icon" style="font-size: 12px;">✖️</span> Cancel
-            </button>
-
-            <button type="button" class="btn-submit" id="ceo-btn-complete-repair" onclick="submitCEOCompletion()" style="background-color: #28a745; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold; transition: 0.2s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; align-items: center; gap: 6px;">
-              <span class="icon">🏁</span> Mark as Completed
-            </button>
-          </div>
-        </div>
-
-        <!-- ✅ SECTION 4: COMPLETED EVIDENCE (PROOF DISPLAY) -->
-        <div id="ceo-completed-evidence-section" class="report-section" style="display: none; background-color: #f0fdf4; border: 1px solid #bbf7d0; padding: 20px; border-radius: 8px; margin-top: 20px;">
-          <h3 class="section-title" style="color: #16434a; margin-bottom: 10px;"><span class="icon">✅</span> Repair Completed</h3>
-          <div style="margin-bottom: 15px;">
-            <strong style="color: #166534; font-size: 13px;">Proof of Repair:</strong>
-            <div style="margin-top: 10px; text-align: center; background: white; padding: 10px; border-radius: 8px; border: 1px solid #dcfce3;">
-              <div class="modal-image-container">
-                <img id="ceo-modal-proof-image" src="" alt="Proof of Repair" onclick="openFullscreenImage(this)">
-              </div>
-            </div>
-          </div>
-          <div>
-            <strong style="color: #166534; font-size: 13px;">Official Remarks:</strong>
-            <p id="ceo-modal-proof-remarks" style="background: white; padding: 12px; border-radius: 4px; border: 1px solid #dcfce3; color: #374151; font-size: 13px; margin-top: 5px;">No remarks provided.</p>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  </div>
-
 </div>
 
-<!-- 🚀 THE BEAUTIFUL CUSTOM MODAL (NOW DYNAMIC!) -->
-<div id="batch-defer-modal" class="modal-overlay hidden">
-  <div class="modal-content" style="max-width: 500px;">
+<!-- CEO MANAGE PROJECT MODAL -->
+<div id="manage-modal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+  <div class="modal-content" style="max-width: 800px; width: 95%;">
 
     <div class="modal-header">
-      <!-- ⚠️ JS NEEDS THIS ID TO CHANGE THE TITLE -->
-      <h2 id="defer-modal-title">Batch Defer Projects</h2>
-      <button class="close-modal-btn" onclick="document.getElementById('batch-defer-modal').classList.add('hidden')">✕</button>
+      <h2>Manage Project <span class="highlight" id="ceo-modal-prj-id">#PRJ-0000</span></h2>
+      <button type="button" class="close-modal-btn" onclick="document.getElementById('manage-modal').classList.add('hidden')" aria-label="Close modal">✕</button>
     </div>
 
     <div class="modal-body">
-      <div style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 15px; border-radius: 4px; margin-bottom: 20px;">
-        <h4 style="color: #856404; margin-top: 0; margin-bottom: 5px; display: flex; align-items: center; gap: 8px;">
-          <span class="icon" style="font-size: 18px;">⚠️</span> Action Warning
+
+      <!-- REWORK ALERT BANNER -->
+      <div id="ceo-rework-alert" class="hidden" style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+        <h4 style="color: #856404; margin-top: 0; margin-bottom: 8px; font-size: 15px;">
+          ⚠️ Admin QA Rejected - Rework Required
         </h4>
-        <!-- ⚠️ JS NEEDS THIS ID TO CHANGE THE WARNING TEXT -->
-        <p id="defer-modal-warning" style="margin: 0; font-size: 13px; color: #533f03;">
-          This action will instantly sweep up and defer <strong>ALL</strong> selected reports to <span class="badge" style="background: #f59e0b; color: white; padding: 2px 6px; border-radius: 4px;">Pending Budget</span>.
+        <p style="margin: 0; font-size: 13px; color: #533f03;">
+          <strong>Admin Instructions:</strong> <span id="ceo-modal-admin-remarks">Loading...</span>
         </p>
       </div>
 
-      <label style="font-weight: bold; font-size: 13px; color: var(--text-main); display: block; margin-bottom: 5px;">Reason for Deferral <span style="color: #dc3545;">*</span></label>
-      <textarea id="batch-defer-reason" rows="4" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #cbd5e1; font-family: inherit; font-size: 13px;" placeholder="e.g., Insufficient funds for Fiscal Year 2026. Will require National Budget allocation."></textarea>
-
-      <div class="form-actions" style="margin-top: 25px; display: flex; justify-content: flex-end; gap: 12px;">
-        <button type="button" onclick="document.getElementById('batch-defer-modal').classList.add('hidden')" style="background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s;">
-          Cancel
-        </button>
-        <button type="button" id="btn-confirm-batch-defer" onclick="submitBatchDefer()" style="background-color: #f59e0b; color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-weight: bold; transition: 0.2s; box-shadow: 0 2px 4px rgba(245,158,11,0.2);">
-          Confirm Batch Deferral
-        </button>
-      </div>
-
-    </div>
-  </div>
-</div>
-
-
-<div id="toast-notification" style="position: fixed; top: 20px; right: 20px; padding: 15px 20px; border-radius: 8px; color: white; transition: all 0.3s ease; z-index: 999999; opacity: 0; transform: translateY(-20px); pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 10px;">
-  <span id="toast-icon" style="font-size: 20px;"></span>
-  <span id="toast-message" style="font-weight: bold;"></span>
-</div>
-
-<!-- 🚀 CONFIRMATION MODAL (Double-Check - DYNAMIC) -->
-<div id="confirm-action-modal" class="modal-overlay hidden" style="z-index: 99999; background-color: rgba(0, 0, 0, 0.65);">
-  <div class="modal-content" style="max-width: 400px; text-align: center; padding: 30px 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
-
-    <div style="font-size: 45px; margin-bottom: 10px;">⚠️</div>
-    <h3 style="margin-bottom: 10px; color: #0f172a;">Are you absolutely sure?</h3>
-
-    <!-- 🚀 ADDED ID: confirm-modal-text -->
-    <p id="confirm-modal-text" style="color: #64748b; font-size: 14px; margin-bottom: 25px; line-height: 1.5;">
-      You are about to defer <strong id="confirm-defer-count" style="color: #dc3545; font-size: 16px;">0</strong> selected reports. <br>
-      This will immediately notify the CPDO and the Barangay Officials.
-    </p>
-
-    <div style="display: flex; justify-content: center; gap: 12px;">
-      <button onclick="document.getElementById('confirm-action-modal').classList.add('hidden')" style="background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s;">
-        No, Cancel
-      </button>
-      <button id="btn-final-confirm" onclick="executeBatchDeferral()" style="background-color: #f59e0b; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; box-shadow: 0 4px 6px rgba(245,158,11,0.2); transition: 0.2s;">
-        Yes, Confirm
-      </button>
-    </div>
-
-  </div>
-</div>
-
-
-<!-- ========================================== -->
-<!-- 🚀 CEO NOTIFICATION MODALS -->
-<!-- ========================================== -->
-
-<!-- 1. ALL NOTIFICATIONS HISTORY MODAL -->
-<div id="all-notifications-modal" class="modal-overlay hidden" style="z-index: 99999; background-color: rgba(0, 0, 0, 0.5);">
-  <div class="modal-content" style="max-width: 550px; width: 90%; max-height: 85vh; display: flex; flex-direction: column; padding: 0; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);">
-
-    <div style="padding: 18px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border-radius: 12px 12px 0 0;">
-      <h3 style="margin: 0; color: #0f172a; font-size: 18px; font-weight: 700;">Notification History</h3>
-      <button onclick="document.getElementById('all-notifications-modal').classList.add('hidden')" style="background: none; border: none; font-size: 18px; cursor: pointer; color: #64748b; padding: 5px;">✖</button>
-    </div>
-
-    <div id="all-notifications-list" style="padding: 0; overflow-y: auto; flex-grow: 1; background: #ffffff; border-radius: 0 0 12px 12px;">
-      <!-- Full notification history will inject here -->
-    </div>
-
-  </div>
-</div>
-
-<!-- 2. SINGLE NOTIFICATION DETAILS MODAL (Higher z-index so it sits on top) -->
-<div id="single-notif-modal" class="modal-overlay hidden" style="z-index: 100001; background-color: rgba(0, 0, 0, 0.5);">
-  <div class="modal-content" style="max-width: 450px; padding: 25px; border-radius: 12px; text-align: left; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
-
-    <button onclick="document.getElementById('single-notif-modal').classList.add('hidden')" style="position: absolute; top: 15px; right: 15px; background: none; border: none; font-size: 18px; cursor: pointer; color: #64748b; padding: 5px;">✖</button>
-
-    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px;">
-      <!-- CEO Theme: Orange Icon Container -->
-      <div style="background: #fff7ed; color: #c2410c; width: 42px; height: 42px; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 20px; box-shadow: 0 2px 4px rgba(194,65,12,0.2);">🔔</div>
-      <div>
-        <h3 id="single-notif-title" style="margin: 0; color: #0f172a; font-size: 17px; font-weight: 700;">Notification Title</h3>
-        <span id="single-notif-time" style="font-size: 12px; color: #64748b; font-weight: 500;">Just now</span>
-      </div>
-    </div>
-
-    <div style="background: #f8fafc; padding: 18px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 20px;">
-      <p id="single-notif-message" style="margin: 0; font-size: 14px; color: #334155; line-height: 1.6; white-space: pre-wrap; word-wrap: break-word;">Message goes here...</p>
-    </div>
-
-    <div style="text-align: right;">
-      <!-- CEO Theme: Orange Button -->
-      <button onclick="document.getElementById('single-notif-modal').classList.add('hidden')" style="background: #e67e22; color: white; border: none; padding: 9px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; box-shadow: 0 2px 4px rgba(230,126,34,0.3); transition: 0.2s;">
-        Close
-      </button>
-    </div>
-  </div>
-</div>
-
-<!-- ======================================================= -->
-<!-- 📄 CEO ANNUAL REPORT PREVIEW & PRINT MODAL              -->
-<!-- ======================================================= -->
-<div id="annual-report-preview-modal" class="modal-overlay hidden" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.7); z-index: 100000; display: none; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
-  <div style="background: white; border-radius: 12px; width: 92%; max-width: 1050px; height: 90vh; display: flex; flex-direction: column; box-shadow: 0 20px 40px rgba(0,0,0,0.3); overflow: hidden;">
-
-    <!-- Modal Toolbar (Hidden during actual print) -->
-    <div class="no-print" style="padding: 16px 24px; background: #f8fafc; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center;">
-      <div>
-        <h3 style="margin: 0; font-size: 18px; color: #1e293b;">Engineering Project Report Preview</h3>
-        <p style="margin: 3px 0 0 0; font-size: 12px; color: #64748b;">Review document layout and verify records before printing or downloading.</p>
-      </div>
-      <div style="display: flex; gap: 10px; align-items: center;">
-        <button type="button" onclick="printReportDocument()" style="padding: 8px 18px; background: #2563eb; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px;">
-          🖨️ Print / Save as PDF
-        </button>
-        <button type="button" onclick="downloadPreviewedCSV()" style="padding: 8px 18px; background: #16a34a; color: white; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px;">
-          📥 Download CSV
-        </button>
-        <button type="button" onclick="closeReportPreviewModal()" style="background: none; border: none; font-size: 24px; cursor: pointer; color: #64748b; margin-left: 8px; line-height: 1;">&times;</button>
-      </div>
-    </div>
-
-    <!-- Printable Paper Container -->
-    <div id="printable-report-area" style="flex: 1; padding: 40px; overflow-y: auto; background: white; font-family: 'Segoe UI', Arial, sans-serif; color: #1e293b;">
-
-      <!-- Official Header -->
-      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #0f172a; padding-bottom: 15px; margin-bottom: 20px;">
-        <img src="img/cpdologo.png" alt="Logo" style="height: 65px; width: auto;" onerror="this.style.display='none'">
-        <div style="text-align: center; flex: 1; margin: 0 20px;">
-          <h4 style="margin: 0; font-size: 12px; text-transform: uppercase; color: #64748b; letter-spacing: 1px;">Republic of the Philippines • City of San Jose Del Monte</h4>
-          <h2 style="margin: 4px 0; font-size: 20px; color: #0f172a; font-weight: 800;">ENGINEERING PROJECT & REPAIR INVENTORY REPORT</h2>
-          <p id="preview-report-subtitle" style="margin: 0; font-size: 13px; font-weight: 600; color: #2563eb;">Inventory Cycle: 2026</p>
-        </div>
-        <img src="img/logo.png" alt="RoadWise Logo" style="height: 65px; width: auto;" onerror="this.style.display='none'">
-      </div>
-
-      <!-- Report Metadata Banner -->
-      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px 16px; margin-bottom: 25px; font-size: 12px;">
-        <div><strong>Generated By:</strong> <span id="preview-generated-by">Loading...</span></div>
-        <div><strong>Scope:</strong> <span id="preview-scope">City Engineering Office</span></div>
-        <div><strong>Date Generated:</strong> <span id="preview-date">August 21, 2026</span></div>
-        <div><strong>Total Records:</strong> <span id="preview-total-count">0</span></div>
-      </div>
-
-      <!-- Data Table with Full Road Specifications -->
-      <table style="width: 100%; border-collapse: collapse; font-size: 11px; text-align: left;">
-        <thead>
-        <tr style="background: #0f172a; color: white;">
-          <th style="padding: 8px 6px; border: 1px solid #0f172a; width: 65px;">Proj ID</th>
-          <th style="padding: 8px 6px; border: 1px solid #0f172a;">Barangay</th>
-          <th style="padding: 8px 6px; border: 1px solid #0f172a;">Road Name & Type</th>
-          <th style="padding: 8px 6px; border: 1px solid #0f172a; width: 110px;">Road Dimensions</th>
-          <th style="padding: 8px 6px; border: 1px solid #0f172a; width: 100px;">Culverts / Bridges</th>
-          <th style="padding: 8px 6px; border: 1px solid #0f172a;">Damage Details</th>
-          <th style="padding: 8px 6px; border: 1px solid #0f172a; width: 70px; text-align: center;">Severity</th>
-          <th style="padding: 8px 6px; border: 1px solid #0f172a; width: 90px; text-align: center;">Status</th>
-          <th style="padding: 8px 6px; border: 1px solid #0f172a; width: 80px; text-align: right;">Date</th>
-        </tr>
-        </thead>
-        <tbody id="preview-report-table-body">
-        <!-- Dynamically Injected in Chronological Order -->
-        </tbody>
-      </table>
-
-      <!-- Signatures Footer -->
-      <!-- ✍️ ANNUAL REPORT MODAL SIGNATURE BLOCK -->
-      <div style="display: flex; justify-content: space-between; margin-top: 50px; padding-top: 20px; page-break-inside: avoid;">
-
-        <!-- Left Side: City Engineer -->
-        <div style="text-align: center; width: 240px;">
-          <div style="border-bottom: 1.5px solid #0f172a; height: 35px; margin-bottom: 6px;"></div>
-          <strong id="preview-sign-name" style="margin: 0; font-size: 12px; font-weight: 700; color: #0f172a; display: block; text-transform: uppercase;">Official Name</strong>
-          <span style="font-size: 10.5px; color: #777; font-style: italic; display: block; margin-top: 2px;">(Signature over Printed Name)</span>
-          <span id="preview-sign-role" style="margin: 2px 0 0 0; font-size: 11px; color: #64748b; font-weight: 600; display: block;">City Engineer</span>
+      <!-- ORIGINAL DAMAGE REPORT & BEFORE PHOTO -->
+      <div class="section-card" style="margin-bottom: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h3 class="section-title" style="margin: 0;">Original Damage & Evidence</h3>
+          <button type="button" class="btn-secondary btn-small" id="ceo-btn-locate-map">🗺️ Locate on Map</button>
         </div>
 
+        <div id="ceo-manage-map-container" class="hidden" style="margin-bottom: 15px; border-radius: 8px; overflow: hidden; height: 220px;">
+          <div id="ceo-manage-map" style="height: 100%; width: 100%;"></div>
+        </div>
+
+        <div class="report-detail-grid">
+          <div><strong>Barangay:</strong> <span id="ceo-modal-brgy">Loading...</span></div>
+          <div><strong>City Road Name:</strong> <span id="ceo-modal-road-name">Loading...</span></div>
+          <div><strong>Damage Type:</strong> <span id="ceo-modal-damage-type">Loading...</span></div>
+          <div><strong>Damage Area:</strong> <span id="ceo-modal-damage-area">0 sq.m</span></div>
+          <div><strong>Priority:</strong> <span id="ceo-modal-priority" class="status-badge">LOADING</span></div>
+          <div><strong>GPS Coordinates:</strong> <span id="ceo-modal-gps">Loading...</span></div>
+        </div>
+
+        <!-- Before Photo -->
+        <div style="margin-top: 15px; text-align: center;">
+          <strong style="display: block; font-size: 12px; color: var(--color-muted); margin-bottom: 6px;">BEFORE (Initial Damage Photo)</strong>
+          <img id="ceo-modal-image" src="" alt="Initial Damage" onclick="openFullscreenImage(this)" style="max-height: 180px; max-width: 100%; border-radius: 8px; border: 1px solid var(--color-border); cursor: zoom-in;">
+        </div>
+      </div>
+
+      <!-- DISPATCH & SCHEDULING CONTROLS -->
+      <div id="ceo-dispatch-section" class="section-card" style="margin-bottom: 20px;">
+        <h3 class="section-title">Dispatch Crew & Scheduling</h3>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;">
+          <span class="status-badge pending" id="ceo-modal-current-status">Loading...</span>
+          <span id="ceo-target-countdown-badge" class="hidden"></span>
+
+          <button type="button" class="btn-primary" id="ceo-btn-start-repair">
+            👷 Mark as "In Progress"
+          </button>
+          <button type="button" class="btn-warning" id="btn-pending-budget" onclick="markAsPendingBudget()" style="background: #f59e0b; color: white; border: none; padding: 8px 16px; border-radius: 6px; font-weight: bold; cursor: pointer;">
+            ⏳ Defer (Pending Budget)
+          </button>
+        </div>
+
+        <div id="ceo-target-date-container" class="hidden">
+          <label for="ceo-target-date-input" style="font-size: 12.5px; font-weight: 700;">📅 Target Completion Date:</label>
+          <input type="date" id="ceo-target-date-input" style="padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 4px;">
+          <span id="ceo-target-date-hint" style="font-size: 11.5px; color: #0284c7; margin-left: 8px;"></span>
+        </div>
+      </div>
+
+      <!-- COMPLETION & AFTER EVIDENCE CHECKLIST -->
+      <div id="ceo-completion-form" class="section-card" style="background-color: #f8fcf8; border-color: #bbf7d0;">
+        <h3 class="section-title" style="color: var(--color-success);">Project Resolution & Evidence Upload</h3>
+
+        <!-- Completion Checklist -->
+        <div style="background: white; padding: 12px; border-radius: 6px; border: 1px solid #bbf7d0; margin-bottom: 16px;">
+          <strong style="font-size: 12.5px; color: #166534; display: block; margin-bottom: 8px;">Engineering Completion Checklist:</strong>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; font-size: 12px;">
+            <label><input type="checkbox" checked disabled> Road surface repaired</label>
+            <label><input type="checkbox" checked disabled> Drainage cleared</label>
+            <label><input type="checkbox" checked disabled> Area cleaned & safe</label>
+          </div>
+        </div>
+
+        <strong style="display: block; margin-bottom: 8px; font-size: 13px; color: var(--color-text);">
+          Upload Completion Photo (AFTER) <span style="color: var(--color-danger);">*</span>
+        </strong>
+
+        <div id="ceo-dropzone-container" style="border: 2px dashed #cbd5e1; padding: 24px; text-align: center; border-radius: 8px; background: #ffffff; cursor: pointer; margin-bottom: 16px;">
+          <input type="file" id="ceo-repair-image-upload" accept="image/*" style="display: none;" />
+          <div id="ceo-dropzone-default">
+            <span style="font-size: 28px;">📸</span>
+            <p style="margin: 8px 0 0 0; font-size: 13px; color: var(--color-muted);">Click or drag completed repair photo here (Max 5MB)</p>
+          </div>
+          <div id="ceo-dropzone-preview" class="hidden">
+            <img id="ceo-preview-img" src="" alt="Repair Preview" style="max-height: 180px; border-radius: 6px;">
+            <button type="button" id="ceo-btn-remove-image" style="background: var(--color-danger); color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer;">✕</button>
+            <p id="ceo-repair-file-name" style="font-size: 12px; color: var(--color-success); margin-top: 6px; font-weight: bold;"></p>
+          </div>
+        </div>
+
+        <label for="ceo-repair-remarks" style="font-weight: bold; font-size: 13px; display: block; margin-bottom: 6px;">Engineering Notes & Remarks</label>
+        <textarea id="ceo-repair-remarks" rows="3" placeholder="Provide engineering repair notes..."></textarea>
+
+        <div class="modal-actions" style="margin-top: 16px;">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('manage-modal').classList.add('hidden')">Cancel</button>
+          <button type="button" class="btn-primary" id="ceo-btn-complete-repair" onclick="submitCEOCompletion()">🏁 Mark as Completed</button>
+        </div>
+      </div>
+
+      <!-- COMPLETED PROOF VIEW (When project completed) -->
+      <div id="ceo-completed-evidence-section" class="section-card hidden" style="background-color: #f0fdf4; border-color: #bbf7d0;">
+        <h3 class="section-title" style="color: var(--color-success);">Completed Evidence (Side-by-Side View)</h3>
+        <div style="text-align: center; margin-bottom: 12px;">
+          <strong style="display: block; font-size: 12px; color: #166534; margin-bottom: 6px;">AFTER (Completed Repair Photo)</strong>
+          <img id="ceo-modal-proof-image" src="" alt="Proof of Repair" onclick="openFullscreenImage(this)" style="max-height: 180px; max-width: 100%; border-radius: 8px; border: 1px solid #bbf7d0; cursor: zoom-in;">
+        </div>
+        <p id="ceo-modal-proof-remarks" style="background: white; padding: 10px; border-radius: 6px; border: 1px solid #bbf7d0; font-size: 13px;"></p>
       </div>
 
     </div>
   </div>
 </div>
 
-<!-- 🚀 WEBSOCKET LIBRARIES (LIVE REFRESH) -->
 <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
-
 <script src="js/config.js"></script>
-<script src="js/app.js?v=bruteforce"></script>
+<script src="js/app.js"></script>
 <script src="js/forecasting_ui.js"></script>
 </body>
 </html>
