@@ -47,6 +47,20 @@ public class SupabaseStorageService {
     }
 
     public String uploadImage(MultipartFile file) throws Exception {
+        return uploadImageInternal(file, "reports/", false);
+    }
+
+    /**
+     * Quarantine storage for images rejected by validation/inference or routed
+     * to human review. Rejected files never reach the published report path;
+     * quarantine objects should be removed once review is complete (retention
+     * policy) and the folder must not be publicly listed.
+     */
+    public String uploadImageQuarantined(MultipartFile file) throws Exception {
+        return uploadImageInternal(file, "quarantine/", true);
+    }
+
+    private String uploadImageInternal(MultipartFile file, String folder, boolean quarantined) throws Exception {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File cannot be empty.");
         }
@@ -79,7 +93,8 @@ public class SupabaseStorageService {
             throw e;
         } catch (Exception ignored) {}
 
-        String cleanFileName = UUID.randomUUID() + "_" + originalName.replaceAll("[^a-zA-Z0-9._-]", "_");
+        // Original filename never becomes a storage path; UUID-prefixed only.
+        String cleanFileName = folder + UUID.randomUUID() + ".img";
         String uploadEndpoint = String.format("%s/storage/v1/object/%s/%s", supabaseUrl, bucketName, cleanFileName);
 
         HttpRequest request = HttpRequest.newBuilder()
@@ -96,6 +111,11 @@ public class SupabaseStorageService {
             throw new RuntimeException("Supabase upload failed [" + response.statusCode() + "]: " + response.body());
         }
 
+        if (quarantined) {
+            // Non-public path: resolvable only with an authenticated service key
+            // (signed URLs / retention cleanup handled by the storage policy).
+            return String.format("%s/storage/v1/object/authenticated/%s/%s", supabaseUrl, bucketName, cleanFileName);
+        }
         return String.format("%s/storage/v1/object/public/%s/%s", supabaseUrl, bucketName, cleanFileName);
     }
 

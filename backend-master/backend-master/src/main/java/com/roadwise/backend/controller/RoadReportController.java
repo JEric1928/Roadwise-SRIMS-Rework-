@@ -96,6 +96,21 @@ public class RoadReportController {
                 .orElse(1L);
     }
 
+    /**
+     * Only road-confirmed, adequately confident predictions get their image
+     * published to the public bucket. Everything else (INVALID_INPUT,
+     * LOW_IMAGE_QUALITY, NON_ROAD_OR_UNCERTAIN, UNCERTAIN_PREDICTION,
+     * MODEL_ERROR, AI_UNAVAILABLE, AI_ERROR or any reviewRequired result)
+     * goes to quarantine pending human validation.
+     */
+    private boolean isPublishableAiResult(RoadInspectionService.InspectionResult aiResult) {
+        if (aiResult == null) return false;
+        if (aiResult.isReviewRequired()) return false;
+        if ("Unassessed".equalsIgnoreCase(aiResult.getSeverity())) return false;
+        String status = aiResult.getStatus() == null ? "" : aiResult.getStatus().toUpperCase();
+        return status.equals("CONFIRMED") || status.equals("ROAD_CONFIRMED");
+    }
+
     private Long getCeoId() {
         return userRepository.findFirstByRoleInIgnoreCase(List.of("engineer", "city engineer"))
                 .map(User::getId)
@@ -134,16 +149,27 @@ public class RoadReportController {
 
         try {
             if (imageFile != null && !imageFile.isEmpty()) {
-                String cloudImageUrl = supabaseStorageService.uploadImage(imageFile);
-                report.setDamageImage(cloudImageUrl);
-
+                // SAFETY POLICY: validate + infer BEFORE permanent storage.
+                // Invalid / low-quality / non-road / uncertain images are never
+                // published to the public bucket; they are quarantined for review.
+                RoadInspectionService.InspectionResult aiResult;
                 try {
-                    RoadInspectionService.InspectionResult aiResult = aiService.analyzeSeverity(imageFile);
-                    report.setSeverity(aiResult.getSeverity());
-                    report.setCvConfidenceScore(aiResult.getConfidence());
+                    aiResult = aiService.analyzeSeverity(imageFile);
                 } catch (Exception e) {
-                    report.setSeverity("Unassessed");
-                    report.setCvConfidenceScore(0.0);
+                    aiResult = RoadInspectionService.InspectionResult
+                            .unassessed("AI_UNAVAILABLE", "AI service call failed.");
+                }
+                report.setSeverity(aiResult.getSeverity());
+                report.setCvConfidenceScore(aiResult.getConfidence());
+
+                if (isPublishableAiResult(aiResult)) {
+                    String cloudImageUrl = supabaseStorageService.uploadImage(imageFile);
+                    report.setDamageImage(cloudImageUrl);
+                } else {
+                    String quarantineUrl = supabaseStorageService.uploadImageQuarantined(imageFile);
+                    report.setDamageImage(quarantineUrl);
+                    System.out.println("⚠️ [IMAGE QUARANTINED] AI status=" + aiResult.getStatus()
+                            + " reviewRequired=" + aiResult.isReviewRequired());
                 }
             } else {
                 report.setDamageImage("no_image.jpg");
@@ -492,17 +518,28 @@ public class RoadReportController {
 
         try {
             if (imageFile != null && !imageFile.isEmpty()) {
-                String cloudImageUrl = supabaseStorageService.uploadImage(imageFile);
-                existingReport.setDamageImage(cloudImageUrl);
-
+                // SAFETY POLICY: run validation/inference before deciding where
+                // the image is stored (published vs quarantined).
+                RoadInspectionService.InspectionResult aiResult;
                 try {
-                    RoadInspectionService.InspectionResult aiResult = aiService.analyzeSeverity(imageFile);
-                    existingReport.setSeverity(aiResult.getSeverity());
-                    existingReport.setCvConfidenceScore(aiResult.getConfidence());
-                } catch (Exception ignored) {}
+                    aiResult = aiService.analyzeSeverity(imageFile);
+                } catch (Exception e) {
+                    aiResult = RoadInspectionService.InspectionResult
+                            .unassessed("AI_UNAVAILABLE", "AI service call failed.");
+                }
+                existingReport.setSeverity(aiResult.getSeverity());
+                existingReport.setCvConfidenceScore(aiResult.getConfidence());
+
+                if (isPublishableAiResult(aiResult)) {
+                    existingReport.setDamageImage(supabaseStorageService.uploadImage(imageFile));
+                } else {
+                    existingReport.setDamageImage(supabaseStorageService.uploadImageQuarantined(imageFile));
+                    System.out.println("⚠️ [IMAGE QUARANTINED] AI status=" + aiResult.getStatus()
+                            + " reviewRequired=" + aiResult.isReviewRequired());
+                }
             }
         } catch (Exception e) {
-            throw new RuntimeException("Failed to upload updated image: " + e.getMessage());
+            throw new RuntimeException("Failed to process updated image: " + e.getMessage());
         }
 
         boolean isResubmitted = false;
