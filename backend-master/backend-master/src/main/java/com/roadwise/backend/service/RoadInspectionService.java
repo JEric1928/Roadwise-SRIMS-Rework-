@@ -18,6 +18,9 @@ public class RoadInspectionService {
     @Value("${ai.service.url:https://roadwise-ai-service.onrender.com}")
     private String aiServiceUrl;
 
+    @Value("${ai.service.api.key:roadwise-internal-secret-key}")
+    private String aiServiceApiKey;
+
     private final RestTemplate restTemplate;
 
     public RoadInspectionService() {
@@ -30,24 +33,37 @@ public class RoadInspectionService {
     public static class InspectionResult {
         private final String severity;
         private final double confidence;
+        private final String status;
+        private final boolean reviewRequired;
 
         public InspectionResult(String severity, double confidence) {
+            this(severity, confidence, "CONFIRMED", false);
+        }
+
+        public InspectionResult(String severity, double confidence, String status, boolean reviewRequired) {
             this.severity = severity;
             this.confidence = confidence;
+            this.status = status;
+            this.reviewRequired = reviewRequired;
         }
 
         public String getSeverity() { return severity; }
         public double getConfidence() { return confidence; }
+        public String getStatus() { return status; }
+        public boolean isReviewRequired() { return reviewRequired; }
     }
 
     public InspectionResult analyzeSeverity(MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            return new InspectionResult("Low", 100.0);
+            return new InspectionResult("Unassessed", 0.0, "INVALID_INPUT", true);
         }
 
         try {
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+            if (aiServiceApiKey != null && !aiServiceApiKey.trim().isEmpty()) {
+                headers.set("X-API-Key", aiServiceApiKey);
+            }
 
             // Wrap file bytes in ByteArrayResource and preserve original filename
             ByteArrayResource fileResource = new ByteArrayResource(file.getBytes()) {
@@ -70,11 +86,13 @@ public class RoadInspectionService {
 
             if (response.getStatusCode().is2xxSuccessful() && response.getBody() != null) {
                 Map<String, Object> respBody = response.getBody();
-                String severity = respBody.getOrDefault("severity", "Medium").toString();
-                double confidence = Double.parseDouble(respBody.getOrDefault("confidence", 75.0).toString());
+                String severity = respBody.getOrDefault("severity", "Unassessed").toString();
+                double confidence = Double.parseDouble(respBody.getOrDefault("confidence", 0.0).toString());
+                String status = respBody.getOrDefault("status", "CONFIRMED").toString();
+                boolean reviewRequired = Boolean.parseBoolean(respBody.getOrDefault("reviewRequired", false).toString());
 
-                System.out.println(">>> [AI SUCCESS] Predicted: " + severity + " (" + confidence + "%)");
-                return new InspectionResult(severity, confidence);
+                System.out.println(">>> [AI SUCCESS] Predicted: " + severity + " (" + confidence + "%, Status: " + status + ")");
+                return new InspectionResult(severity, confidence, status, reviewRequired);
             } else {
                 System.err.println(">>> [AI HTTP ERROR] Microservice returned status: " + response.getStatusCode());
             }
@@ -82,7 +100,7 @@ public class RoadInspectionService {
             System.err.println(">>> [AI CLIENT ERROR] Microservice communication failed: " + e.getMessage());
         }
 
-        // Safe fallback triage if the microservice is temporarily waking up from cold sleep
-        return new InspectionResult("Medium", 75.0);
+        // Safe failure state if the microservice is unavailable or errors out
+        return new InspectionResult("Unassessed", 0.0, "AI_UNAVAILABLE", true);
     }
 }
