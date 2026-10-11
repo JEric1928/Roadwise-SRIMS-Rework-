@@ -2,6 +2,10 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('path');
+const { pathToFileURL } = require('url');
+
+const utilsUrl = pathToFileURL(path.join(__dirname, 'js/core/utils.js')).href;
+const statusUrl = pathToFileURL(path.join(__dirname, 'js/core/status.js')).href;
 
 // Test 1: PWA Webmanifest Validation
 test('site.webmanifest has required PWA fields', () => {
@@ -72,23 +76,8 @@ test('calculateEstimatedDays calculates repair windows based on damage type and 
 });
 
 // Test 4: Official Name Formatter
-function formatOfficialName(firstName, middleName, lastName, prefix = '') {
-  const first = (firstName || '').trim();
-  const last = (lastName || '').trim();
-
-  let mi = '';
-  if (middleName && typeof middleName === 'string') {
-    const cleaned = middleName.trim().replace(/\./g, '');
-    if (cleaned.length > 0 && cleaned.toLowerCase() !== 'null' && cleaned.toLowerCase() !== 'undefined') {
-      mi = `${cleaned.charAt(0).toUpperCase()}.`;
-    }
-  }
-
-  const fullName = [first, mi, last].filter(Boolean).join(' ');
-  return prefix ? `${prefix.trim()} ${fullName}` : (fullName || 'Official');
-}
-
-test('formatOfficialName formats name with middle initial and prefix', () => {
+test('formatOfficialName formats name with middle initial and prefix', async () => {
+  const { formatOfficialName } = await import(utilsUrl);
   assert.strictEqual(formatOfficialName('Juan', 'Dela', 'Cruz'), 'Juan D. Cruz');
   assert.strictEqual(formatOfficialName('Maria', 'Clara', 'Santos', 'Engr.'), 'Engr. Maria C. Santos');
   assert.strictEqual(formatOfficialName('Pedro', null, 'Penduko'), 'Pedro Penduko');
@@ -117,20 +106,28 @@ test('validateReportStep1 enforces valid road name, length, and width', () => {
   assert.deepStrictEqual(validateReportStep1('Main St', '1.5', '6.0').valid, true);
 });
 
-// Test 6: escapeHtml sanitizes special characters
-function escapeHtml(str) {
-  if (str === null || str === undefined) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
-
-test('escapeHtml escapes potentially harmful HTML characters', () => {
+// Test 6: escapeHtml sanitizes special characters from core module
+test('escapeHtml escapes potentially harmful HTML characters', async () => {
+  const { escapeHtml } = await import(utilsUrl);
   assert.strictEqual(escapeHtml('<script>alert(1)</script>'), '&lt;script&gt;alert(1)&lt;/script&gt;');
   assert.strictEqual(escapeHtml('Road & Street "Name"'), 'Road &amp; Street &quot;Name&quot;');
   assert.strictEqual(escapeHtml("Barangay's Zone"), 'Barangay&#039;s Zone');
   assert.strictEqual(escapeHtml(null), '');
+});
+
+// Test 7: Centralized status normalization and badge mapping logic
+test('normalizeStatus maps diverse status variations to canonical REPORT_STATUS', async () => {
+  const { REPORT_STATUS, normalizeStatus } = await import(statusUrl);
+  assert.strictEqual(normalizeStatus('Completed Repair'), REPORT_STATUS.COMPLETED);
+  assert.strictEqual(normalizeStatus('in_progress'), REPORT_STATUS.IN_PROGRESS);
+  assert.strictEqual(normalizeStatus('dispatched to ceo'), REPORT_STATUS.DISPATCHED);
+  assert.strictEqual(normalizeStatus('Pending Validation'), REPORT_STATUS.VALIDATED);
+  assert.strictEqual(normalizeStatus('archived item'), REPORT_STATUS.ARCHIVED);
+});
+
+test('getStatusBadgeClass returns correct styling classes for report statuses', async () => {
+  const { REPORT_STATUS, getStatusBadgeClass } = await import(statusUrl);
+  assert.ok(getStatusBadgeClass(REPORT_STATUS.COMPLETED).includes('emerald'));
+  assert.ok(getStatusBadgeClass(REPORT_STATUS.IN_PROGRESS).includes('blue'));
+  assert.ok(getStatusBadgeClass(REPORT_STATUS.ARCHIVED).includes('slate'));
 });

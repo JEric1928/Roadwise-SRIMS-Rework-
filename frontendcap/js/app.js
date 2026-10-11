@@ -1,3 +1,9 @@
+import { escapeHtml, formatOfficialName, resetModalScroll } from './core/utils.js';
+import { REPORT_STATUS, normalizeStatus, getStatusBadgeClass } from './core/status.js';
+import { apiFetch, getAuthHeaders, getErrorMessage, API_BASE_URL } from './core/api.js';
+import { showToast } from './components/toast.js';
+import { openModal, closeModal } from './components/modal.js';
+
 
 // ==========================================
 // 🇵🇭 PHILIPPINE STANDARD TIME (PST / UTC+8) HELPER
@@ -421,27 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 });
 
-// A reusable function for all your API calls
-async function apiFetch(endpoint, options = {}) {
-  const url = `${API_BASE_URL}${endpoint}`;
 
-  // 🚀 THE FIX: Force the browser to ALWAYS fetch live data, never use cached/old data
-  options.cache = 'no-store';
-
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...API_HEADERS, // Automatically adds your ngrok fix from config.js
-      ...options.headers
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`API request failed with status: ${response.status}`);
-  }
-
-  return response.json();
-}
 // ==========================================
 // 🚀 SECURE IMAGE FETCHER (SUPABASE + LOCAL COMPATIBLE)
 // ==========================================
