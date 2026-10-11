@@ -562,6 +562,9 @@ window.openCEOManageModal = function(reportId) {
 
   apiFetch(`/api/reports/${reportId}`, { cache: 'no-store' })
     .then(report => {
+      // 🛡️ RACE CONDITION GUARD: Ignore superseded response if user opened another report
+      if (currentCEOProjectID !== reportId) return;
+
       currentCEOLat = report.latitude;
       currentCEOLng = report.longitude;
 
