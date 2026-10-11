@@ -12,6 +12,7 @@ import { refreshNotifications } from '../notifications/index.js';
 // 🚀 ENTERPRISE WEBSOCKETS (LIVE DASHBOARD)
 // ==========================================
 let stompClient = null;
+let refreshDebounceTimer = null;
 
 function connectLiveDashboards() {
   // Connect to the Java backend endpoint using your global API_BASE_URL (Great for Ngrok!)
@@ -27,27 +28,31 @@ function connectLiveDashboards() {
 
       // When we hear the pulse from the Java backend:
       if (message.body === "REFRESH_DASHBOARDS") {
-        // 🚀 THE FIX: Give the database 0.3 seconds to officially commit the save!
-        setTimeout(() => {
+        if (refreshDebounceTimer) clearTimeout(refreshDebounceTimer);
+
+        // Debounce updates and scope refreshes to the current active role
+        refreshDebounceTimer = setTimeout(() => {
           // 🔔 1. REFRESH THE NOTIFICATIONS
           refreshNotifications();
 
-          // 📊 2. REFRESH THE BARANGAY DASHBOARD
-          const brgyId = sessionStorage.getItem("barangayId");
-          if (brgyId && typeof window.loadBarangayReports === "function") {
-            window.loadBarangayReports(brgyId);
+          const role = (sessionStorage.getItem("userRole") || sessionStorage.getItem("role") || "").toUpperCase();
+
+          // 📊 2. SCOPED DASHBOARD REFRESH BY USER ROLE
+          if (role.includes("BARANGAY")) {
+            const brgyId = sessionStorage.getItem("barangayId");
+            if (brgyId && typeof window.loadBarangayReports === "function") {
+              window.loadBarangayReports(brgyId);
+            }
+          } else if (role.includes("CEO") || role.includes("ENGINEER")) {
+            if (typeof window.loadCEODashboardData === "function") window.loadCEODashboardData();
+          } else if (role.includes("ADMIN") || role.includes("CPDO")) {
+            if (typeof window.loadAdminDashboardData === "function") window.loadAdminDashboardData();
+            if (typeof window.loadAdminReports === "function") window.loadAdminReports();
+            if (typeof window.loadTrackingData === "function") window.loadTrackingData();
+            if (typeof window.loadUserManagementTable === "function") window.loadUserManagementTable();
+            if (typeof window.loadBarangayManagement === "function") window.loadBarangayManagement();
           }
-
-          // 📊 3. REFRESH THE ADMIN DASHBOARD
-          if (typeof window.loadAdminDashboardData === "function") window.loadAdminDashboardData();
-          if (typeof window.loadAdminReports === "function") window.loadAdminReports();
-          if (typeof window.loadTrackingData === "function") window.loadTrackingData();
-          if (typeof window.loadUserManagementTable === "function") window.loadUserManagementTable();
-          if (typeof window.loadBarangayManagement === "function") window.loadBarangayManagement();
-
-          // 📊 4. REFRESH THE CEO DASHBOARD
-          if (typeof window.loadCEODashboardData === "function") window.loadCEODashboardData();
-        }, 300); // <-- 300 milliseconds delay
+        }, 300);
       }
     });
 

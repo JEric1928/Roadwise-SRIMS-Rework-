@@ -29,7 +29,8 @@ function loadAdminReports() {
     return;
   }
 
-  const reportsTableBody = document.querySelector('.data-table tbody');
+  const reportsTableBody = document.getElementById('admin-inbox-table-body') ||
+    document.querySelector('#view-reports .data-table tbody');
   if (!reportsTableBody) return;
 
   apiFetch(`/api/reports`)
@@ -237,6 +238,9 @@ function reviewReport(reportId) {
   // 6. Fetch report data
   apiFetch(`/api/reports/${reportId}`)
     .then(report => {
+      // 🛡️ RACE CONDITION GUARD: Ignore superseded response if user opened another report
+      if (currentReviewReportId !== reportId) return;
+
       const formattedId = `#RPT-${String(report.id).padStart(4, '0')}`;
 
       currentReviewLat = parseFloat(report.latitude) || 0;

@@ -12,6 +12,15 @@ export let selectedLng = 121.0453;
 export let redIcon;
 
 let sjdmGeoJsonData = null;
+
+// Expose boundary GeoJSON on window for cross-module map caching (CEO & Barangay overlays)
+Object.defineProperty(window, 'sjdmGeoJsonData', {
+  get() { return sjdmGeoJsonData; },
+  set(val) { sjdmGeoJsonData = val; window.ceoGeoJsonData = val; },
+  configurable: true,
+  enumerable: true
+});
+window.ceoGeoJsonData = window.ceoGeoJsonData || null;
 let currentBoundaryLayer = null;
 let currentMaskLayer = null;
 let activePolygonCoords = null;
@@ -621,7 +630,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     fetch('sjdm_barangays.geojson')
       .then(res => res.json())
-      .then(data => { sjdmGeoJsonData = data; })
+      .then(data => {
+        sjdmGeoJsonData = data;
+        window.ceoGeoJsonData = data;
+      })
       .catch(err => console.error("Could not load sjdm_barangays.geojson:", err));
 
     const searchInput = document.getElementById('custom-map-search');
@@ -758,7 +770,11 @@ document.addEventListener('DOMContentLoaded', () => {
           }).addTo(map);
 
           map.on('click', function(e) {
-            if (activePolygonCoords && !isPointInsidePolygon(e.latlng.lat, e.latlng.lng, activePolygonCoords)) {
+            if (!activePolygonCoords) {
+              showToast("Barangay boundary is still loading or unavailable. Please wait...", "warning");
+              return;
+            }
+            if (!isPointInsidePolygon(e.latlng.lat, e.latlng.lng, activePolygonCoords)) {
               showToast(`You cannot drop a pin outside Barangay ${loggedInBarangay}!`, "error");
               return;
             }

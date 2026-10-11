@@ -117,6 +117,26 @@ test('admin dashboard module exposes exports and sets up window compatibility br
   }
 });
 
+// Test 23: Integration connections regression tests
+test('integration connections expose generatePriorityList and global GeoJSON cache', async () => {
+  const originals = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = {};
+  globalThis.document = { getElementById: () => null, addEventListener: () => {} };
+  try {
+    await import(mapEngineUrl);
+    assert.strictEqual('sjdmGeoJsonData' in globalThis.window, true, 'window.sjdmGeoJsonData property should exist');
+    assert.strictEqual('ceoGeoJsonData' in globalThis.window, true, 'window.ceoGeoJsonData property should exist');
+
+    await import(pathToFileURL(path.join(__dirname, 'js/features/priority-report/index.js')).href);
+    assert.strictEqual(typeof globalThis.window.generatePriorityList, 'function', 'generatePriorityList should be exposed on window');
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
+});
+
 // Test 18: Barangay dashboard feature window compatibility bridges
 test('barangay dashboard module exposes exports and sets up window compatibility bridges', async () => {
   const originals = { window: globalThis.window, document: globalThis.document };

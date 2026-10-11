@@ -15,9 +15,12 @@ document.addEventListener('DOMContentLoaded', () => {
 // 🗺️ VIEW DISPATCH REGISTRY: Maps views directly to their loaders
   const viewDispatchers = {
     'view-dashboard': () => {
-      const role = (sessionStorage.getItem('role') || '').toUpperCase();
+      const role = (sessionStorage.getItem('userRole') || sessionStorage.getItem('role') || '').toUpperCase();
       if (role.includes('CEO') || role.includes('ENGINEER')) {
         if (typeof window.loadCEODashboardData === 'function') window.loadCEODashboardData();
+      } else if (role.includes('BARANGAY')) {
+        const brgyId = sessionStorage.getItem("barangayId");
+        if (brgyId && typeof window.loadBarangayReports === 'function') window.loadBarangayReports(brgyId);
       } else {
         if (typeof window.loadAdminDashboardData === 'function') window.loadAdminDashboardData();
       }
@@ -28,8 +31,18 @@ document.addEventListener('DOMContentLoaded', () => {
     'view-repair': () => {
       if (typeof window.loadCEODashboardData === 'function') window.loadCEODashboardData();
     },
+    'view-barangay': () => {
+      if (typeof window.loadBarangayManagement === 'function') window.loadBarangayManagement();
+    },
     'view-barangay-management': () => {
       if (typeof window.loadBarangayManagement === 'function') window.loadBarangayManagement();
+    },
+    'view-archive': () => {
+      if (typeof window.initializeArchiveModule === 'function') {
+        window.initializeArchiveModule();
+      } else if (typeof window.loadArchiveDatabaseData === 'function') {
+        window.loadArchiveDatabaseData();
+      }
     },
     'view-user-management': () => {
       if (typeof window.loadBarangayDropdownForAdmin === 'function') window.loadBarangayDropdownForAdmin();

@@ -123,9 +123,16 @@ function openSingleNotification(notifId, element) {
   if (titleEl) titleEl.style.fontWeight = '600';
 
   // F. Send the read request to the backend silently
-  fetch(`${API_BASE_URL}/api/notifications/${notifId}/read`, { method: 'PUT' })
+  apiFetch(`/api/notifications/${notifId}/read`, { method: 'PUT' })
     .then(() => fetchUnreadBadgeCount())
-    .catch(err => console.error("Error marking as read:", err));
+    .catch(err => {
+      console.error("Error marking as read:", err);
+      // Rollback optimistic UI update on failure
+      element.setAttribute('data-read', 'false');
+      element.style.backgroundColor = '#eff6ff';
+      if (dot) dot.style.display = 'inline-block';
+      if (titleEl) titleEl.style.fontWeight = '700';
+    });
 }
 
 // 4. ACTION: Mark ALL notifications as read
@@ -135,10 +142,8 @@ function markAllAsRead() {
   const markAllBtn = document.getElementById('btn-mark-all-read');
   if (markAllBtn) markAllBtn.innerText = "Marking...";
 
-  fetch(`${API_BASE_URL}/api/notifications/me/read-all`, { method: 'PUT' })
-    .then(res => {
-      if (res.ok) loadNotifications();
-    })
+  apiFetch(`/api/notifications/me/read-all`, { method: 'PUT' })
+    .then(() => loadNotifications())
     .catch(err => console.error("Error marking all as read:", err))
     .finally(() => {
       if (markAllBtn) markAllBtn.innerText = "Mark all as read";
