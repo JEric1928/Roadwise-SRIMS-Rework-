@@ -116,3 +116,21 @@ test('validateReportStep1 enforces valid road name, length, and width', () => {
   assert.deepStrictEqual(validateReportStep1('Main St', '1.5', '0').valid, false);
   assert.deepStrictEqual(validateReportStep1('Main St', '1.5', '6.0').valid, true);
 });
+
+// Test 6: escapeHtml sanitizes special characters
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+test('escapeHtml escapes potentially harmful HTML characters', () => {
+  assert.strictEqual(escapeHtml('<script>alert(1)</script>'), '&lt;script&gt;alert(1)&lt;/script&gt;');
+  assert.strictEqual(escapeHtml('Road & Street "Name"'), 'Road &amp; Street &quot;Name&quot;');
+  assert.strictEqual(escapeHtml("Barangay's Zone"), 'Barangay&#039;s Zone');
+  assert.strictEqual(escapeHtml(null), '');
+});
