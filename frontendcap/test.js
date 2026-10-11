@@ -8,6 +8,15 @@ const utilsUrl = pathToFileURL(path.join(__dirname, 'js/core/utils.js')).href;
 const statusUrl = pathToFileURL(path.join(__dirname, 'js/core/status.js')).href;
 const apiUrl = pathToFileURL(path.join(__dirname, 'js/core/api.js')).href;
 const repairEstimatesUrl = pathToFileURL(path.join(__dirname, 'js/domain/repair-estimates.js')).href;
+const timeAgoUrl = pathToFileURL(path.join(__dirname, 'js/core/time-ago.js')).href;
+const formatPstUrl = pathToFileURL(path.join(__dirname, 'js/core/format-pst.js')).href;
+const auditTimeUrl = pathToFileURL(path.join(__dirname, 'js/core/audit-time.js')).href;
+const inventoryUrl = pathToFileURL(path.join(__dirname, 'js/domain/inventory.js')).href;
+const activityLogUrl = pathToFileURL(path.join(__dirname, 'js/domain/activity-log.js')).href;
+const imageLightboxUrl = pathToFileURL(path.join(__dirname, 'js/features/image-lightbox/index.js')).href;
+const liveClockUrl = pathToFileURL(path.join(__dirname, 'js/features/live-clock/index.js')).href;
+const notificationsUrl = pathToFileURL(path.join(__dirname, 'js/features/notifications/index.js')).href;
+const authUrl = pathToFileURL(path.join(__dirname, 'js/features/auth/index.js')).href;
 
 // Test 1: PWA Webmanifest Validation
 test('site.webmanifest has required PWA fields', () => {
@@ -161,4 +170,280 @@ test('getStatusBadgeClass returns correct styling classes for report statuses', 
   assert.ok(getStatusBadgeClass(REPORT_STATUS.COMPLETED).includes('emerald'));
   assert.ok(getStatusBadgeClass(REPORT_STATUS.IN_PROGRESS).includes('blue'));
   assert.ok(getStatusBadgeClass(REPORT_STATUS.ARCHIVED).includes('slate'));
+});
+
+// Test 8: Production relative-time formatter, extracted from notifications
+test('timeAgo returns relative labels with original thresholds', async () => {
+  const { timeAgo } = await import(timeAgoUrl);
+  const now = Date.now();
+  assert.strictEqual(timeAgo(new Date(now).toISOString()), 'Just now');
+  assert.strictEqual(timeAgo(new Date(now + 60000).toISOString()), 'Just now'); // clock-skew clamp
+  assert.strictEqual(timeAgo(new Date(now - 60000).toISOString()), '1 minute ago');
+  assert.strictEqual(timeAgo(new Date(now - 5 * 60000).toISOString()), '5 minutes ago');
+  assert.strictEqual(timeAgo(new Date(now - 3600000).toISOString()), '1 hour ago');
+  assert.strictEqual(timeAgo(new Date(now - 3 * 3600000).toISOString()), '3 hours ago');
+  assert.strictEqual(timeAgo(new Date(now - 25 * 3600000).toISOString()), 'Yesterday');
+  assert.strictEqual(timeAgo(new Date(now - 73 * 3600000).toISOString()), '3 days ago');
+});
+
+test('timeAgo treats timezone-less timestamps as UTC and supports array serialization', async () => {
+  const { timeAgo } = await import(timeAgoUrl);
+  assert.strictEqual(timeAgo('2024-01-15T10:30:00'), timeAgo('2024-01-15T18:30:00+08:00'));
+  assert.strictEqual(timeAgo('2024-01-15 10:30:00'), timeAgo('2024-01-15T10:30:00Z'));
+  assert.strictEqual(timeAgo([2024, 1, 15, 10, 30, 0]), timeAgo('2024-01-15T10:30:00Z'));
+});
+
+test('timeAgo returns an empty string for missing or invalid input', async () => {
+  const { timeAgo } = await import(timeAgoUrl);
+  assert.strictEqual(timeAgo(null), '');
+  assert.strictEqual(timeAgo(undefined), '');
+  assert.strictEqual(timeAgo(''), '');
+  assert.strictEqual(timeAgo('not-a-date'), '');
+});
+
+// Test 9: Production PST timestamp formatter
+test('formatPST formats timestamps in Asia/Manila without double-shifting', async () => {
+  const { formatPST } = await import(formatPstUrl);
+  assert.strictEqual(formatPST(null), 'N/A');
+  assert.strictEqual(formatPST(''), 'N/A');
+  assert.strictEqual(formatPST('not-a-date'), 'N/A');
+  assert.strictEqual(formatPST('2024-01-15 10:30:00'), 'Jan 15, 2024, 10:30 AM');
+  assert.strictEqual(formatPST('2024-01-15T10:30:00'), 'Jan 15, 2024, 10:30 AM');
+  assert.strictEqual(formatPST('2024-01-15T10:30:00+08:00'), 'Jan 15, 2024, 10:30 AM');
+  assert.strictEqual(formatPST('2024-01-15T02:30:00Z'), 'Jan 15, 2024, 10:30 AM');
+  assert.strictEqual(formatPST('2024-01-15T23:30:00Z'), 'Jan 16, 2024, 07:30 AM');
+  assert.strictEqual(formatPST('2024-01-15T05:30:00-05:00'), 'Jan 15, 2024, 06:30 PM');
+});
+
+test('formatPST omits time when includeTime is false and preserves date-only behavior', async () => {
+  const { formatPST } = await import(formatPstUrl);
+  assert.strictEqual(formatPST('2024-01-15T02:30:00Z', false), 'Jan 15, 2024');
+  // A date-only string gains +08:00 and parses as invalid, matching production.
+  assert.strictEqual(formatPST('2024-01-15', false), 'N/A');
+});
+
+// Test 10: Production audit-log timestamp helpers
+test('parseAuditTimestamp treats naive timestamps as UTC and supports arrays', async () => {
+  const { parseAuditTimestamp } = await import(auditTimeUrl);
+  assert.strictEqual(parseAuditTimestamp(null), null);
+  assert.strictEqual(parseAuditTimestamp(''), null);
+  assert.strictEqual(parseAuditTimestamp('2024-01-15 10:30:00').toISOString(), '2024-01-15T10:30:00.000Z');
+  assert.strictEqual(parseAuditTimestamp(' 2024-01-15T10:30:00 ').toISOString(), '2024-01-15T10:30:00.000Z');
+  assert.strictEqual(parseAuditTimestamp('2024-01-15T18:30:00+08:00').toISOString(), '2024-01-15T10:30:00.000Z');
+  assert.strictEqual(parseAuditTimestamp([2024, 1, 15, 10, 30, 0]).toISOString(), '2024-01-15T10:30:00.000Z');
+  assert.strictEqual(parseAuditTimestamp([2024, 1, 15]).toISOString(), '2024-01-15T00:00:00.000Z');
+  assert.ok(isNaN(parseAuditTimestamp('not-a-date').getTime()));
+});
+
+test('formatAuditTimestamp renders PHT date and time including seconds', async () => {
+  const { formatAuditTimestamp } = await import(auditTimeUrl);
+  assert.strictEqual(formatAuditTimestamp(null), 'N/A');
+  assert.strictEqual(formatAuditTimestamp('not-a-date'), 'N/A');
+  assert.strictEqual(formatAuditTimestamp('2024-01-15T02:30:00Z'), 'Jan 15, 2024 10:30:00 AM');
+  assert.strictEqual(formatAuditTimestamp('2024-01-15 02:30:00'), 'Jan 15, 2024 10:30:00 AM');
+  assert.strictEqual(formatAuditTimestamp([2024, 1, 15, 2, 30, 0]), 'Jan 15, 2024 10:30:00 AM');
+});
+
+// Test 11: Production inventory helpers
+test('parseToKilometers preserves thresholds and invalid input handling', async () => {
+  const { parseToKilometers } = await import(inventoryUrl);
+  assert.strictEqual(parseToKilometers(null), 0);
+  assert.strictEqual(parseToKilometers(''), 0);
+  assert.strictEqual(parseToKilometers('abc'), 0);
+  assert.strictEqual(parseToKilometers(15), 15);
+  assert.strictEqual(parseToKilometers('20'), 20);
+  assert.strictEqual(parseToKilometers(20.5), 0.0205);
+  assert.strictEqual(parseToKilometers('1500'), 1.5);
+});
+
+test('formatTerrainType normalizes terrain variants', async () => {
+  const { formatTerrainType } = await import(inventoryUrl);
+  assert.strictEqual(formatTerrainType(null), 'FLAT');
+  assert.strictEqual(formatTerrainType('   '), 'FLAT');
+  assert.strictEqual(formatTerrainType(' flat '), 'FLAT');
+  assert.strictEqual(formatTerrainType('Mountainous'), 'MOUNTAINOUS');
+  assert.strictEqual(formatTerrainType('rolling hills'), 'ROLLING');
+});
+
+test('getReportYear and getReportYearSettings preserve their fallback differences', async () => {
+  const { getReportYear, getReportYearSettings } = await import(inventoryUrl);
+  assert.strictEqual(getReportYear(null), '');
+  assert.strictEqual(getReportYear({ inventoryYear: 2024 }), '2024');
+  assert.strictEqual(getReportYear({ inventory_year: ' 2023 ' }), '2023');
+  assert.strictEqual(getReportYear({ inventoryYear: 'undefined', dateSubmitted: [2022, 5, 1] }), '2022');
+  assert.strictEqual(getReportYear({ dateSubmitted: '2021-06-15T12:00:00Z' }), '2021');
+  assert.strictEqual(getReportYearSettings({ inventoryYear: 'undefined' }), 'undefined');
+  assert.strictEqual(getReportYearSettings({ inventoryYear: 'null' }), '');
+});
+
+test('formatInventoryDate formats array and string dates with local display rules', async () => {
+  const { formatInventoryDate } = await import(inventoryUrl);
+  assert.strictEqual(formatInventoryDate(null), 'N/A');
+  assert.strictEqual(formatInventoryDate({}), 'N/A');
+  assert.strictEqual(formatInventoryDate({ dateSubmitted: 'invalid' }), 'invalid');
+
+  const expectedArray = new Date('2024-01-15').toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  assert.strictEqual(formatInventoryDate({ dateSubmitted: [2024, 1, 15, 10, 30] }), expectedArray);
+
+  const expectedString = new Date('2024-06-15T12:00:00Z').toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  assert.strictEqual(formatInventoryDate({ dateSubmitted: '2024-06-15T12:00:00Z' }), expectedString);
+});
+
+// Test 12: Production activity-log formatters
+test('formatTargetEntity pads IDs, renders emails, and escapes text', async () => {
+  const { formatTargetEntity } = await import(activityLogUrl);
+  assert.deepStrictEqual(formatTargetEntity(null), { html: '<span style="color: #94a3b8;">—</span>', text: '—' });
+  assert.deepStrictEqual(formatTargetEntity('N/A'), { html: '<span style="color: #94a3b8;">—</span>', text: '—' });
+  assert.deepStrictEqual(formatTargetEntity('-'), { html: '<span style="color: #94a3b8;">—</span>', text: '—' });
+  assert.strictEqual(formatTargetEntity('#USR-1').text, '#USR-0001');
+  assert.ok(formatTargetEntity('#USR-1').html.includes('#USR-0001'));
+  assert.strictEqual(formatTargetEntity('#prj-42').text, '#PRJ-0042');
+  assert.strictEqual(formatTargetEntity('user@example.com').text, 'user@example.com');
+  assert.ok(formatTargetEntity('user@example.com').html.includes('user@example.com'));
+  assert.strictEqual(formatTargetEntity('SYSTEM').text, 'SYSTEM');
+  assert.ok(formatTargetEntity('<b>x</b>').html.includes('&lt;b&gt;x&lt;/b&gt;'));
+  assert.ok(formatTargetEntity('#<script>').html.includes('&lt;script&gt;'));
+});
+
+test('getCategoryBadge maps activity categories to HTML badges', async () => {
+  const { getCategoryBadge } = await import(activityLogUrl);
+  assert.ok(getCategoryBadge('PROJECT').includes('PROJECT'));
+  assert.ok(getCategoryBadge('qa').includes('QA & REVIEW'));
+  assert.ok(getCategoryBadge('export').includes('EXPORT'));
+  assert.ok(getCategoryBadge('auth').includes('SECURITY'));
+  assert.ok(getCategoryBadge('user').includes('USER MGMT'));
+  assert.ok(getCategoryBadge(null).includes('SYSTEM'));
+  assert.ok(getCategoryBadge('unknown').includes('SYSTEM'));
+});
+
+test('getStatusBadge maps audit statuses to HTML badges', async () => {
+  const { getStatusBadge } = await import(activityLogUrl);
+  assert.ok(getStatusBadge('FAILED').includes('FAILED'));
+  assert.ok(getStatusBadge('warning').includes('WARNING'));
+  assert.ok(getStatusBadge('SUCCESS').includes('SUCCESS'));
+  assert.ok(getStatusBadge(null).includes('SUCCESS'));
+});
+
+// Test 13: Image lightbox feature (headless: bridge + listener lifecycle only)
+test('image lightbox installs the bridge once and skips placeholder sources', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  let escapeAdds = 0;
+  let escapeRemovals = 0;
+  globalThis.window = {};
+  globalThis.document = {
+    addEventListener: () => { escapeAdds++; },
+    removeEventListener: () => { escapeRemovals++; }
+  };
+  try {
+    const { initImageLightbox, destroyImageLightbox, openFullscreenImage } = await import(imageLightboxUrl);
+    initImageLightbox();
+    initImageLightbox(); // idempotent: must not bind twice
+    assert.strictEqual(escapeAdds, 1, 'Escape listener should be bound once');
+    assert.strictEqual(globalThis.window.openFullscreenImage, openFullscreenImage);
+    assert.strictEqual(typeof globalThis.window.closeFullscreenImage, 'function');
+    assert.strictEqual(globalThis.window.openFullscreenImage('https://placehold.co/500x300'), undefined);
+    assert.strictEqual(globalThis.window.openFullscreenImage(''), undefined);
+    destroyImageLightbox();
+    assert.strictEqual(escapeRemovals, 1, 'cleanup should unbind the Escape listener');
+    destroyImageLightbox(); // second cleanup is a no-op
+    assert.strictEqual(escapeRemovals, 1);
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window;
+    else globalThis.window = originalWindow;
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+  }
+});
+
+// Test 14: Live clock feature (headless: interval lifecycle only)
+test('live clock starts once and cleans up its interval', async () => {
+  const originalDocument = globalThis.document;
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+  let intervalCalls = 0;
+  let clearCalls = 0;
+  let rendered = '';
+  globalThis.document = {
+    getElementById: (id) => (id === 'live-clock-display'
+      ? { set innerHTML(value) { rendered = value; }, get innerHTML() { return rendered; } }
+      : null)
+  };
+  globalThis.setInterval = () => { intervalCalls++; return 'timer-1'; };
+  globalThis.clearInterval = () => { clearCalls++; };
+  try {
+    const { initLiveClock, destroyLiveClock } = await import(liveClockUrl);
+    initLiveClock();
+    initLiveClock(); // idempotent: must not start a second interval
+    assert.strictEqual(intervalCalls, 1, 'interval should be created once');
+    assert.ok(rendered.includes('|'), 'clock markup should render immediately');
+    destroyLiveClock();
+    assert.strictEqual(clearCalls, 1, 'cleanup should clear the interval');
+    destroyLiveClock(); // second cleanup is a no-op
+    assert.strictEqual(clearCalls, 1);
+  } finally {
+    if (originalDocument === undefined) delete globalThis.document;
+    else globalThis.document = originalDocument;
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+  }
+});
+
+// Test 15: Notifications feature entry points (headless smoke test)
+test('notifications module exposes its entry points without browser globals', async () => {
+  const originalSessionStorage = globalThis.sessionStorage;
+  globalThis.sessionStorage = { getItem: () => null };
+  try {
+    const mod = await import(notificationsUrl);
+    assert.deepStrictEqual(Object.keys(mod).sort(), ['initNotifications', 'refreshNotifications']);
+    assert.strictEqual(typeof mod.initNotifications, 'function');
+    assert.strictEqual(typeof mod.refreshNotifications, 'function');
+  } finally {
+    if (originalSessionStorage === undefined) delete globalThis.sessionStorage;
+    else globalThis.sessionStorage = originalSessionStorage;
+  }
+});
+
+// Test 16: Auth feature (headless: exports, password rule, idempotent init)
+test('auth module exposes entry points, password rule, and idempotent init', async () => {
+  const originals = {
+    sessionStorage: globalThis.sessionStorage,
+    localStorage: globalThis.localStorage,
+    window: globalThis.window,
+    document: globalThis.document
+  };
+  let enterAdds = 0;
+  const fakeInput = { addEventListener: () => { enterAdds++; } };
+  globalThis.sessionStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  globalThis.window = { location: { hostname: 'localhost' } };
+  globalThis.document = {
+    getElementById: (id) => (id === 'username' || id === 'password' ? fakeInput : null)
+  };
+  try {
+    const mod = await import(authUrl);
+    for (const name of [
+      'handleLogin', 'handleVerifyMfa', 'showForgotPassword',
+      'handleForgotPasswordRequest', 'handlePasswordReset', 'backToLogin', 'initAuth'
+    ]) {
+      assert.strictEqual(typeof mod[name], 'function', `${name} should be exported`);
+    }
+    assert.ok(mod.STRICT_PASSWORD_REGEX.test('Passw0rd!'));
+    assert.ok(mod.STRICT_PASSWORD_REGEX.test('Abcdef1#'));
+    assert.ok(!mod.STRICT_PASSWORD_REGEX.test('password1!'), 'needs an uppercase letter');
+    assert.ok(!mod.STRICT_PASSWORD_REGEX.test('Password!!'), 'needs a digit');
+    assert.ok(!mod.STRICT_PASSWORD_REGEX.test('Password12'), 'needs a special character');
+    assert.ok(!mod.STRICT_PASSWORD_REGEX.test('Pw1!'), 'needs eight characters');
+
+    mod.initAuth();
+    mod.initAuth(); // idempotent: must not bind again
+    assert.strictEqual(enterAdds, 2, 'username and password bound once each');
+    assert.strictEqual(globalThis.window.handleLogin, mod.handleLogin);
+    assert.strictEqual(globalThis.window.backToLogin, mod.backToLogin);
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
 });
