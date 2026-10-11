@@ -6,16 +6,10 @@
  * file self-registers the security check, initial load, edit-image preview and
  * the tab observer, matching the original registration.
  *
- * Compatibility bridges (names unchanged):
- * - window.filterBarangayReports, window.toggleViewTimeline and
- *   window.toggleEditTimeline are required by inline template handlers and the
- *   search-filters feature.
- * - window.loadReportTimeline (installed below) is required by the CEO/admin/
- *   tracking engines still in app.js and by the reports/archive feature.
- *
- * Deliberate non-bridge: window.loadBarangayReports stays undefined so the
- * live-updates WebSocket guard keeps skipping it exactly as it did before this
- * extraction. app.js imports loadBarangayReports for its post-submit refresh.
+ * Compatibility bridges installed on window:
+ * window.filterBarangayReports, window.toggleViewTimeline, window.toggleEditTimeline,
+ * window.openViewModal, window.openEditModal, window.closeBdModals,
+ * window.submitEditedReport, window.loadBarangayReports, window.loadReportTimeline.
  *
  * Shared map state: renderViewModalMap reads the leaflet icon through
  * window.redIcon, which app.js publishes once it builds the icon inside the
@@ -933,20 +927,12 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  const brgyDashboardSection = document.getElementById('view-dashboard');
-  if (brgyDashboardSection && storedBarangayId) {
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.attributeName === 'class' && !brgyDashboardSection.classList.contains('hidden')) {
-          loadBarangayReports(storedBarangayId);
-        }
-      });
-    });
-    observer.observe(brgyDashboardSection, { attributes: true });
-  }
 });
 
-// Compatibility bridge: the CEO/admin/tracking engines in app.js and the
-// reports/archive feature call the timeline renderer across this module
-// boundary. (Moved from the app.js feature-startup block.)
+// Compatibility bridges
+window.openViewModal = openViewModal;
+window.openEditModal = openEditModal;
+window.closeBdModals = closeBdModals;
+window.submitEditedReport = submitEditedReport;
+window.loadBarangayReports = loadBarangayReports;
 window.loadReportTimeline = loadReportTimeline;
