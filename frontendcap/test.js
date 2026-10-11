@@ -6,6 +6,8 @@ const { pathToFileURL } = require('url');
 
 const utilsUrl = pathToFileURL(path.join(__dirname, 'js/core/utils.js')).href;
 const statusUrl = pathToFileURL(path.join(__dirname, 'js/core/status.js')).href;
+const apiUrl = pathToFileURL(path.join(__dirname, 'js/core/api.js')).href;
+const repairEstimatesUrl = pathToFileURL(path.join(__dirname, 'js/domain/repair-estimates.js')).href;
 
 // Test 1: PWA Webmanifest Validation
 test('site.webmanifest has required PWA fields', () => {
@@ -21,58 +23,87 @@ test('site.webmanifest has required PWA fields', () => {
   assert.strictEqual(manifest.theme_color, '#0f172a');
 });
 
-// Test 2: Error Message Formatter Logic (from config.js)
-function getErrorMessage(status, fallbackText = "Request failed") {
-  switch (status) {
-    case 401: return "Authentication required. Please log in again.";
-    case 403: return "Access denied. You do not have permission for this action.";
-    case 404: return "Requested resource or endpoint was not found.";
-    case 409: return "A conflict occurred with the existing data.";
-    case 500: return "Server error. Please try again or contact system support.";
-    default: return fallbackText;
-  }
-}
-
-test('getErrorMessage returns appropriate status messages', () => {
+// Test 2: Production API error formatter
+test('getErrorMessage returns appropriate status messages', async () => {
+  const { getErrorMessage } = await import(apiUrl);
   assert.strictEqual(getErrorMessage(401), 'Authentication required. Please log in again.');
   assert.strictEqual(getErrorMessage(403), 'Access denied. You do not have permission for this action.');
   assert.strictEqual(getErrorMessage(404), 'Requested resource or endpoint was not found.');
+  assert.strictEqual(getErrorMessage(409), 'A conflict occurred with the existing data.');
   assert.strictEqual(getErrorMessage(500), 'Server error. Please try again or contact system support.');
   assert.strictEqual(getErrorMessage(418, 'Custom error'), 'Custom error');
+  assert.strictEqual(getErrorMessage(418), 'Request failed');
+  assert.strictEqual(getErrorMessage('401', 'String status'), 'String status');
 });
 
-// Test 3: Estimated Repair Days Calculation Logic
-function calculateEstimatedDays(damageType, severity, areaSqM) {
-  const dt = String(damageType || '').toLowerCase();
-  const sev = String(severity || '').toLowerCase();
-  const area = parseFloat(areaSqM) || 0;
+// Test 3: Production repair estimator, without app startup.
 
-  if (dt.includes('pothole') || dt.includes('lubak')) {
-    return { days: 3, label: 'Pothole Patching (3 days)' };
-  }
-  if (dt.includes('surface') || dt.includes('cracking') || dt.includes('alligator') || dt.includes('longitudinal')) {
-    return { days: 7, label: 'Surface Crack Sealing & Resurfacing (7 days)' };
-  }
-  if (dt.includes('edge') || dt.includes('deformation') || dt.includes('rutting')) {
-    return { days: 10, label: 'Edge Rebuilding & Base Compaction (10 days)' };
-  }
-  if (dt.includes('washout') || dt.includes('sinkhole') || dt.includes('slab') || dt.includes('concrete')) {
-    return { days: 21, label: 'Major Structural Restoration & Curing (21 days)' };
-  }
+const damageGroups = [
+  [['pothole', 'lubak'], 3, 'Pothole Patching (3 days)'],
+  [['surface', 'cracking', 'alligator', 'longitudinal'], 7, 'Surface Crack Sealing & Resurfacing (7 days)'],
+  [['edge', 'deformation', 'rutting'], 10, 'Edge Rebuilding & Base Compaction (10 days)'],
+  [['washout', 'sinkhole', 'slab', 'concrete'], 21, 'Major Structural Restoration & Curing (21 days)']
+];
 
-  if (sev === 'high') return { days: 14, label: 'AI High Severity Scope (14 days)' };
-  if (sev === 'medium') return { days: 7, label: 'AI Medium Severity Scope (7 days)' };
-  if (sev === 'low') return { days: 3, label: 'AI Low Severity Scope (3 days)' };
-
-  if (area > 20) return { days: 14, label: 'Large Damage Area > 20 sq.m (14 days)' };
-  return { days: 5, label: 'Standard Maintenance Window (5 days)' };
+for (const [aliases, days, label] of damageGroups) {
+  test(`calculateEstimatedDays recognizes ${aliases.join(', ')} before severity and area`, async () => {
+    const { calculateEstimatedDays } = await import(repairEstimatesUrl);
+    for (const alias of aliases) {
+      assert.deepStrictEqual(calculateEstimatedDays(`Road ${alias.toUpperCase()} damage`, 'high', 100), { days, label });
+    }
+  });
 }
 
-test('calculateEstimatedDays calculates repair windows based on damage type and severity', () => {
-  assert.strictEqual(calculateEstimatedDays('Pothole', 'medium', 2).days, 3);
-  assert.strictEqual(calculateEstimatedDays('Surface Cracking', 'low', 5).days, 7);
-  assert.strictEqual(calculateEstimatedDays('Washout/Sinkhole', 'high', 10).days, 21);
-  assert.strictEqual(calculateEstimatedDays('Other', 'high', 1).days, 14);
+test('calculateEstimatedDays preserves first-match damage precedence', async () => {
+  const { calculateEstimatedDays } = await import(repairEstimatesUrl);
+  assert.deepStrictEqual(calculateEstimatedDays('Concrete pothole surface', 'high', 100), {
+    days: 3, label: 'Pothole Patching (3 days)'
+  });
+  assert.deepStrictEqual(calculateEstimatedDays('Edge surface cracking', 'high', 100), {
+    days: 7, label: 'Surface Crack Sealing & Resurfacing (7 days)'
+  });
+  assert.deepStrictEqual(calculateEstimatedDays('Concrete edge deformation', 'high', 100), {
+    days: 10, label: 'Edge Rebuilding & Base Compaction (10 days)'
+  });
+});
+
+test('calculateEstimatedDays uses severity before measurement fallback', async () => {
+  const { calculateEstimatedDays } = await import(repairEstimatesUrl);
+  for (const [severity, days, label] of [
+    ['HIGH', 14, 'AI High Severity Scope (14 days)'],
+    ['Medium', 7, 'AI Medium Severity Scope (7 days)'],
+    ['low', 3, 'AI Low Severity Scope (3 days)']
+  ]) {
+    for (const area of [0, 100]) {
+      assert.deepStrictEqual(calculateEstimatedDays('Other', severity, area), { days, label });
+    }
+  }
+});
+
+test('calculateEstimatedDays preserves strict measurement thresholds and labels', async () => {
+  const { calculateEstimatedDays } = await import(repairEstimatesUrl);
+  for (const [area, days, label] of [
+    [5, 5, 'Standard Maintenance Window (5 days)'],
+    [5.01, 7, 'Moderate Damage Area (7 days)'],
+    [20, 7, 'Moderate Damage Area (7 days)'],
+    [20.01, 14, 'Large Damage Area > 20 sq.m (14 days)'],
+    ['6.5 sq.m', 7, 'Moderate Damage Area (7 days)'],
+    ['21', 14, 'Large Damage Area > 20 sq.m (14 days)']
+  ]) {
+    assert.deepStrictEqual(calculateEstimatedDays('Other', 'unknown', area), { days, label });
+  }
+});
+
+test('calculateEstimatedDays preserves missing inputs and untrimmed severity', async () => {
+  const { calculateEstimatedDays } = await import(repairEstimatesUrl);
+  const standard = { days: 5, label: 'Standard Maintenance Window (5 days)' };
+  assert.deepStrictEqual(calculateEstimatedDays(), standard);
+  for (const area of [null, '', 'invalid', 0, -10]) {
+    assert.deepStrictEqual(calculateEstimatedDays(null, null, area), standard);
+  }
+  assert.deepStrictEqual(calculateEstimatedDays(123, ' high ', 6), {
+    days: 7, label: 'Moderate Damage Area (7 days)'
+  });
 });
 
 // Test 4: Official Name Formatter
