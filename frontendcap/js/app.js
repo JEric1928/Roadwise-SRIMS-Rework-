@@ -1,3 +1,9 @@
+import { escapeHtml, formatOfficialName, resetModalScroll } from './core/utils.js';
+import { REPORT_STATUS, normalizeStatus, getStatusBadgeClass } from './core/status.js';
+import { apiFetch, getAuthHeaders, getErrorMessage, API_BASE_URL } from './core/api.js';
+import { showToast } from './components/toast.js';
+import { openModal, closeModal } from './components/modal.js';
+
 
 // ==========================================
 // 🇵🇭 PHILIPPINE STANDARD TIME (PST / UTC+8) HELPER
@@ -421,27 +427,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 });
 
-// A reusable function for all your API calls
-async function apiFetch(endpoint, options = {}) {
-  const url = `${API_BASE_URL}${endpoint}`;
 
-  // 🚀 THE FIX: Force the browser to ALWAYS fetch live data, never use cached/old data
-  options.cache = 'no-store';
-
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...API_HEADERS, // Automatically adds your ngrok fix from config.js
-      ...options.headers
-    }
-  });
-
-  if (!response.ok) {
-    throw new Error(`API request failed with status: ${response.status}`);
-  }
-
-  return response.json();
-}
 // ==========================================
 // 🚀 SECURE IMAGE FETCHER (SUPABASE + LOCAL COMPATIBLE)
 // ==========================================
@@ -1801,21 +1787,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const viewReportPriority = document.getElementById('view-report-priority');
 
 // Helper: Official Name Formatter with Middle Initial
-  function formatOfficialName(firstName, middleName, lastName, prefix = '') {
-    const first = (firstName || '').trim();
-    const last = (lastName || '').trim();
-
-    let mi = '';
-    if (middleName && typeof middleName === 'string') {
-      const cleaned = middleName.trim().replace(/\./g, '');
-      if (cleaned.length > 0 && cleaned.toLowerCase() !== 'null' && cleaned.toLowerCase() !== 'undefined') {
-        mi = `${cleaned.charAt(0).toUpperCase()}. `;
-      }
-    }
-
-    const fullName = `${first} ${mi}${last}`.trim();
-    return prefix ? `${prefix.trim()} ${fullName}` : (fullName || 'Designated Official');
-  }
 
 // 1. Print Official Document (Suppresses browser header & footer stamps)
   if (btnPrintDocument) {
@@ -3132,11 +3103,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!mapContainer) return;
 
       if (!currentCEOLat || !currentCEOLng || (currentCEOLat === 0 && currentCEOLng === 0)) {
-        if (typeof showToast === 'function') {
-          showToast("No GPS coordinates were provided for this report.", "warning");
-        } else {
-          alert("No GPS coordinates were provided for this report.");
-        }
+        showToast("No GPS coordinates were provided for this report.", "warning");
         return;
       }
 
@@ -4364,39 +4331,6 @@ function loadAdminReports() {
 // ==========================================
 // 🚀 BULLETPROOF MODAL SCROLL RESET HELPER
 // ==========================================
-function resetModalScroll(modalElementOrId) {
-  const modal = typeof modalElementOrId === 'string'
-    ? document.getElementById(modalElementOrId)
-    : modalElementOrId;
-
-  if (!modal) return;
-
-  const performReset = () => {
-    // 1. Reset Modal Overlay / Wrapper
-    modal.scrollTop = 0;
-    if (typeof modal.scrollTo === 'function') {
-      modal.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    }
-
-    // 2. Reset All Inner Scroll Containers & Timelines
-    const scrollableTargets = modal.querySelectorAll(
-      '.modal-body, .bd-modal-body, .modal-content, .bd-modal-box, .report-timeline, [id$="-timeline-container"]'
-    );
-
-    scrollableTargets.forEach(el => {
-      el.scrollTop = 0;
-      if (typeof el.scrollTo === 'function') {
-        el.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-      }
-    });
-  };
-
-  // Immediate execution + animation frame + async render delays
-  performReset();
-  requestAnimationFrame(performReset);
-  setTimeout(performReset, 50);
-  setTimeout(performReset, 200);
-}
 
 // ==========================================
 // ADMIN MODAL MAP VARIABLES
@@ -4591,11 +4525,7 @@ function toggleAdminReviewMap() {
   if (!mapContainer) return;
 
   if (!currentReviewLat || !currentReviewLng || (currentReviewLat === 0 && currentReviewLng === 0)) {
-    if (typeof showToast === 'function') {
-      showToast("No GPS coordinates were provided for this report.", "warning");
-    } else {
-      alert("No GPS coordinates were provided for this report.");
-    }
+    showToast("No GPS coordinates were provided for this report.", "warning");
     return;
   }
 
@@ -4753,11 +4683,7 @@ if (btnConfirmReject) {
     const remarks = remarksInput ? remarksInput.value.trim() : '';
 
     if (!remarks) {
-      if (typeof showToast === 'function') {
-        showToast("Please provide a reason for rejecting this report.", "error");
-      } else {
-        alert("Please provide a reason for rejecting this report.");
-      }
+      showToast("Please provide a reason for rejecting this report.", "error");
       return;
     }
 
@@ -5448,16 +5374,7 @@ function loadReportTimeline(reportId, targetContainerId) {
     });
 }
 
-function escapeHtml(str) {
-  if (!str) return '';
-  return str.replace(/[&<>'"]/g, tag => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    "'": '&#39;',
-    '"': '&quot;'
-  }[tag] || tag));
-}
+
 
 // ==========================================
 // 📜 VIEW MODAL TIMELINE ACCORDION TOGGLE
@@ -5476,39 +5393,6 @@ window.toggleViewTimeline = function() {
 // ==========================================
 // 🚀 BULLETPROOF MODAL SCROLL RESET HELPER
 // ==========================================
-function resetModalScroll(modalElementOrId) {
-  const modal = typeof modalElementOrId === 'string'
-    ? document.getElementById(modalElementOrId)
-    : modalElementOrId;
-
-  if (!modal) return;
-
-  const performReset = () => {
-    // 1. Reset Modal Overlay / Wrapper
-    modal.scrollTop = 0;
-    if (typeof modal.scrollTo === 'function') {
-      modal.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    }
-
-    // 2. Reset All Possible Inner Scroll Containers & Timelines
-    const scrollableTargets = modal.querySelectorAll(
-      '.modal-body, .bd-modal-body, .modal-content, .bd-modal-box, .report-timeline, [id$="-timeline-container"]'
-    );
-
-    scrollableTargets.forEach(el => {
-      el.scrollTop = 0;
-      if (typeof el.scrollTo === 'function') {
-        el.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-      }
-    });
-  };
-
-  // Immediate reset, next animation frame, and delayed resets for async image/timeline insertion
-  performReset();
-  requestAnimationFrame(performReset);
-  setTimeout(performReset, 50);
-  setTimeout(performReset, 200);
-}
 
 // 📜 VIEW MODAL ACCORDION TOGGLE
 window.toggleViewTimeline = function() {
@@ -5794,20 +5678,12 @@ function submitEditedReport() {
 // ==========================================
 // 7. UTILITIES & OBSERVERS
 // ==========================================
-function escapeHtml(text) {
-  if (!text) return "";
-  return String(text)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+
 
 document.addEventListener("DOMContentLoaded", () => {
   const storedBarangayId = sessionStorage.getItem("barangayId");
   if (!storedBarangayId && document.getElementById('barangay-report-list')) {
-    alert("Security Check: You must log in first!");
+    if (typeof showToast === "function") showToast("Security Check: You must log in first!", "error");
     window.location.href = "login.html";
     return;
   }
@@ -6243,7 +6119,7 @@ function loadAdminDashboardData() {
       ).size;
 
       // Exact total road count directly from the database query
-      const totalCityRoads = allRoads.length > 0 ? allRoads.length : 378;
+      const totalCityRoads = allRoads.length > 0 ? allRoads.length : 0;
 
       let quotaPercentage = totalCityRoads > 0 ? Math.round((uniqueInspectedRoads / totalCityRoads) * 100) : 0;
       if (quotaPercentage > 100) quotaPercentage = 100;
@@ -6871,21 +6747,6 @@ function loadTrackingData() {
 // ==========================================
 
 // Helper: Official Name Formatter (First M.I. Last)
-function formatOfficialName(firstName, middleName, lastName, prefix = '') {
-  const first = (firstName || '').trim();
-  const last = (lastName || '').trim();
-
-  let mi = '';
-  if (middleName && typeof middleName === 'string') {
-    const cleaned = middleName.trim().replace(/\./g, '');
-    if (cleaned.length > 0 && cleaned.toLowerCase() !== 'null' && cleaned.toLowerCase() !== 'undefined') {
-      mi = `${cleaned.charAt(0).toUpperCase()}. `;
-    }
-  }
-
-  const fullName = `${first} ${mi}${last}`.trim();
-  return prefix ? `${prefix.trim()} ${fullName}` : (fullName || 'Designated Official');
-}
 
 // Helper: Safely get active records, with auto-fetch fallback
 async function getActiveTrackingRecords() {
@@ -7336,7 +7197,7 @@ window.executeBatchArchive = function() {
       if (window.showToast) {
         window.showToast(successMsg, "success"); // <-- Now correctly formatted!
       } else {
-        alert(successMsg);
+        showToast(successMsg);
       }
 
       // Hide the action bar and uncheck "Select All"
@@ -7353,7 +7214,7 @@ window.executeBatchArchive = function() {
       if (window.showToast) {
         window.showToast("Failed to archive projects.", "error"); // <-- Fixed parameter order here too!
       } else {
-        alert("Failed to archive projects.");
+        showToast("Failed to archive projects.");
       }
       pendingArchiveIds = []; // clear it out on error too
     });
@@ -7361,39 +7222,6 @@ window.executeBatchArchive = function() {
 // ==========================================
 // 🚀 BULLETPROOF MODAL SCROLL RESET HELPER
 // ==========================================
-function resetModalScroll(modalElementOrId) {
-  const modal = typeof modalElementOrId === 'string'
-    ? document.getElementById(modalElementOrId)
-    : modalElementOrId;
-
-  if (!modal) return;
-
-  const performReset = () => {
-    // 1. Reset Modal Overlay / Wrapper
-    modal.scrollTop = 0;
-    if (typeof modal.scrollTo === 'function') {
-      modal.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    }
-
-    // 2. Reset All Inner Scroll Containers & Timelines
-    const scrollableTargets = modal.querySelectorAll(
-      '.modal-body, .bd-modal-body, .modal-content, .bd-modal-box, .report-timeline, [id$="-timeline-container"]'
-    );
-
-    scrollableTargets.forEach(el => {
-      el.scrollTop = 0;
-      if (typeof el.scrollTo === 'function') {
-        el.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-      }
-    });
-  };
-
-  // Immediate execution + animation frame + async render delays
-  performReset();
-  requestAnimationFrame(performReset);
-  setTimeout(performReset, 50);
-  setTimeout(performReset, 200);
-}
 
 // ==========================================
 // 7 & 8. TRACKING MODAL ENGINE (RELIABLE GLOBAL HANDLERS)
@@ -8086,11 +7914,7 @@ window.toggleTrackMap = function() {
   if (!mapContainer) return;
 
   if (!currentTrackLat || !currentTrackLng || (currentTrackLat === 0 && currentTrackLng === 0)) {
-    if (typeof showToast === 'function') {
-      showToast("No GPS coordinates were provided for this report.", "error");
-    } else {
-      alert("No GPS coordinates were provided for this report.");
-    }
+    showToast("No GPS coordinates were provided for this report.", "error");
     return;
   }
 
@@ -9957,11 +9781,7 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch (error) {
         console.error("Error creating user:", error);
         const errorMsg = error.message || "Failed to create account. Please check inputs.";
-        if (typeof showToast === 'function') {
-          showToast(errorMsg, "error");
-        } else {
-          alert(errorMsg);
-        }
+        showToast(errorMsg, "error");
       } finally {
         if (submitBtn) {
           submitBtn.innerHTML = "💾 Provision Account";
@@ -11025,21 +10845,6 @@ let currentPreviewReports = [];
 // ==========================================
 // 🖋️ 0. OFFICIAL NAME FORMATTER (FIRST M.I. LAST)
 // ==========================================
-function formatOfficialName(firstName, middleName, lastName, prefix = '') {
-  const first = (firstName || '').trim();
-  const last = (lastName || '').trim();
-
-  let mi = '';
-  if (middleName && typeof middleName === 'string') {
-    const cleaned = middleName.trim().replace(/\./g, '');
-    if (cleaned.length > 0 && cleaned.toLowerCase() !== 'null' && cleaned.toLowerCase() !== 'undefined') {
-      mi = `${cleaned.charAt(0).toUpperCase()}.`;
-    }
-  }
-
-  const fullName = [first, mi, last].filter(Boolean).join(' ');
-  return prefix ? `${prefix.trim()} ${fullName}` : (fullName || 'Barangay Official');
-}
 
 // ==========================================
 // 🕒 1. ROBUST DATE FORMATTER HELPER
@@ -11318,21 +11123,6 @@ let adminCachedInventory = [];
 window.activeInventoryYear = new Date().getFullYear(); // Fallback to current calendar year
 
 // Helper: Official Name Formatter with Middle Initial
-function formatOfficialName(firstName, middleName, lastName, prefix = '') {
-  const first = (firstName || '').trim();
-  const last = (lastName || '').trim();
-
-  let mi = '';
-  if (middleName && typeof middleName === 'string') {
-    const cleaned = middleName.trim().replace(/\./g, '');
-    if (cleaned.length > 0 && cleaned.toLowerCase() !== 'null' && cleaned.toLowerCase() !== 'undefined') {
-      mi = `${cleaned.charAt(0).toUpperCase()}.`;
-    }
-  }
-
-  const fullName = [first, mi, last].filter(Boolean).join(' ');
-  return prefix ? `${prefix.trim()} ${fullName}` : (fullName || 'CPDO Administrator');
-}
 
 // Helper: Convert length values to kilometers
 function parseToKilometers(val) {
@@ -11657,7 +11447,7 @@ window.loadActiveCycleOverview = function() {
   ])
     .then(([cityRoads, reports]) => {
       // A. Get Actual Total Road Count from DB (Fallback to 378 if API fails)
-      const totalRoads = (Array.isArray(cityRoads) && cityRoads.length > 0) ? cityRoads.length : 378;
+      const totalRoads = (Array.isArray(cityRoads) && cityRoads.length > 0) ? cityRoads.length : 0;
 
       // =========================================================================
       // 🚀 B. FILTER FOR ACTIVE CYCLE ONLY (EXCLUDE ARCHIVED & PAST YEARS)
@@ -11872,11 +11662,7 @@ window.executeAnnualRollover = function() {
     method: "POST"
   })
     .then(res => {
-      if (typeof showToast === "function") {
-        showToast(`Rollover Complete: Archived ${res.archivedCount || 0} reports. Notifications sent.`, "success");
-      } else {
-        alert(`Rollover Complete: Archived ${res.archivedCount || 0} reports.`);
-      }
+      showToast(`Rollover Complete: Archived ${res.archivedCount || 0} reports. Notifications sent.`, "success");
 
       window.closeRolloverModal();
       if (typeof window.loadActiveCycleOverview === "function") {
@@ -11885,11 +11671,7 @@ window.executeAnnualRollover = function() {
     })
     .catch(err => {
       console.error("Rollover failed:", err);
-      if (typeof showToast === "function") {
-        showToast("Error processing annual rollover.", "error");
-      } else {
-        alert("Error processing annual rollover.");
-      }
+      showToast("Error processing annual rollover.", "error");
     })
     .finally(() => {
       if (btn) {
@@ -11941,11 +11723,7 @@ window.toggleMaintenanceMode = function(isLocked) {
     })
     .catch(err => {
       console.error(err);
-      if (typeof showToast === "function") {
-        showToast("Failed to toggle maintenance mode.", "error");
-      } else {
-        alert("Failed to toggle maintenance mode.");
-      }
+      showToast("Failed to toggle maintenance mode.", "error");
       // Revert the toggle visually if it failed
       document.getElementById("toggle-maintenance").checked = !isLocked;
     });
@@ -12669,11 +12447,7 @@ window.toggleArchiveMap = function() {
   if (!container) return;
 
   if (!currentArchiveLat || !currentArchiveLng || (currentArchiveLat === 0 && currentArchiveLng === 0)) {
-    if (typeof showToast === 'function') {
-      showToast("No GPS coordinates recorded for this project.", "warning");
-    } else {
-      alert("No GPS coordinates recorded for this project.");
-    }
+    showToast("No GPS coordinates recorded for this project.", "warning");
     return;
   }
 
@@ -12754,21 +12528,6 @@ window.toggleExportMenu = function(menuId) {
 };
 
 // Helper: Official Name Formatter (First M.I. Last)
-function formatOfficialName(firstName, middleName, lastName, prefix = '') {
-  const first = (firstName || '').trim();
-  const last = (lastName || '').trim();
-
-  let mi = '';
-  if (middleName && typeof middleName === 'string') {
-    const cleaned = middleName.trim().replace(/\./g, '');
-    if (cleaned.length > 0 && cleaned.toLowerCase() !== 'null' && cleaned.toLowerCase() !== 'undefined') {
-      mi = `${cleaned.charAt(0).toUpperCase()}. `;
-    }
-  }
-
-  const fullName = `${first} ${mi}${last}`.trim();
-  return prefix ? `${prefix.trim()} ${fullName}` : (fullName || 'CPDO Administrator');
-}
 
 // =======================================================
 // 👁️ 9. OPEN MASTERLIST PREVIEW MODALS (WITH MIDDLE INITIAL)
@@ -13129,21 +12888,6 @@ let rawActivityLogs = [];
 let filteredActivityLogs = [];
 
 // Helper: Official Name Formatter (First M.I. Last)
-function formatOfficialName(firstName, middleName, lastName, prefix = '') {
-  const first = (firstName || '').trim();
-  const last = (lastName || '').trim();
-
-  let mi = '';
-  if (middleName && typeof middleName === 'string') {
-    const cleaned = middleName.trim().replace(/\./g, '');
-    if (cleaned.length > 0 && cleaned.toLowerCase() !== 'null' && cleaned.toLowerCase() !== 'undefined') {
-      mi = `${cleaned.charAt(0).toUpperCase()}. `;
-    }
-  }
-
-  const fullName = `${first} ${mi}${last}`.trim();
-  return prefix ? `${prefix.trim()} ${fullName}` : (fullName || 'CPDO Administrator');
-}
 
 // Helper: Target Entity Formatter (Handles #USR-0001 padding & Email display)
 function formatTargetEntity(entity) {
@@ -13635,12 +13379,3 @@ function getStatusBadge(status) {
   return `<span style="background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; padding: 2px 6px; border-radius: 4px; font-weight: 800; font-size: 10px;">SUCCESS</span>`;
 }
 
-function escapeHtml(text) {
-  if (!text) return "";
-  return String(text)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
