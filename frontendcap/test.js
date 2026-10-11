@@ -17,6 +17,12 @@ const imageLightboxUrl = pathToFileURL(path.join(__dirname, 'js/features/image-l
 const liveClockUrl = pathToFileURL(path.join(__dirname, 'js/features/live-clock/index.js')).href;
 const notificationsUrl = pathToFileURL(path.join(__dirname, 'js/features/notifications/index.js')).href;
 const authUrl = pathToFileURL(path.join(__dirname, 'js/features/auth/index.js')).href;
+const adminDashboardUrl = pathToFileURL(path.join(__dirname, 'js/features/admin-dashboard/index.js')).href;
+const barangayDashboardUrl = pathToFileURL(path.join(__dirname, 'js/features/barangay-dashboard/index.js')).href;
+const reportSubmissionUrl = pathToFileURL(path.join(__dirname, 'js/features/report-submission/index.js')).href;
+const priorityDispatchUrl = pathToFileURL(path.join(__dirname, 'js/features/priority-dispatch/index.js')).href;
+const repairTrackingUrl = pathToFileURL(path.join(__dirname, 'js/features/repair-tracking/index.js')).href;
+const mapEngineUrl = pathToFileURL(path.join(__dirname, 'js/features/map-engine/index.js')).href;
 
 // Test 1: PWA Webmanifest Validation
 test('site.webmanifest has required PWA fields', () => {
@@ -85,6 +91,132 @@ test('calculateEstimatedDays uses severity before measurement fallback', async (
   ]) {
     for (const area of [0, 100]) {
       assert.deepStrictEqual(calculateEstimatedDays('Other', severity, area), { days, label });
+    }
+  }
+});
+
+// Test 17: Admin dashboard feature window compatibility bridges
+test('admin dashboard module exposes exports and sets up window compatibility bridges', async () => {
+  const originals = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = {};
+  globalThis.document = { getElementById: () => null, querySelector: () => null, addEventListener: () => {} };
+  try {
+    const mod = await import(adminDashboardUrl);
+    assert.strictEqual(typeof mod.loadAdminDashboardData, 'function');
+    assert.strictEqual(typeof globalThis.window.reviewReport, 'function');
+    assert.strictEqual(typeof globalThis.window.loadAdminReports, 'function');
+    assert.strictEqual(typeof globalThis.window.loadAdminDashboardData, 'function');
+    assert.strictEqual(typeof globalThis.window.jumpToReportsAndReview, 'function');
+    assert.strictEqual(typeof globalThis.window.jumpToAllReports, 'function');
+    assert.strictEqual(typeof globalThis.window.jumpToArchiveTab, 'function');
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
+});
+
+// Test 18: Barangay dashboard feature window compatibility bridges
+test('barangay dashboard module exposes exports and sets up window compatibility bridges', async () => {
+  const originals = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = {};
+  globalThis.document = { getElementById: () => null, addEventListener: () => {} };
+  try {
+    const mod = await import(barangayDashboardUrl);
+    assert.strictEqual(typeof mod.loadBarangayReports, 'function');
+    assert.strictEqual(typeof globalThis.window.openViewModal, 'function');
+    assert.strictEqual(typeof globalThis.window.openEditModal, 'function');
+    assert.strictEqual(typeof globalThis.window.closeBdModals, 'function');
+    assert.strictEqual(typeof globalThis.window.submitEditedReport, 'function');
+    assert.strictEqual(typeof globalThis.window.loadBarangayReports, 'function');
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
+});
+
+// Test 19: Report submission feature window compatibility bridges
+test('report submission module exposes exports and sets up window compatibility bridges', async () => {
+  const originals = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = {};
+  globalThis.document = { getElementById: () => null, addEventListener: () => {} };
+  try {
+    const mod = await import(reportSubmissionUrl);
+    assert.strictEqual(typeof mod.submitRoadReport, 'function');
+    assert.strictEqual(typeof mod.executeFinalSubmission, 'function');
+    assert.strictEqual(typeof globalThis.window.toggleOtherDamageType, 'function');
+    assert.strictEqual(typeof globalThis.window.submitRoadReport, 'function');
+    assert.strictEqual(typeof globalThis.window.closeConfirmModal, 'function');
+    assert.strictEqual(typeof globalThis.window.executeFinalSubmission, 'function');
+    assert.strictEqual(typeof globalThis.window.resetAddReportForm, 'function');
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
+});
+
+// Test 20: Priority dispatch feature window compatibility bridges
+test('priority dispatch module exposes exports and sets up window compatibility bridges', async () => {
+  const originals = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = {};
+  globalThis.document = { getElementById: () => null, addEventListener: () => {} };
+  try {
+    const mod = await import(priorityDispatchUrl);
+    assert.strictEqual(typeof mod.executePriorityDispatch, 'function');
+    assert.strictEqual(typeof globalThis.window.executePriorityDispatch, 'function');
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
+});
+
+// Test 21: Repair tracking feature window compatibility bridges
+test('repair tracking module exposes exports and sets up window compatibility bridges', async () => {
+  const originals = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = {};
+  globalThis.document = { getElementById: () => null, addEventListener: () => {} };
+  try {
+    const mod = await import(repairTrackingUrl);
+    assert.strictEqual(typeof mod.loadTrackingData, 'function');
+    assert.strictEqual(typeof globalThis.window.loadTrackingData, 'function');
+    assert.strictEqual(typeof globalThis.window.openTrackingModal, 'function');
+    assert.strictEqual(typeof globalThis.window.toggleTrackTimeline, 'function');
+    assert.strictEqual(typeof globalThis.window.handleApproveProject, 'function');
+    assert.strictEqual(typeof globalThis.window.submitReworkFeedback, 'function');
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
+});
+
+// Test 22: Map engine feature exports and ray casting
+test('map engine module exposes point-in-polygon logic and global map loaders', async () => {
+  const originals = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = {};
+  globalThis.document = { getElementById: () => null, addEventListener: () => {} };
+  try {
+    const mod = await import(mapEngineUrl);
+    assert.strictEqual(typeof mod.isPointInsidePolygon, 'function');
+    assert.strictEqual(typeof mod.loadAdminGlobalMap, 'function');
+    assert.strictEqual(typeof mod.loadCEOGlobalMap, 'function');
+    assert.strictEqual(typeof mod.loadBarangayLocalMap, 'function');
+
+    const squarePoly = [[0, 0], [0, 10], [10, 10], [10, 0]];
+    assert.strictEqual(mod.isPointInsidePolygon(5, 5, squarePoly), true);
+    assert.strictEqual(mod.isPointInsidePolygon(15, 15, squarePoly), false);
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
     }
   }
 });

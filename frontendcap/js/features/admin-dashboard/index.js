@@ -11,15 +11,10 @@
  * suppressed exactly as before (show/cancel reject handlers still run their
  * idempotent DOM toggles).
  *
- * Bridges kept (names unchanged): window.toggleAdminReviewTimeline,
- * window.closeReviewModal, window.toggleAdminReviewMap.
- *
- * Deliberate non-bridges: window.reviewReport, window.jumpToReportsAndReview,
- * window.jumpToAllReports, window.jumpToArchiveTab, window.loadAdminReports
- * and window.loadAdminDashboardData stay undefined so the live-updates and
- * navigation guards and the inline HTML handlers keep behaving exactly as
- * before. app.js imports loadAdminDashboardData for its remaining in-app
- * refresh calls.
+ * Compatibility bridges installed on window:
+ * window.reviewReport, window.loadAdminReports, window.loadAdminDashboardData,
+ * window.jumpToReportsAndReview, window.jumpToAllReports, window.jumpToArchiveTab,
+ * window.toggleAdminReviewTimeline, window.closeReviewModal, window.toggleAdminReviewMap.
  */
 import { apiFetch, API_BASE_URL } from '../../core/api.js';
 import { resetModalScroll } from '../../core/utils.js';
@@ -640,19 +635,6 @@ document.addEventListener("DOMContentLoaded", () => {
   if (document.getElementById('fresh-admin-queue-body') || document.getElementById('adminComplianceChart')) {
     loadAdminDashboardData();
   }
-
-  // Live Navigation Observer
-  const dashboardSection = document.getElementById('view-admin-dashboard');
-  if (dashboardSection) {
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        if (mutation.attributeName === 'class' && !dashboardSection.classList.contains('hidden')) {
-          loadAdminDashboardData();
-        }
-      });
-    });
-    observer.observe(dashboardSection, { attributes: true });
-  }
 });
 
 export function loadAdminDashboardData() {
@@ -1060,172 +1042,10 @@ function jumpToArchiveTab() {
   }
 }
 
-// ==========================================
-// LEGACY ADMIN ACCEPT & VALIDATE LISTENERS
-// ==========================================
-// Lifted verbatim from the main app.js DOMContentLoaded listener. The
-// module-scope .onclick controllers above run first and call
-// stopImmediatePropagation, so these listeners remain neutralized exactly as
-// they were before the extraction.
-document.addEventListener("DOMContentLoaded", () => {
-// ==========================================
-// ADMIN DASHBOARD: ACCEPT & VALIDATE LOGIC
-// ==========================================
-  const btnAcceptValidate = document.getElementById('btn-accept-validate');
-  const acceptConfirmModal = document.getElementById('accept-confirm-modal');
-  const btnCancelAccept = document.getElementById('btn-cancel-accept');
-  const btnConfirmAccept = document.getElementById('btn-confirm-accept');
-
-  if (btnAcceptValidate) {
-    btnAcceptValidate.addEventListener('click', () => {
-      acceptConfirmModal.classList.remove('hidden');
-
-      // Force the modal to the very front using JavaScript
-      acceptConfirmModal.style.position = 'fixed';
-      acceptConfirmModal.style.top = '0';
-      acceptConfirmModal.style.left = '0';
-      acceptConfirmModal.style.width = '100vw';
-      acceptConfirmModal.style.height = '100vh';
-      acceptConfirmModal.style.zIndex = '2147483647';
-      acceptConfirmModal.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-    });
-  }
-
-  if (btnCancelAccept) {
-    btnCancelAccept.addEventListener('click', () => {
-      acceptConfirmModal.classList.add('hidden');
-    });
-  }
-
-// 3. SEND TO DATABASE: VALIDATE REPORT
-  if (btnConfirmAccept) {
-    btnConfirmAccept.addEventListener('click', (e) => {
-      e.preventDefault();
-
-      if (!currentReviewReportId) {
-        console.error("No report ID found to update!");
-        return;
-      }
-
-      btnConfirmAccept.innerHTML = "⏳ Validating...";
-      btnConfirmAccept.disabled = true;
-
-      const currentUserId = sessionStorage.getItem("userId");
-
-      fetch(`${API_BASE_URL}/api/reports/${currentReviewReportId}/status`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: "Validated",
-          userId: currentUserId
-        })
-      })
-        .then(async response => {
-          if (!response.ok) throw new Error("Failed to validate report");
-          return response.text();
-        })
-        .then(text => {
-          if (text === "ARCHIVED_NO_IMAGE") {
-            showToast("Report has no damage evidence. Inspected and auto-archived!", "info");
-          } else {
-            showToast("Report successfully validated and added to priority pool!", "success");
-          }
-
-          acceptConfirmModal.classList.add('hidden');
-          document.getElementById('review-modal').classList.add('hidden');
-
-          if (typeof loadAdminReports === 'function') loadAdminReports();
-          if (typeof loadAdminDashboardData === 'function') loadAdminDashboardData();
-        })
-        .catch(error => {
-          console.error("Error validating report:", error);
-          showToast("Failed to connect. Press F12 for details.", "error");
-        })
-        .finally(() => {
-          btnConfirmAccept.innerHTML = "Yes, Validate It";
-          btnConfirmAccept.disabled = false;
-        });
-    });
-  }
-
-  // ==========================================
-// 3. REJECTION FEEDBACK LOGIC
-// ==========================================
-  const btnShowReject = document.getElementById('btn-show-reject');
-  const feedbackForm = document.getElementById('reject-feedback-form');
-  const adminRemarksInput = document.getElementById('admin-remarks-input');
-  const btnConfirmReject = document.getElementById('btn-confirm-reject');
-  const btnCancelReject = document.getElementById('btn-cancel-reject');
-
-  const primaryActions = document.getElementById('primary-actions');
-
-// A. Show the text box when "Reject" is clicked
-  if (btnShowReject && primaryActions && feedbackForm) {
-    btnShowReject.addEventListener('click', () => {
-      primaryActions.classList.add('hidden'); // Hide the Accept/Reject buttons
-      feedbackForm.classList.remove('hidden'); // Show the Text Area
-      adminRemarksInput.value = ''; // Clear out any old text
-    });
-  }
-
-// B. Hide the text box if they click "Cancel"
-  if (btnCancelReject && primaryActions && feedbackForm) {
-    btnCancelReject.addEventListener('click', () => {
-      feedbackForm.classList.add('hidden');
-      primaryActions.classList.remove('hidden');
-    });
-  }
-
-// C. SEND TO DATABASE: Submit the Rejection
-  if (btnConfirmReject) {
-    btnConfirmReject.addEventListener('click', (e) => {
-      e.preventDefault(); // STOP THE BROWSER FROM REFRESHING!
-
-      const remarks = adminRemarksInput.value.trim();
-      if (!remarks) {
-        showToast("Please type a reason so the Barangay Official knows what to fix!", "error");
-        return;
-      }
-
-      if (!currentReviewReportId) return;
-
-      btnConfirmReject.innerHTML = "⏳ Rejecting...";
-      btnConfirmReject.disabled = true;
-
-      // Send the Status AND the Remarks to Spring Boot
-      fetch(`${API_BASE_URL}/api/reports/${currentReviewReportId}/status`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          status: "Rejected",
-          adminRemarks: remarks
-        })
-      })
-        .then(response => {
-          if (!response.ok) throw new Error("Failed to reject report");
-          return response.text();
-        })
-        .then(text => {
-          // ✅ Trigger the Toast instead of the alert!
-          showToast("Report Rejected! Feedback saved.");
-
-          // Hide modals and reset the UI
-          document.getElementById('review-modal').classList.add('hidden');
-          feedbackForm.classList.add('hidden');
-          primaryActions.classList.remove('hidden');
-
-          // Reload the table
-          if (typeof loadAdminReports === 'function') loadAdminReports();
-        })
-        .catch(error => {
-          console.error("Error rejecting report:", error);
-          // ❌ Trigger the Error Toast!
-          showToast("Failed to connect. Check F12 console.", true);
-        })
-        .finally(() => {
-          btnConfirmReject.innerHTML = "Submit Rejection";
-          btnConfirmReject.disabled = false;
-        });
-    });
-  }
-});
+// Window Compatibility Bridges
+window.reviewReport = reviewReport;
+window.loadAdminReports = loadAdminReports;
+window.loadAdminDashboardData = loadAdminDashboardData;
+window.jumpToReportsAndReview = jumpToReportsAndReview;
+window.jumpToAllReports = jumpToAllReports;
+window.jumpToArchiveTab = jumpToArchiveTab;
