@@ -29,10 +29,11 @@ public class SecurityConfig {
             .cors(cors -> {})
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/**", "/api/health/**", "/health", "/ws/**", "/actuator/health").permitAll()
+                .requestMatchers("/api/auth/**", "/api/health/**", "/health", "/ws/**", "/ws-live/**", "/actuator/health").permitAll()
                 // CityRoadController is mapped at /api/roads — the old /api/city-roads
                 // rule never matched any endpoint. Keep both for backwards compatibility.
-                .requestMatchers(HttpMethod.GET, "/api/barangays/**", "/api/roads/**", "/api/city-roads/**").permitAll()
+                // Public access allowed for basic barangay list endpoint only; /{id} and dashboard-summary require auth.
+                .requestMatchers(HttpMethod.GET, "/api/barangays", "/api/roads/**", "/api/city-roads/**").permitAll()
                 .requestMatchers("/api/settings/toggle-maintenance").hasAnyRole("ADMIN", "CPDO Admin")
                 .anyRequest().authenticated()
             )

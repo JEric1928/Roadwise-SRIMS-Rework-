@@ -9,6 +9,7 @@ import com.roadwise.backend.repository.CityRoadRepository;
 import com.roadwise.backend.repository.RoadReportRepository;
 import com.roadwise.backend.repository.UserRepository;
 import com.roadwise.backend.service.*;
+import com.roadwise.backend.util.ExifGpsExtractor;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -161,6 +162,36 @@ public class RoadReportController {
                 .orElseThrow(() -> new IllegalArgumentException("Unknown city road: " + ref));
     }
 
+    /**
+     * Resolves the coordinates to store for a submission. An explicitly
+     * provided fix always wins; otherwise the attached photo's EXIF GPS tags
+     * are used when present. EXIF recovery is best-effort and never blocks
+     * the submission.
+     *
+     * @return a two-element array {@code [latitude, longitude]}.
+     */
+    private Double[] resolveReportCoordinates(Double latitude, Double longitude,
+                                              MultipartFile imageFile) {
+        Double lat = latitude;
+        Double lng = longitude;
+        boolean missing = lat == null || lng == null || (lat == 0.0 && lng == 0.0);
+        if (missing && imageFile != null && !imageFile.isEmpty()) {
+            try {
+                Optional<ExifGpsExtractor.GpsCoordinates> exif =
+                        ExifGpsExtractor.extract(imageFile.getBytes());
+                if (exif.isPresent()) {
+                    lat = exif.get().latitude();
+                    lng = exif.get().longitude();
+                    System.out.println("📍 [EXIF GEOTAG] Coordinates recovered from photo metadata: "
+                            + lat + ", " + lng);
+                }
+            } catch (Exception ignored) {
+                // A missing or unreadable fix must never block the submission.
+            }
+        }
+        return new Double[]{lat, lng};
+    }
+
     // ==========================================
     // 1. CREATE REPORT
     // ==========================================
@@ -181,8 +212,13 @@ public class RoadReportController {
         report.setWidth(createDto.getWidth());
         report.setLengthOfCulverts(createDto.getLengthOfCulverts());
         report.setNumberOfBridges(createDto.getNumberOfBridges());
-        report.setLatitude(createDto.getLatitude());
-        report.setLongitude(createDto.getLongitude());
+        // Automatic geotagging: fall back to the photo's EXIF GPS fix when the
+        // submission carries no usable coordinates (absent, or the 0.0/0.0
+        // sentinel the form sends when no map pin was dropped).
+        Double[] resolvedCoords = resolveReportCoordinates(
+                createDto.getLatitude(), createDto.getLongitude(), imageFile);
+        report.setLatitude(resolvedCoords[0]);
+        report.setLongitude(resolvedCoords[1]);
         report.setDamageLength(createDto.getDamageLength());
         report.setDamageWidth(createDto.getDamageWidth());
         report.setCityRoadName(createDto.getCityRoadName());
@@ -459,6 +495,9 @@ public class RoadReportController {
 
         String previousStatusStr = report.getStatus();
         String newStatusStr = payload.get("status");
+        if (newStatusStr == null || newStatusStr.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body("Status parameter is required.");
+        }
         String adminRemarks = payload.get("adminRemarks");
 
         ReportStatus currentStatusEnum = ReportStatus.fromString(previousStatusStr);
@@ -630,6 +669,27 @@ public class RoadReportController {
         if (damageType != null) existingReport.setDamageType(damageType);
         if (damageLength != null) existingReport.setDamageLength(damageLength);
         if (damageWidth != null) existingReport.setDamageWidth(damageWidth);
+
+        // Automatic geotagging on resubmission: when neither explicit
+        // coordinates nor a stored fix exist, recover the replacement photo's
+        // EXIF GPS fix (explicit values always win).
+        if (latitude == null && longitude == null
+                && (existingReport.getLatitude() == null || existingReport.getLongitude() == null
+                    || (existingReport.getLatitude() == 0.0 && existingReport.getLongitude() == 0.0))
+                && imageFile != null && !imageFile.isEmpty()) {
+            try {
+                Optional<ExifGpsExtractor.GpsCoordinates> exif =
+                        ExifGpsExtractor.extract(imageFile.getBytes());
+                if (exif.isPresent()) {
+                    existingReport.setLatitude(exif.get().latitude());
+                    existingReport.setLongitude(exif.get().longitude());
+                    System.out.println("📍 [EXIF GEOTAG] Coordinates recovered from replacement photo: "
+                            + exif.get().latitude() + ", " + exif.get().longitude());
+                }
+            } catch (Exception ignored) {
+                // A missing or unreadable fix must never block the update.
+            }
+        }
 
         try {
             if (imageFile != null && !imageFile.isEmpty()) {
@@ -919,8 +979,12 @@ public class RoadReportController {
         String previousStatus = report.getStatus();
         reportWorkflowService.validateTransition(ReportStatus.fromString(previousStatus), ReportStatus.PENDING_BUDGET);
 
-        String reason = payload.get("repairRemarks");
-        report.setRepairRemarks(reason);
+        String reason = payload != null ? payload.get("repairRemarks") : null;
+        if (reason == null || reason.trim().isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Deferral reason is required."));
+        }
+
+        report.setRepairRemarks(reason.trim());
         report.setStatus(ReportStatus.PENDING_BUDGET.getLabel());
         repository.save(report);
 
@@ -1038,7 +1102,17 @@ public class RoadReportController {
             return ResponseEntity.badRequest().body(Map.of("error", "Proposed date and reason are required."));
         }
 
-        LocalDate proposedDate = LocalDate.parse(targetDateStr.trim());
+        LocalDate proposedDate;
+        try {
+            proposedDate = LocalDate.parse(targetDateStr.trim());
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Invalid extension target date format. Expected YYYY-MM-DD."));
+        }
+
+        if (proposedDate.isBefore(LocalDate.now())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Proposed extension date cannot be in the past."));
+        }
+
         report.setExtensionTargetDate(proposedDate);
         report.setExtensionReason(reason.trim());
         report.setExtensionStatus("PENDING");
@@ -1088,8 +1162,19 @@ public class RoadReportController {
         String decision = (String) payload.get("decision");
         String adminRemarks = (String) payload.get("adminRemarks");
 
+        if (decision == null || (!decision.equalsIgnoreCase("APPROVED") && !decision.equalsIgnoreCase("REJECTED"))) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Decision must be either APPROVED or REJECTED."));
+        }
+
+        if (!"PENDING".equalsIgnoreCase(report.getExtensionStatus())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "This report has no pending extension request to review."));
+        }
+
         boolean isApproved = "APPROVED".equalsIgnoreCase(decision);
         if (isApproved) {
+            if (report.getExtensionTargetDate() == null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Extension request target date is missing."));
+            }
             report.setTargetCompletionDate(report.getExtensionTargetDate());
             report.setExtensionStatus("APPROVED");
         } else {
@@ -1284,7 +1369,14 @@ public class RoadReportController {
     @GetMapping("/image/{filename:.+}")
     public ResponseEntity<Resource> serveImage(@PathVariable String filename) {
         try {
-            Path file = Paths.get("uploads").resolve(filename);
+            if (filename == null || filename.contains("..") || filename.contains("/") || filename.contains("\\")) {
+                return ResponseEntity.badRequest().build();
+            }
+            Path uploadsDir = Paths.get("uploads").toAbsolutePath().normalize();
+            Path file = uploadsDir.resolve(filename).toAbsolutePath().normalize();
+            if (!file.startsWith(uploadsDir)) {
+                return ResponseEntity.badRequest().build();
+            }
             Resource resource = new UrlResource(file.toUri());
             if (resource.exists() || resource.isReadable()) {
                 String contentType = Files.probeContentType(file);

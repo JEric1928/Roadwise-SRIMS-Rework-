@@ -312,6 +312,8 @@ public class UserController {
         user.setFailedLoginAttempts(0);
         user.setLockoutUntil(null);
         user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPasswordChangeRequired(false);
+        user.setTempPasswordExpiresAt(null);
         // Revoke every existing session, outstanding refresh token and pending
         // MFA/recovery challenge; the change is not complete until they are gone.
         revokeUserSessionsAndChallenges(user);
@@ -365,6 +367,7 @@ public class UserController {
 
         String username = payload.get("username");
         String rawPassword = payload.get("password");
+        String email = payload.get("email") != null ? payload.get("email").trim() : "";
 
         if (username == null || username.trim().isEmpty()) {
             return ResponseEntity.status(400).body(Map.of("error", "Username is required."));
@@ -378,6 +381,9 @@ public class UserController {
         }
         if (userRepository.findByUsername(username).isPresent()) {
             return ResponseEntity.status(400).body(Map.of("error", "Username already exists!"));
+        }
+        if (!email.isEmpty() && userRepository.findByEmail(email).isPresent()) {
+            return ResponseEntity.status(400).body(Map.of("error", "Email already exists!"));
         }
 
         // This endpoint provisions Barangay Officials only. Administrators must
@@ -396,6 +402,8 @@ public class UserController {
         newUser.setUsername(username);
         // Store credentials hashed (BCrypt), consistent with AuthController.
         newUser.setPassword(passwordEncoder.encode(rawPassword));
+        newUser.setPasswordChangeRequired(true);
+        newUser.setTempPasswordExpiresAt(LocalDateTime.now().plusHours(24));
         newUser.setRole("BARANGAY");
         newUser.setStatus("Active");
 
@@ -485,10 +493,24 @@ public class UserController {
         }
 
         User user = userOpt.get();
-        user.setFirstName(updates.get("firstName"));
-        user.setMiddleName(updates.get("middleName"));
-        user.setLastName(updates.get("lastName"));
-        user.setEmail(updates.get("email"));
+        if (updates.containsKey("firstName")) user.setFirstName(updates.get("firstName"));
+        if (updates.containsKey("middleName")) user.setMiddleName(updates.get("middleName"));
+        if (updates.containsKey("lastName")) user.setLastName(updates.get("lastName"));
+
+        if (updates.containsKey("email")) {
+            String newEmail = updates.get("email") != null ? updates.get("email").trim() : "";
+            if (newEmail.isEmpty()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Email cannot be empty."));
+            }
+            if (!newEmail.contains("@") || !newEmail.contains(".")) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invalid email format."));
+            }
+            Optional<User> emailOwner = userRepository.findByEmail(newEmail);
+            if (emailOwner.isPresent() && !emailOwner.get().getId().equals(id)) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Email is already registered to another user."));
+            }
+            user.setEmail(newEmail);
+        }
 
         String oldStatus = user.getStatus();
         String newStatus = updates.get("status");
@@ -506,27 +528,36 @@ public class UserController {
             }
         }
 
-        if (updates.get("barangayId") != null && !updates.get("barangayId").isEmpty()) {
-            Long brgyId = Long.parseLong(updates.get("barangayId"));
-            List<User> existingOfficials = userRepository.findByBarangayId(brgyId);
+        if (updates.containsKey("barangayId") && updates.get("barangayId") != null && !updates.get("barangayId").isEmpty()) {
+            try {
+                Long brgyId = Long.parseLong(updates.get("barangayId"));
+                List<User> existingOfficials = userRepository.findByBarangayId(brgyId);
 
-            Optional<User> conflictOfficial = existingOfficials.stream()
-                    .filter(u -> !u.getId().equals(id) && (u.getStatus() == null || !u.getStatus().equalsIgnoreCase("Deactivated")))
-                    .findFirst();
+                Optional<User> conflictOfficial = existingOfficials.stream()
+                        .filter(u -> !u.getId().equals(id) && (u.getStatus() == null || !u.getStatus().equalsIgnoreCase("Deactivated")))
+                        .findFirst();
 
-            if (conflictOfficial.isPresent()) {
-                User occupiedBy = conflictOfficial.get();
-                return ResponseEntity.status(400).body(Map.of("error",
-                        "Cannot reassign: This Barangay is already assigned to " + occupiedBy.getFirstName() + " " + occupiedBy.getLastName() + "."));
+                if (conflictOfficial.isPresent()) {
+                    User occupiedBy = conflictOfficial.get();
+                    return ResponseEntity.status(400).body(Map.of("error",
+                            "Cannot reassign: This Barangay is already assigned to " + occupiedBy.getFirstName() + " " + occupiedBy.getLastName() + "."));
+                }
+
+                barangayRepository.findById(brgyId).ifPresent(user::setBarangay);
+            } catch (NumberFormatException e) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Invalid barangay ID format."));
             }
-
-            barangayRepository.findById(brgyId).ifPresent(user::setBarangay);
         }
 
         userRepository.save(user);
 
         String adminIdStr = updates.get("adminId");
-        Long adminId = (adminIdStr != null && !adminIdStr.isEmpty()) ? Long.valueOf(adminIdStr) : getAdminId();
+        Long adminId = getAdminId();
+        if (adminIdStr != null && !adminIdStr.isEmpty()) {
+            try {
+                adminId = Long.valueOf(adminIdStr);
+            } catch (NumberFormatException ignored) {}
+        }
         User adminActor = userRepository.findById(adminId).orElse(null);
 
         String statusNotice = (newStatus != null && !newStatus.equalsIgnoreCase(oldStatus)) ? " Status changed to '" + newStatus + "'." : "";
@@ -564,6 +595,8 @@ public class UserController {
         // authenticated administrator so it can be communicated securely.
         String tempPassword = generateTemporaryPassword();
         user.setPassword(passwordEncoder.encode(tempPassword));
+        user.setPasswordChangeRequired(true);
+        user.setTempPasswordExpiresAt(LocalDateTime.now().plusHours(24));
         user.setFailedLoginAttempts(0);
         user.setLockoutUntil(null);
         // Force re-authentication: revoke refresh tokens, access stamps and any
@@ -696,6 +729,8 @@ public class UserController {
         newAdmin.setUsername(newUsername != null ? newUsername.trim() : "");
         newAdmin.setPhoneNumber(newPhone != null ? newPhone.trim() : "");
         newAdmin.setPassword(passwordEncoder.encode(tempPassword));
+        newAdmin.setPasswordChangeRequired(true);
+        newAdmin.setTempPasswordExpiresAt(LocalDateTime.now().plusHours(24));
         newAdmin.setRole("CPDO Admin");
         newAdmin.setStatus("Active");
         newAdmin.setFailedLoginAttempts(0);
@@ -830,6 +865,8 @@ public class UserController {
         newCeo.setUsername(newUsername != null ? newUsername.trim() : "");
         newCeo.setPhoneNumber(newPhone != null ? newPhone.trim() : "");
         newCeo.setPassword(passwordEncoder.encode(tempPassword));
+        newCeo.setPasswordChangeRequired(true);
+        newCeo.setTempPasswordExpiresAt(LocalDateTime.now().plusHours(24));
         newCeo.setRole(currentCeo.getRole() != null ? currentCeo.getRole() : "ENGINEER");
         newCeo.setStatus("Active");
         newCeo.setFailedLoginAttempts(0);
