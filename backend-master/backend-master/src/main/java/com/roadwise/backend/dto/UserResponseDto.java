@@ -26,6 +26,7 @@ public class UserResponseDto {
     private String gender;
     private String profilePicture;
     private String status;
+    private Boolean passwordChangeRequired;
     private BarangayDto barangay;
 
     public UserResponseDto() {
@@ -48,6 +49,7 @@ public class UserResponseDto {
         dto.gender = user.getGender();
         dto.profilePicture = user.getProfilePicture();
         dto.status = user.getStatus();
+        dto.passwordChangeRequired = user.getPasswordChangeRequired();
         dto.barangay = BarangayDto.from(user.getBarangay());
         return dto;
     }
@@ -64,6 +66,7 @@ public class UserResponseDto {
     public String getGender() { return gender; }
     public String getProfilePicture() { return profilePicture; }
     public String getStatus() { return status; }
+    public Boolean getPasswordChangeRequired() { return passwordChangeRequired; }
     public BarangayDto getBarangay() { return barangay; }
 
     /**

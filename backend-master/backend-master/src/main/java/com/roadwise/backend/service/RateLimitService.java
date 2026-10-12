@@ -31,7 +31,7 @@ public class RateLimitService {
     }
 
     /** @return true when the key is currently in a penalty window. */
-    public boolean isBlocked(String key) {
+    public synchronized boolean isBlocked(String key) {
         LoginRateLimit rateLimit = loginRateLimitRepository.findByKeyIdentifier(key).orElse(null);
         if (rateLimit == null) {
             return false;
@@ -44,7 +44,7 @@ public class RateLimitService {
     }
 
     /** Records a failed attempt and applies an exponential penalty past the threshold. */
-    public void recordFailure(String key) {
+    public synchronized void recordFailure(String key) {
         LoginRateLimit rateLimit = loginRateLimitRepository.findByKeyIdentifier(key).orElse(null);
         if (rateLimit == null || isWindowExpired(rateLimit)) {
             rateLimit = new LoginRateLimit(key);
@@ -66,7 +66,7 @@ public class RateLimitService {
      * the last request, or once {@code maxPerWindow} requests happened in the
      * window.
      */
-    public boolean isRequestThrottled(String key, Duration cooldown, int maxPerWindow) {
+    public synchronized boolean isRequestThrottled(String key, Duration cooldown, int maxPerWindow) {
         LoginRateLimit rateLimit = loginRateLimitRepository.findByKeyIdentifier(key).orElse(null);
         if (rateLimit == null || isWindowExpired(rateLimit)) {
             return false;
@@ -78,7 +78,7 @@ public class RateLimitService {
         return rateLimit.getAttemptCount() >= maxPerWindow;
     }
 
-    public void recordRequest(String key) {
+    public synchronized void recordRequest(String key) {
         LoginRateLimit rateLimit = loginRateLimitRepository.findByKeyIdentifier(key).orElse(null);
         if (rateLimit == null || isWindowExpired(rateLimit)) {
             rateLimit = new LoginRateLimit(key);
@@ -90,7 +90,7 @@ public class RateLimitService {
         loginRateLimitRepository.save(rateLimit);
     }
 
-    public void clear(String key) {
+    public synchronized void clear(String key) {
         loginRateLimitRepository.findByKeyIdentifier(key).ifPresent(loginRateLimitRepository::delete);
     }
 }

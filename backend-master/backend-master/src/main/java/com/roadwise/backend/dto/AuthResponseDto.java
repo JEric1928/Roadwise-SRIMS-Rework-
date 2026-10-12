@@ -17,6 +17,7 @@ public class AuthResponseDto {
     private LocalDate birthday;
     private String gender;
     private String profilePicture;
+    private Boolean passwordChangeRequired;
     private Long barangayId;
     private String barangayName;
 
@@ -63,6 +64,9 @@ public class AuthResponseDto {
 
     public String getProfilePicture() { return profilePicture; }
     public void setProfilePicture(String profilePicture) { this.profilePicture = profilePicture; }
+
+    public Boolean getPasswordChangeRequired() { return passwordChangeRequired; }
+    public void setPasswordChangeRequired(Boolean passwordChangeRequired) { this.passwordChangeRequired = passwordChangeRequired; }
 
     public Long getBarangayId() { return barangayId; }
     public void setBarangayId(Long barangayId) { this.barangayId = barangayId; }

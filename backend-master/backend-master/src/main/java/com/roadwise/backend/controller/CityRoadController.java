@@ -57,7 +57,7 @@ public class CityRoadController {
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     @CacheEvict(value = "cityRoads", allEntries = true)
-    public ResponseEntity<?> createCityRoad(@RequestBody CityRoad cityRoad) {
+    public synchronized ResponseEntity<?> createCityRoad(@RequestBody CityRoad cityRoad) {
         // 1. Ensure a Barangay is attached
         if (cityRoad.getBarangay() == null || cityRoad.getBarangay().getId() == null) {
             return ResponseEntity.badRequest().body("A valid Barangay ID is required to register a road.");

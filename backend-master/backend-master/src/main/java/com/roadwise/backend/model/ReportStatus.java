@@ -25,7 +25,7 @@ public enum ReportStatus {
 
     public static ReportStatus fromString(String statusStr) {
         if (statusStr == null || statusStr.trim().isEmpty()) {
-            return PENDING_VALIDATION;
+            throw new IllegalArgumentException("Report status cannot be null or empty.");
         }
         for (ReportStatus rs : ReportStatus.values()) {
             if (rs.name().equalsIgnoreCase(statusStr) || rs.getLabel().equalsIgnoreCase(statusStr)) {

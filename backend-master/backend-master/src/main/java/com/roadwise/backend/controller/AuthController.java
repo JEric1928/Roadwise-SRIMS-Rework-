@@ -189,6 +189,15 @@ public class AuthController {
                     .body(Map.of("error", "Too many failed attempts. Account temporarily rate-limited for security."));
         }
 
+        if (user.getPasswordChangeRequired() && user.getTempPasswordExpiresAt() != null
+                && LocalDateTime.now().isAfter(user.getTempPasswordExpiresAt())) {
+            activityLogService.log(
+                    null, "AUTH", "AUTH_TEMP_PASSWORD_EXPIRED", formattedUserId,
+                    "Login attempt with expired temporary password.", "WARNING", request);
+            return ResponseEntity.status(401).body(Map.of("error",
+                    "Temporary password has expired. Please request a password reset or contact CPDO Admin."));
+        }
+
         boolean passwordMatches;
         if (user.getPassword().startsWith("$2a$")
                 || user.getPassword().startsWith("$2b$")
@@ -398,6 +407,7 @@ public class AuthController {
         response.setBirthday(user.getBirthday());
         response.setGender(user.getGender());
         response.setProfilePicture(user.getProfilePicture());
+        response.setPasswordChangeRequired(user.getPasswordChangeRequired());
 
         if (user.getBarangay() != null) {
             response.setBarangayId(user.getBarangay().getId());
@@ -639,6 +649,8 @@ public class AuthController {
         }
 
         user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPasswordChangeRequired(false);
+        user.setTempPasswordExpiresAt(null);
         user.setFailedLoginAttempts(0);
         user.setLockoutUntil(null);
         user.bumpSessionVersion();
@@ -650,6 +662,7 @@ public class AuthController {
         // Recovery invalidates every existing session.
         revokeAllRefreshTokens(user);
         clearRateLimit("RESET_EMAIL:" + email.toLowerCase(Locale.ROOT));
+        clearRateLimit("RESET_IP:" + request.getRemoteAddr());
 
         activityLogService.log(
                 user, "AUTH", "AUTH_PASSWORD_RESET_SUCCESS", String.format("#USR-%04d", user.getId()),
