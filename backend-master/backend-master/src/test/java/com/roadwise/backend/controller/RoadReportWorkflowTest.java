@@ -193,12 +193,11 @@ class RoadReportWorkflowTest {
         assertEquals("Pending Budget", updatedR1.getStatus());
 
         String invalidBatchPayload = String.format("{\"repairRemarks\":\"Lack of budget\",\"reportIds\":[%d]}", r2.getId());
-        assertThrows(Exception.class, () -> {
-            mockMvc.perform(post("/api/reports/batch/defer")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .content(invalidBatchPayload)
-                    .header("Authorization", "Bearer " + engineerToken));
-        });
+        mockMvc.perform(post("/api/reports/batch/defer")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(invalidBatchPayload)
+                        .header("Authorization", "Bearer " + engineerToken))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

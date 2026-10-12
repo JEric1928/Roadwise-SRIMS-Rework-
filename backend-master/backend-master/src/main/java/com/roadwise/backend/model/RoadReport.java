@@ -2,6 +2,8 @@ package com.roadwise.backend.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -97,11 +99,13 @@ public class RoadReport {
     @JsonIgnoreProperties({"reports", "hibernateLazyInitializer", "handler"})
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "barangay_id")
+    @OnDelete(action = OnDeleteAction.SET_NULL)
     private Barangay barangay;
 
     @JsonIgnoreProperties({"hibernateLazyInitializer", "handler", "password"})
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
+    @OnDelete(action = OnDeleteAction.SET_NULL)
     private User user;
 
     private String reportedBy;

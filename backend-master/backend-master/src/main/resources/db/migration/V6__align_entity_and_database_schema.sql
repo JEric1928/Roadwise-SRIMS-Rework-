@@ -131,6 +131,23 @@ UPDATE report_status_logs SET action = COALESCE(action, 'STATUS_CHANGE');
 
 ALTER TABLE report_status_logs ALTER COLUMN action SET NOT NULL;
 
+-- Baseline created the audit column as changed_at; the entity (and this
+-- migration) use created_at. Rename it on databases that still have the
+-- legacy name, then add it if neither column exists (fresh installs differ).
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = current_schema()
+                 AND table_name = 'report_status_logs' AND column_name = 'changed_at')
+       AND NOT EXISTS (SELECT 1 FROM information_schema.columns
+                       WHERE table_schema = current_schema()
+                         AND table_name = 'report_status_logs' AND column_name = 'created_at') THEN
+        ALTER TABLE report_status_logs RENAME COLUMN changed_at TO created_at;
+    END IF;
+END $$;
+
+ALTER TABLE report_status_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
 UPDATE report_status_logs SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE created_at IS NULL;
 ALTER TABLE report_status_logs ALTER COLUMN created_at SET NOT NULL;
 

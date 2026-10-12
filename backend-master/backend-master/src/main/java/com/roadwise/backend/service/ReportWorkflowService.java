@@ -45,6 +45,7 @@ public class ReportWorkflowService {
 
         allowedTransitions.put(ReportStatus.DISPATCHED_TO_CEO, Set.of(
                 ReportStatus.IN_PROGRESS,
+                ReportStatus.PENDING_BUDGET,
                 ReportStatus.COMPLETED,
                 ReportStatus.ARCHIVED
         ));
@@ -52,6 +53,7 @@ public class ReportWorkflowService {
         allowedTransitions.put(ReportStatus.IN_PROGRESS, Set.of(
                 ReportStatus.COMPLETED,
                 ReportStatus.RESOLVED,
+                ReportStatus.PENDING_BUDGET,
                 ReportStatus.ARCHIVED
         ));
 

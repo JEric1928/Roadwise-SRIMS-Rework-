@@ -196,6 +196,8 @@ public class RoadReportController {
             report.setStatus(ReportStatus.PENDING_VALIDATION.getLabel());
             RoadReport savedReport = repository.save(report);
 
+            Long adminId = getAdminId();
+
             // Duplicate detection check
             Optional<RoadReport> duplicateOpt = duplicateDetectionService.findPotentialDuplicate(savedReport);
             if (duplicateOpt.isPresent()) {
@@ -222,7 +224,6 @@ public class RoadReportController {
                     savedReport.getDamageImage()
             );
 
-            Long adminId = getAdminId();
             if (savedReport.getSeverity() != null && savedReport.getSeverity().equalsIgnoreCase("High")) {
                 notificationService.sendNotification(
                         adminId,
@@ -759,7 +760,7 @@ public class RoadReportController {
     public ResponseEntity<?> completeReport(
             @PathVariable Long id,
             @RequestParam(value = "repairRemarks", required = false) String repairRemarks,
-            @RequestParam(value = "proofImage", required = true) MultipartFile proofImage,
+            @RequestParam(value = "proofImage", required = false) MultipartFile proofImage,
             HttpServletRequest request) {
 
         User currentUser = getAuthenticatedUser();

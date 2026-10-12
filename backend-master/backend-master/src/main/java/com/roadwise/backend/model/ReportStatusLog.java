@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 
@@ -19,6 +21,7 @@ public class ReportStatusLog {
     @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "report_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     private RoadReport report;
 
     // The event keyword: SUBMITTED, REJECTED, RESUBMITTED, VALIDATED, DISPATCHED,
