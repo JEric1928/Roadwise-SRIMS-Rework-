@@ -114,7 +114,6 @@ if (typeof window !== 'undefined') {
   window.getAuthHeaders = getAuthHeaders;
   window.getAuthOnlyHeaders = getAuthOnlyHeaders;
   window.clearAuthSession = clearAuthSession;
-<<<<<<< HEAD
 
   // Cross-tab logout: when another tab clears the token, mirror it here.
   window.addEventListener('storage', (event) => {
@@ -122,6 +121,4 @@ if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('roadwise:session-expired'));
     }
   });
-=======
->>>>>>> 04ae5226e73d3211b8bdff7e0567d67c856aca26
 }

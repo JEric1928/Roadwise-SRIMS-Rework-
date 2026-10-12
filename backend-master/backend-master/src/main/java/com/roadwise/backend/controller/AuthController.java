@@ -16,10 +16,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.util.DigestUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -86,8 +87,24 @@ public class AuthController {
                 .orElse(1L);
     }
 
-    private String hashToken(String rawToken) {
-        return DigestUtils.md5DigestAsHex(rawToken.getBytes(StandardCharsets.UTF_8));
+    /**
+     * SHA-256 hash of a raw bearer token before persistence. MD5 was previously
+     * used and is unsuitable even for high-entropy tokens; switching invalidates
+     * any outstanding refresh tokens (a one-time re-login, acceptable).
+     */
+    static String hashToken(String rawToken) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(rawToken.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+                hex.append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available in this JVM", e);
+        }
     }
 
     private boolean isWindowExpired(LoginRateLimit rateLimit) {
@@ -181,7 +198,9 @@ public class AuthController {
     // ==========================================
     @PostMapping("/login")
     @Transactional
-    public ResponseEntity<?> login(@Valid @RequestBody LoginRequestDto loginDto, HttpServletRequest request) {
+    public ResponseEntity<?> login(
+            @Valid @RequestBody LoginRequestDto loginDto,
+            HttpServletRequest request) {
         String username = loginDto.getUsername();
         String password = loginDto.getPassword();
         String clientIp = request.getRemoteAddr();
@@ -198,7 +217,10 @@ public class AuthController {
         if (userOpt.isEmpty()) {
             recordFailedAttempt("IP:" + clientIp);
             recordFailedAttempt("USER:" + username);
-            activityLogService.log(null, "AUTH", "AUTH_LOGIN_FAILED", username, "Failed login attempt for unknown account: '" + username + "'", "FAILED", request);
+            activityLogService.log(
+                    null, "AUTH", "AUTH_LOGIN_FAILED", username,
+                    "Failed login attempt for unknown account: '" + username + "'",
+                    "FAILED", request);
             return ResponseEntity.status(401).body(Map.of("error", "Invalid username or password."));
         }
 
@@ -206,15 +228,20 @@ public class AuthController {
         String formattedUserId = String.format("#USR-%04d", user.getId());
 
         if (user.getLockoutUntil() != null && LocalDateTime.now().isBefore(user.getLockoutUntil())) {
-            activityLogService.log(null, "AUTH", "AUTH_ACCOUNT_LOCKED", formattedUserId, "Blocked login attempt during active lockout penalty.", "WARNING", request);
-            long retryAfter = Math.max(1, java.time.Duration.between(LocalDateTime.now(), user.getLockoutUntil()).getSeconds());
+            activityLogService.log(
+                    null, "AUTH", "AUTH_ACCOUNT_LOCKED", formattedUserId,
+                    "Blocked login attempt during active lockout penalty.", "WARNING", request);
+            long retryAfter = Math.max(
+                    1, Duration.between(LocalDateTime.now(), user.getLockoutUntil()).getSeconds());
             return ResponseEntity.status(429)
                     .header("Retry-After", String.valueOf(retryAfter))
                     .body(Map.of("error", "Too many failed attempts. Account temporarily rate-limited for security."));
         }
 
         boolean passwordMatches;
-        if (user.getPassword().startsWith("$2a$") || user.getPassword().startsWith("$2b$") || user.getPassword().startsWith("$2y$")) {
+        if (user.getPassword().startsWith("$2a$")
+                || user.getPassword().startsWith("$2b$")
+                || user.getPassword().startsWith("$2y$")) {
             passwordMatches = passwordEncoder.matches(password, user.getPassword());
         } else {
             passwordMatches = user.getPassword().equals(password);
@@ -242,7 +269,9 @@ public class AuthController {
             userRepository.save(user);
             recordFailedAttempt("IP:" + clientIp);
             recordFailedAttempt("USER:" + username);
-            activityLogService.log(null, "AUTH", "AUTH_LOGIN_FAILED", formattedUserId, "Failed password verification for '" + username + "'", "FAILED", request);
+            activityLogService.log(
+                    null, "AUTH", "AUTH_LOGIN_FAILED", formattedUserId,
+                    "Failed password verification for '" + username + "'", "FAILED", request);
             return ResponseEntity.status(401).body(Map.of("error", "Invalid username or password."));
         }
 
@@ -253,34 +282,49 @@ public class AuthController {
 
         SystemSettings settings = systemSettingsRepository.findById(1L).orElse(null);
         if (settings != null && settings.isMaintenanceMode()) {
-            if (!user.getRole().equalsIgnoreCase("Admin") && !user.getRole().equalsIgnoreCase("CPDO Admin")) {
-                activityLogService.log(user, "AUTH", "AUTH_MAINTENANCE_BLOCKED", formattedUserId, "Login during maintenance mode.", "WARNING", request);
-                return ResponseEntity.status(403).body(Map.of("error", "System is down for maintenance. Please try again later.", "type", "MAINTENANCE_MODE"));
+            if (!user.getRole().equalsIgnoreCase("Admin")
+                    && !user.getRole().equalsIgnoreCase("CPDO Admin")) {
+                activityLogService.log(
+                        user, "AUTH", "AUTH_MAINTENANCE_BLOCKED", formattedUserId,
+                        "Login during maintenance mode.", "WARNING", request);
+                return ResponseEntity.status(403).body(Map.of(
+                        "error", "System is down for maintenance. Please try again later.",
+                        "type", "MAINTENANCE_MODE"));
             }
         }
 
         if ("Suspended".equalsIgnoreCase(user.getStatus())) {
-            activityLogService.log(user, "AUTH", "AUTH_SUSPENDED_BLOCKED", formattedUserId, "Suspended account login attempt.", "FAILED", request);
-            return ResponseEntity.status(403).body(Map.of("error", "Your account is currently Suspended. Please contact CPDO."));
+            activityLogService.log(
+                    user, "AUTH", "AUTH_SUSPENDED_BLOCKED", formattedUserId,
+                    "Suspended account login attempt.", "FAILED", request);
+            return ResponseEntity.status(403)
+                    .body(Map.of("error", "Your account is currently Suspended. Please contact CPDO."));
         }
 
         if ("Deactivated".equalsIgnoreCase(user.getStatus())) {
-            activityLogService.log(user, "AUTH", "AUTH_DEACTIVATED_BLOCKED", formattedUserId, "Deactivated account login attempt.", "FAILED", request);
-            return ResponseEntity.status(403).body(Map.of("error", "Your account has been Deactivated. Access revoked."));
+            activityLogService.log(
+                    user, "AUTH", "AUTH_DEACTIVATED_BLOCKED", formattedUserId,
+                    "Deactivated account login attempt.", "FAILED", request);
+            return ResponseEntity.status(403)
+                    .body(Map.of("error", "Your account has been Deactivated. Access revoked."));
         }
 
         if (user.getEmail() == null || user.getEmail().isEmpty()) {
-            return ResponseEntity.status(403).body(Map.of("error", "No official email is linked to this account. Cannot proceed with MFA. Contact Admin."));
+            return ResponseEntity.status(403).body(Map.of(
+                    "error", "No official email is linked to this account. Cannot proceed with MFA. Contact Admin."));
         }
 
         // MFA resend cooldown: reject a new code while a recent challenge is
         // still fresh, so OTP email cannot be spammed.
-        Optional<MfaChallenge> existingChallenge = mfaChallengeRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user);
-        if (existingChallenge.isPresent() && existingChallenge.get().getCreatedAt() != null
+        Optional<MfaChallenge> existingChallenge =
+                mfaChallengeRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user);
+        if (existingChallenge.isPresent()
+                && existingChallenge.get().getCreatedAt() != null
                 && existingChallenge.get().getCreatedAt().isAfter(LocalDateTime.now().minusSeconds(60))) {
             return ResponseEntity.status(429)
                     .header("Retry-After", "60")
-                    .body(Map.of("error", "A verification code was just sent. Please wait a minute before requesting another."));
+                    .body(Map.of(
+                            "error", "A verification code was just sent. Please wait a minute before requesting another."));
         }
         existingChallenge.ifPresent(c -> {
             c.setUsed(true);
@@ -305,7 +349,9 @@ public class AuthController {
             System.err.println(">>> [WARN] SMTP Delivery failed: " + e.getMessage());
         }
 
-        activityLogService.log(user, "AUTH", "AUTH_MFA_REQUESTED", formattedUserId, "Credentials validated. 6-digit MFA OTP generated.", "SUCCESS", request);
+        activityLogService.log(
+                user, "AUTH", "AUTH_MFA_REQUESTED", formattedUserId,
+                "Credentials validated. 6-digit MFA OTP generated.", "SUCCESS", request);
 
         Map<String, Object> responseData = new HashMap<>();
         responseData.put("mfaRequired", true);
@@ -320,14 +366,17 @@ public class AuthController {
     // ==========================================
     @PostMapping("/verify-mfa")
     @Transactional
-    public ResponseEntity<?> verifyMfa(@Valid @RequestBody MfaVerifyRequestDto verifyDto, HttpServletRequest request) {
+    public ResponseEntity<?> verifyMfa(
+            @Valid @RequestBody MfaVerifyRequestDto verifyDto,
+            HttpServletRequest request) {
         Long userId = verifyDto.getUserId();
         String submittedOtp = verifyDto.getOtp();
 
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found."));
 
-        Optional<MfaChallenge> challengeOpt = mfaChallengeRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user);
+        Optional<MfaChallenge> challengeOpt =
+                mfaChallengeRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user);
         if (challengeOpt.isEmpty()) {
             return ResponseEntity.status(400).body(Map.of("error", "No active login session found. Please log in again."));
         }
@@ -343,13 +392,16 @@ public class AuthController {
         if (challenge.getAttempts() >= challenge.getMaxAttempts()) {
             challenge.setUsed(true);
             mfaChallengeRepository.save(challenge);
-            return ResponseEntity.status(429).body(Map.of("error", "Maximum OTP verification attempts exceeded. Please log in again."));
+            return ResponseEntity.status(429)
+                    .body(Map.of("error", "Maximum OTP verification attempts exceeded. Please log in again."));
         }
 
         if (!passwordEncoder.matches(submittedOtp, challenge.getOtpCodeHash())) {
             challenge.setAttempts(challenge.getAttempts() + 1);
             mfaChallengeRepository.save(challenge);
-            activityLogService.log(user, "AUTH", "AUTH_MFA_FAILED", String.format("#USR-%04d", userId), "Invalid MFA code submitted.", "FAILED", request);
+            activityLogService.log(
+                    user, "AUTH", "AUTH_MFA_FAILED", String.format("#USR-%04d", userId),
+                    "Invalid MFA code submitted.", "FAILED", request);
             return ResponseEntity.status(401).body(Map.of("error", "Invalid verification code. Please try again."));
         }
 
@@ -372,10 +424,14 @@ public class AuthController {
         LocalDateTime sessionExpiresAt = now.plusNanos(sessionAbsoluteExpirationMs * 1_000_000L);
         LocalDateTime refreshExpiresAt = effectiveRefreshExpiry(now, sessionExpiresAt);
 
-        RefreshToken refreshTokenEntity = new RefreshToken(user, refreshTokenHash, refreshExpiresAt, request.getRemoteAddr(), sessionExpiresAt);
+        RefreshToken refreshTokenEntity = new RefreshToken(
+                user, refreshTokenHash, refreshExpiresAt, request.getRemoteAddr(), sessionExpiresAt);
         refreshTokenRepository.save(refreshTokenEntity);
 
-        activityLogService.log(user, "AUTH", "AUTH_LOGIN_SUCCESS", String.format("#USR-%04d", user.getId()), "User successfully verified MFA and established active session for " + user.getRole(), "SUCCESS", request);
+        activityLogService.log(
+                user, "AUTH", "AUTH_LOGIN_SUCCESS", String.format("#USR-%04d", user.getId()),
+                "User successfully verified MFA and established active session for " + user.getRole(),
+                "SUCCESS", request);
 
         AuthResponseDto response = new AuthResponseDto();
         response.setAccessToken(accessToken);
@@ -408,11 +464,14 @@ public class AuthController {
     // ==========================================
     @PostMapping("/refresh")
     @Transactional
-    public ResponseEntity<?> refreshToken(@Valid @RequestBody RefreshTokenRequestDto refreshDto, HttpServletRequest request) {
+    public ResponseEntity<?> refreshToken(
+            @Valid @RequestBody RefreshTokenRequestDto refreshDto,
+            HttpServletRequest request) {
         String rawToken = refreshDto.getRefreshToken();
         String tokenHash = hashToken(rawToken);
 
-        Optional<RefreshToken> refreshTokenOpt = refreshTokenRepository.findWithLockByTokenHash(tokenHash);
+        Optional<RefreshToken> refreshTokenOpt =
+                refreshTokenRepository.findWithLockByTokenHash(tokenHash);
         if (refreshTokenOpt.isEmpty()) {
             return ResponseEntity.status(401).body(Map.of("error", "Invalid refresh token."));
         }
@@ -427,7 +486,8 @@ public class AuthController {
                 revokeAllRefreshTokens(user);
                 user.bumpSessionVersion();
                 userRepository.save(user);
-                activityLogService.log(user, "SECURITY", "REFRESH_TOKEN_REUSE_DETECTED",
+                activityLogService.log(
+                        user, "SECURITY", "REFRESH_TOKEN_REUSE_DETECTED",
                         String.format("#USR-%04d", user.getId()),
                         "A previously rotated refresh token was replayed; all sessions were revoked.",
                         "WARNING", request);
@@ -439,7 +499,8 @@ public class AuthController {
             return ResponseEntity.status(401).body(Map.of("error", "Expired or revoked refresh token."));
         }
 
-        if ("Suspended".equalsIgnoreCase(user.getStatus()) || "Deactivated".equalsIgnoreCase(user.getStatus())) {
+        if ("Suspended".equalsIgnoreCase(user.getStatus())
+                || "Deactivated".equalsIgnoreCase(user.getStatus())) {
             return ResponseEntity.status(403).body(Map.of("error", "Account access revoked."));
         }
 
@@ -459,7 +520,8 @@ public class AuthController {
                 && now.isAfter(token.getLastUsedAt().plusNanos(sessionIdleExpirationMs * 1_000_000L))) {
             token.setRevoked(true);
             refreshTokenRepository.save(token);
-            return ResponseEntity.status(401).body(Map.of("error", "Session timed out due to inactivity. Please log in again."));
+            return ResponseEntity.status(401)
+                    .body(Map.of("error", "Session timed out due to inactivity. Please log in again."));
         }
 
         token.setRevoked(true);
@@ -472,7 +534,8 @@ public class AuthController {
         token.setReplacedByTokenHash(newRefreshTokenHash);
         refreshTokenRepository.save(token);
 
-        RefreshToken newTokenEntity = new RefreshToken(user, newRefreshTokenHash, refreshExpiresAt, request.getRemoteAddr(), sessionExpiresAt);
+        RefreshToken newTokenEntity = new RefreshToken(
+                user, newRefreshTokenHash, refreshExpiresAt, request.getRemoteAddr(), sessionExpiresAt);
         refreshTokenRepository.save(newTokenEntity);
 
         Map<String, String> tokens = new HashMap<>();
@@ -487,7 +550,9 @@ public class AuthController {
     // ==========================================
     @PostMapping("/forgot-password/request")
     @Transactional
-    public ResponseEntity<?> requestPasswordReset(@Valid @RequestBody PasswordResetRequestDto resetDto, HttpServletRequest request) {
+    public ResponseEntity<?> requestPasswordReset(
+            @Valid @RequestBody PasswordResetRequestDto resetDto,
+            HttpServletRequest request) {
         String email = resetDto.getEmail() == null ? "" : resetDto.getEmail().trim();
         String emailThrottleKey = "RESET_EMAIL:" + email.toLowerCase(Locale.ROOT);
         String ipThrottleKey = "RESET_IP:" + request.getRemoteAddr();
@@ -515,12 +580,14 @@ public class AuthController {
         String rawOtp = String.format("%06d", secureRandom.nextInt(1000000));
         String otpHash = passwordEncoder.encode(rawOtp);
 
-        passwordResetTokenRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user).ifPresent(p -> {
-            p.setUsed(true);
-            passwordResetTokenRepository.save(p);
-        });
+        passwordResetTokenRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user)
+                .ifPresent(p -> {
+                    p.setUsed(true);
+                    passwordResetTokenRepository.save(p);
+                });
 
-        PasswordResetToken resetToken = new PasswordResetToken(user, otpHash, LocalDateTime.now().plusMinutes(10));
+        PasswordResetToken resetToken = new PasswordResetToken(
+                user, otpHash, LocalDateTime.now().plusMinutes(10));
         passwordResetTokenRepository.save(resetToken);
 
         String subject = "RoadWise - Password Reset Code";
@@ -543,7 +610,9 @@ public class AuthController {
                 "SUPPORT"
         );
 
-        activityLogService.log(user, "AUTH", "AUTH_PASSWORD_RESET_REQUEST", formattedUserId, "Password recovery OTP requested.", "SUCCESS", request);
+        activityLogService.log(
+                user, "AUTH", "AUTH_PASSWORD_RESET_REQUEST", formattedUserId,
+                "Password recovery OTP requested.", "SUCCESS", request);
 
         // Deliberately identical to the unknown-email response (no userId, no
         // existence signal).
@@ -555,7 +624,9 @@ public class AuthController {
     // ==========================================
     @PostMapping("/forgot-password/reset")
     @Transactional
-    public ResponseEntity<?> resetPassword(@Valid @RequestBody PasswordResetConfirmDto confirmDto, HttpServletRequest request) {
+    public ResponseEntity<?> resetPassword(
+            @Valid @RequestBody PasswordResetConfirmDto confirmDto,
+            HttpServletRequest request) {
         String email = confirmDto.getEmail() == null ? "" : confirmDto.getEmail().trim();
         String submittedOtp = confirmDto.getOtp();
         String newPassword = confirmDto.getNewPassword();
@@ -563,9 +634,11 @@ public class AuthController {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new IllegalArgumentException("Invalid recovery request."));
 
-        Optional<PasswordResetToken> tokenOpt = passwordResetTokenRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user);
+        Optional<PasswordResetToken> tokenOpt =
+                passwordResetTokenRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user);
         if (tokenOpt.isEmpty()) {
-            return ResponseEntity.status(400).body(Map.of("error", "No active password reset request. Please request a new code."));
+            return ResponseEntity.status(400)
+                    .body(Map.of("error", "No active password reset request. Please request a new code."));
         }
 
         PasswordResetToken resetToken = tokenOpt.get();
@@ -591,7 +664,9 @@ public class AuthController {
                 resetToken.setUsed(true);
             }
             passwordResetTokenRepository.save(resetToken);
-            activityLogService.log(user, "AUTH", "AUTH_PASSWORD_RESET_FAILED", String.format("#USR-%04d", user.getId()), "Invalid reset OTP submitted.", "FAILED", request);
+            activityLogService.log(
+                    user, "AUTH", "AUTH_PASSWORD_RESET_FAILED", String.format("#USR-%04d", user.getId()),
+                    "Invalid reset OTP submitted.", "FAILED", request);
             if (exhausted) {
                 return ResponseEntity.status(429)
                         .header("Retry-After", "600")
@@ -618,7 +693,9 @@ public class AuthController {
         revokeAllRefreshTokens(user);
         clearRateLimit("RESET_EMAIL:" + email.toLowerCase(Locale.ROOT));
 
-        activityLogService.log(user, "AUTH", "AUTH_PASSWORD_RESET_SUCCESS", String.format("#USR-%04d", user.getId()), "Password successfully updated via recovery verification.", "SUCCESS", request);
+        activityLogService.log(
+                user, "AUTH", "AUTH_PASSWORD_RESET_SUCCESS", String.format("#USR-%04d", user.getId()),
+                "Password successfully updated via recovery verification.", "SUCCESS", request);
 
         return ResponseEntity.ok(Map.of("message", "Password successfully reset! You can now log in."));
     }
@@ -627,7 +704,7 @@ public class AuthController {
     // 6. VERIFY SESSION
     // ==========================================
     @PostMapping("/verify-session")
-    public ResponseEntity<?> verifySession(HttpServletRequest request) {
+    public ResponseEntity<?> verifySession() {
         // Identity is derived exclusively from the authenticated JWT. The old
         // implementation trusted client-supplied userId/role, which let any
         // caller assert another account's identity.
@@ -638,8 +715,10 @@ public class AuthController {
 
         return userRepository.findById(principal.getId())
                 .<ResponseEntity<?>>map(user -> {
-                    if ("Suspended".equalsIgnoreCase(user.getStatus()) || "Deactivated".equalsIgnoreCase(user.getStatus())) {
-                        return ResponseEntity.status(403).body(Map.of("valid", false, "error", "Account access revoked."));
+                    if ("Suspended".equalsIgnoreCase(user.getStatus())
+                            || "Deactivated".equalsIgnoreCase(user.getStatus())) {
+                        return ResponseEntity.status(403)
+                                .body(Map.of("valid", false, "error", "Account access revoked."));
                     }
                     Map<String, Object> result = new HashMap<>();
                     result.put("valid", true);
@@ -669,7 +748,8 @@ public class AuthController {
             // other outstanding access token) stops working immediately.
             user.bumpSessionVersion();
             userRepository.save(user);
-            activityLogService.log(user, "AUTH", "AUTH_LOGOUT", String.format("#USR-%04d", user.getId()),
+            activityLogService.log(
+                    user, "AUTH", "AUTH_LOGOUT", String.format("#USR-%04d", user.getId()),
                     "User logged out; all refresh tokens revoked and session version bumped.", "SUCCESS", request);
         }
 

@@ -6,6 +6,7 @@ import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 
@@ -17,5 +18,6 @@ public interface MfaChallengeRepository extends JpaRepository<MfaChallenge, Long
      * code cannot be consumed twice and attempt counts cannot race.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Transactional
     Optional<MfaChallenge> findTopByUserAndUsedFalseOrderByCreatedAtDesc(User user);
 }

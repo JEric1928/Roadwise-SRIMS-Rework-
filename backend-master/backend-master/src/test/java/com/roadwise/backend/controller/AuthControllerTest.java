@@ -15,7 +15,6 @@ import com.roadwise.backend.service.NotificationService;
 import com.roadwise.backend.service.SupabaseStorageService;
 import com.roadwise.backend.service.RoadInspectionService;
 import com.jayway.jsonpath.JsonPath;
-import org.springframework.util.DigestUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,7 +27,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
@@ -186,7 +184,7 @@ class AuthControllerTest {
     @Test
     void testRefreshToken_ReuseRevokesWholeFamily() throws Exception {
         String rawToken = "raw-refresh-token-1";
-        String hash = DigestUtils.md5DigestAsHex(rawToken.getBytes(StandardCharsets.UTF_8));
+        String hash = AuthController.hashToken(rawToken);
         refreshTokenRepository.save(new RefreshToken(testUser, hash, LocalDateTime.now().plusDays(7), "127.0.0.1"));
 
         String firstResponse = mockMvc.perform(post("/api/auth/refresh")

@@ -6,6 +6,7 @@ import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Optional;
@@ -16,6 +17,7 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
 
     /** Pessimistic lock so concurrent refresh rotations cannot both succeed. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Transactional
     Optional<RefreshToken> findWithLockByTokenHash(String tokenHash);
 
     List<RefreshToken> findByUserAndRevokedFalse(User user);

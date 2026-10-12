@@ -1,6 +1,5 @@
 package com.roadwise.backend.controller;
 
-import com.roadwise.backend.model.Barangay;
 import com.roadwise.backend.model.CityRoad;
 import com.roadwise.backend.repository.BarangayRepository;
 import com.roadwise.backend.repository.CityRoadRepository;
@@ -62,6 +61,9 @@ public class CityRoadController {
         // 1. Ensure a Barangay is attached
         if (cityRoad.getBarangay() == null || cityRoad.getBarangay().getId() == null) {
             return ResponseEntity.badRequest().body("A valid Barangay ID is required to register a road.");
+        }
+        if (!barangayRepository.existsById(cityRoad.getBarangay().getId())) {
+            return ResponseEntity.badRequest().body("The specified Barangay does not exist.");
         }
 
         // 2. Clean the input (removes accidental spaces)
@@ -132,6 +134,12 @@ public class CityRoadController {
         }
 
         CityRoad existingRoad = existingOpt.get();
+        if (updatedInfo.getBarangay() == null || updatedInfo.getBarangay().getId() == null) {
+            return ResponseEntity.badRequest().body("A valid Barangay ID is required to update a road.");
+        }
+        if (!barangayRepository.existsById(updatedInfo.getBarangay().getId())) {
+            return ResponseEntity.badRequest().body("The specified Barangay does not exist.");
+        }
         String cleanedName = updatedInfo.getRoadName().trim();
         Long brgyId = updatedInfo.getBarangay().getId();
 
@@ -142,6 +150,7 @@ public class CityRoadController {
 
         // 3. Update the fields
         existingRoad.setRoadName(cleanedName);
+        existingRoad.setBarangay(updatedInfo.getBarangay());
         existingRoad.setRoadImportance(updatedInfo.getRoadImportance());
         existingRoad.setRoadType(updatedInfo.getRoadType());
         existingRoad.setTerrainType(updatedInfo.getTerrainType());
