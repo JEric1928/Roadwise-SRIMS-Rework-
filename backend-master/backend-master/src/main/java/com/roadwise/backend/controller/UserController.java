@@ -321,13 +321,10 @@ public class UserController {
         if (rawPassword == null || rawPassword.trim().isEmpty()) {
             return ResponseEntity.status(400).body(Map.of("error", "Password is required."));
         }
-<<<<<<< HEAD
         String policyError = PasswordPolicy.validate(rawPassword);
         if (policyError != null) {
             return ResponseEntity.status(400).body(Map.of("error", policyError));
         }
-=======
->>>>>>> 04ae5226e73d3211b8bdff7e0567d67c856aca26
         if (userRepository.findByUsername(username).isPresent()) {
             return ResponseEntity.status(400).body(Map.of("error", "Username already exists!"));
         }
@@ -518,11 +515,8 @@ public class UserController {
         user.setPassword(passwordEncoder.encode(tempPassword));
         user.setFailedLoginAttempts(0);
         user.setLockoutUntil(null);
-<<<<<<< HEAD
         // Force every existing session for the affected account to re-authenticate.
         user.bumpSessionVersion();
-=======
->>>>>>> 04ae5226e73d3211b8bdff7e0567d67c856aca26
         userRepository.save(user);
 
         notificationService.sendNotification(
