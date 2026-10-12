@@ -7,6 +7,7 @@ import com.roadwise.backend.repository.*;
 import com.roadwise.backend.service.ActivityLogService;
 import com.roadwise.backend.service.EmailService;
 import com.roadwise.backend.service.NotificationService;
+import com.roadwise.backend.service.RateLimitService;
 import com.roadwise.backend.util.PasswordPolicy;
 import com.roadwise.backend.util.SecurityUtils;
 import jakarta.servlet.http.HttpServletRequest;
@@ -55,7 +56,7 @@ public class AuthController {
     private RefreshTokenRepository refreshTokenRepository;
 
     @Autowired
-    private LoginRateLimitRepository loginRateLimitRepository;
+    private RateLimitService rateLimitService;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -77,7 +78,6 @@ public class AuthController {
     private final SecureRandom secureRandom = new SecureRandom();
 
     // Failed-attempt counters age out after this window instead of blocking forever.
-    private static final Duration RATE_WINDOW = Duration.ofMinutes(15);
     private static final Duration RESET_REQUEST_COOLDOWN = Duration.ofSeconds(60);
     private static final int RESET_REQUEST_MAX_PER_WINDOW = 5;
 
@@ -107,74 +107,25 @@ public class AuthController {
         }
     }
 
-    private boolean isWindowExpired(LoginRateLimit rateLimit) {
-        return rateLimit.getFirstAttemptAt() != null
-                && rateLimit.getFirstAttemptAt().isBefore(LocalDateTime.now().minus(RATE_WINDOW));
-    }
-
     private boolean checkRateLimit(String keyIdentifier) {
-        Optional<LoginRateLimit> rateLimitOpt = loginRateLimitRepository.findByKeyIdentifier(keyIdentifier);
-        if (rateLimitOpt.isPresent()) {
-            LoginRateLimit rateLimit = rateLimitOpt.get();
-            if (isWindowExpired(rateLimit)) {
-                loginRateLimitRepository.delete(rateLimit);
-                return true;
-            }
-            if (rateLimit.getBlockedUntil() != null && LocalDateTime.now().isBefore(rateLimit.getBlockedUntil())) {
-                return false;
-            }
-        }
-        return true;
+        return !rateLimitService.isBlocked(keyIdentifier);
     }
 
     private void recordFailedAttempt(String keyIdentifier) {
-        LoginRateLimit rateLimit = loginRateLimitRepository.findByKeyIdentifier(keyIdentifier).orElse(null);
-        if (rateLimit == null || isWindowExpired(rateLimit)) {
-            rateLimit = new LoginRateLimit(keyIdentifier);
-            rateLimit.setAttemptCount(0);
-            rateLimit.setFirstAttemptAt(LocalDateTime.now());
-        }
-
-        rateLimit.setAttemptCount(rateLimit.getAttemptCount() + 1);
-        rateLimit.setLastAttemptAt(LocalDateTime.now());
-        if (rateLimit.getAttemptCount() > 5) {
-            long penaltySeconds = (long) Math.pow(2, rateLimit.getAttemptCount() - 5);
-            penaltySeconds = Math.min(penaltySeconds, 900);
-            rateLimit.setBlockedUntil(LocalDateTime.now().plusSeconds(penaltySeconds));
-        }
-        loginRateLimitRepository.save(rateLimit);
+        rateLimitService.recordFailure(keyIdentifier);
     }
 
     private boolean isResetRequestThrottled(String keyIdentifier) {
-        Optional<LoginRateLimit> opt = loginRateLimitRepository.findByKeyIdentifier(keyIdentifier);
-        if (opt.isEmpty()) {
-            return false;
-        }
-        LoginRateLimit rateLimit = opt.get();
-        if (isWindowExpired(rateLimit)) {
-            return false;
-        }
-        if (rateLimit.getLastAttemptAt() != null
-                && rateLimit.getLastAttemptAt().isAfter(LocalDateTime.now().minus(RESET_REQUEST_COOLDOWN))) {
-            return true;
-        }
-        return rateLimit.getAttemptCount() >= RESET_REQUEST_MAX_PER_WINDOW;
+        return rateLimitService.isRequestThrottled(
+                keyIdentifier, RESET_REQUEST_COOLDOWN, RESET_REQUEST_MAX_PER_WINDOW);
     }
 
     private void recordResetRequest(String keyIdentifier) {
-        LoginRateLimit rateLimit = loginRateLimitRepository.findByKeyIdentifier(keyIdentifier).orElse(null);
-        if (rateLimit == null || isWindowExpired(rateLimit)) {
-            rateLimit = new LoginRateLimit(keyIdentifier);
-            rateLimit.setAttemptCount(0);
-            rateLimit.setFirstAttemptAt(LocalDateTime.now());
-        }
-        rateLimit.setAttemptCount(rateLimit.getAttemptCount() + 1);
-        rateLimit.setLastAttemptAt(LocalDateTime.now());
-        loginRateLimitRepository.save(rateLimit);
+        rateLimitService.recordRequest(keyIdentifier);
     }
 
     private void clearRateLimit(String keyIdentifier) {
-        loginRateLimitRepository.findByKeyIdentifier(keyIdentifier).ifPresent(loginRateLimitRepository::delete);
+        rateLimitService.clear(keyIdentifier);
     }
 
     private LocalDateTime effectiveRefreshExpiry(LocalDateTime now, LocalDateTime sessionExpiresAt) {
@@ -502,6 +453,13 @@ public class AuthController {
         if ("Suspended".equalsIgnoreCase(user.getStatus())
                 || "Deactivated".equalsIgnoreCase(user.getStatus())) {
             return ResponseEntity.status(403).body(Map.of("error", "Account access revoked."));
+        }
+
+        // Credential-change binding: refuse a token issued under an older
+        // session version (password change, emergency reset, logout, reuse).
+        if (!token.getSessionVersion().equals(user.getSessionVersion())) {
+            revokeAllRefreshTokens(user);
+            return ResponseEntity.status(401).body(Map.of("error", "Session has been revoked. Please log in again."));
         }
 
         LocalDateTime now = LocalDateTime.now();

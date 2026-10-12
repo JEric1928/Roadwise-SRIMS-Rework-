@@ -511,10 +511,20 @@ function bindEditProfileModal() {
       })
         .then(response => {
           if (!response.ok) throw new Error("Failed to update profile");
+          return response.json().catch(() => ({}));
+        })
+        .then(data => {
+          // The server never applies email changes through this endpoint (they
+          // require the verified change-email flow); trust the email it returns
+          // rather than what the form submitted.
+          const serverEmail = (data && typeof data.email === 'string') ? data.email : updatedData.email;
+          if (updatedData.email && serverEmail !== updatedData.email && typeof showToast === 'function') {
+            showToast("Email changes require verification and were not applied.", "warning");
+          }
 
           // Update browser memory
           sessionStorage.setItem('phoneNumber', updatedData.phoneNumber);
-          sessionStorage.setItem('email', updatedData.email);
+          sessionStorage.setItem('email', serverEmail);
           sessionStorage.setItem('birthday', updatedData.birthday);
           sessionStorage.setItem('gender', updatedData.gender);
 
@@ -523,7 +533,7 @@ function bindEditProfileModal() {
           if (pPhone) pPhone.textContent = updatedData.phoneNumber;
 
           const pEmail = document.getElementById('profile-email');
-          if (pEmail) pEmail.textContent = updatedData.email;
+          if (pEmail) pEmail.textContent = serverEmail;
 
           const pGender = document.getElementById('profile-gender');
           if (pGender) pGender.textContent = updatedData.gender;

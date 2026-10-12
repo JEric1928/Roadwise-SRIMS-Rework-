@@ -23,7 +23,15 @@ app = FastAPI(
 
 # 1. Load ONNX Model on Startup (with supply-chain checksum verification)
 MODEL_PATH = "rdd2022_d4_resnet38.onnx"
-if not V.verify_model_file(MODEL_PATH):
+AI_ENV = os.environ.get("AI_ENV", "").strip().lower()
+
+if AI_ENV == "production" and not os.environ.get("MODEL_SHA256", "").strip():
+    # Fail closed in production: without a pinned digest the deployed artifact
+    # is not verifiable, so predictions are refused until MODEL_SHA256 is set.
+    print(">>> [AI ERROR] MODEL_SHA256 must be pinned in production; refusing to load the model.")
+    session = None
+    input_name = None
+elif not V.verify_model_file(MODEL_PATH):
     print(f">>> [AI ERROR] Model checksum verification failed for '{MODEL_PATH}'; refusing to load.")
     session = None
     input_name = None
@@ -124,9 +132,11 @@ class PavementDecayRequest(BaseModel):
 class HydrologicalShockRequest(BaseModel):
     road_id: str = Field(default="RD-102")
     soil_type: str = Field(default="Sibul_Clay")
-    rainfall_mm: float = Field(default=180.0, ge=0.0)
+    # Upper bounds keep the engines from being driven into excessive allocation
+    # or runtime by hostile inputs.
+    rainfall_mm: float = Field(default=180.0, ge=0.0, le=2000.0)
     slope_degrees: float = Field(default=22.0, ge=0.0, le=90.0)
-    drainage_capacity_mm: float = Field(default=50.0, ge=0.0)
+    drainage_capacity_mm: float = Field(default=50.0, ge=0.0, le=1000.0)
 
 
 class DefectPropagationRequest(BaseModel):
@@ -189,7 +199,12 @@ async def predict_severity(file: UploadFile = File(...), _: None = Depends(requi
     if session is None:
         raise HTTPException(status_code=503, detail="AI Model session is not initialized.")
 
-    contents = await file.read()
+    contents = await file.read(V.MAX_FILE_SIZE_BYTES + 1)
+    if contents is None or len(contents) == 0:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if len(contents) > V.MAX_FILE_SIZE_BYTES:
+        # Cap was hit before the full body was buffered in memory.
+        raise HTTPException(status_code=413, detail="Uploaded file exceeds the maximum allowed size.")
 
     # Layer 1: file / security validation (size, MIME, magic bytes).
     err_status, err_message = V.validate_upload_bytes(contents, file.content_type)

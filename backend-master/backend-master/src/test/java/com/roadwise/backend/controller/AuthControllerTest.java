@@ -17,6 +17,7 @@ import com.roadwise.backend.service.RoadInspectionService;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -28,9 +29,17 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.time.LocalDateTime;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.verify;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 @SpringBootTest
@@ -218,6 +227,104 @@ class AuthControllerTest {
 
         mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
                         .get("/api/reports")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void testPasswordChange_RevokesSessionsAndRefreshTokens() throws Exception {
+        String rawToken = "refresh-token-before-password-change";
+        refreshTokenRepository.save(new RefreshToken(testUser, AuthController.hashToken(rawToken),
+                LocalDateTime.now().plusDays(7), "127.0.0.1"));
+        String accessToken = jwtTokenProvider.generateAccessToken(testUser);
+
+        mockMvc.perform(put("/api/users/" + testUser.getId() + "/password")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"Password123!\",\"newPassword\":\"NewPassw0rd!\"}")
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isOk());
+
+        // A refresh token minted before the change can no longer rotate.
+        mockMvc.perform(post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"" + rawToken + "\"}"))
+                .andExpect(status().isUnauthorized());
+
+        // The access token issued before the change is rejected immediately.
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/users/" + testUser.getId())
+                        .header("Authorization", "Bearer " + accessToken))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void testProfileUpdate_CannotChangeEmail() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(testUser);
+
+        mockMvc.perform(put("/api/users/" + testUser.getId() + "/profile")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"attacker@example.com\",\"phoneNumber\":\"0999999999\"}")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        User reloaded = userRepository.findById(testUser.getId()).orElseThrow();
+        assertEquals("testuser@example.com", reloaded.getEmail());
+        assertEquals("0999999999", reloaded.getPhoneNumber());
+    }
+
+    @Test
+    void testEmailChange_RequiresVerifiedOtpAndRevokesSessions() throws Exception {
+        String token = jwtTokenProvider.generateAccessToken(testUser);
+
+        // Wrong password is rejected.
+        mockMvc.perform(post("/api/users/" + testUser.getId() + "/email-change/request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"nope\",\"email\":\"new.address@example.com\"}")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized());
+
+        // The correct password only queues the change.
+        mockMvc.perform(post("/api/users/" + testUser.getId() + "/email-change/request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"currentPassword\":\"Password123!\",\"email\":\"new.address@example.com\"}")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        User pending = userRepository.findById(testUser.getId()).orElseThrow();
+        assertEquals("testuser@example.com", pending.getEmail());
+        assertEquals("new.address@example.com", pending.getPendingEmail());
+
+        // Pull the OTP out of the mocked email sent to the NEW address.
+        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(emailService, atLeastOnce())
+                .sendEmail(eq("new.address@example.com"), anyString(), bodyCaptor.capture());
+        Matcher matcher = Pattern.compile("verification code is: (\\d{6})")
+                .matcher(bodyCaptor.getValue());
+        assertTrue(matcher.find(), "OTP should be embedded in the new-address email");
+        String otp = matcher.group(1);
+
+        // A wrong OTP does not activate the address.
+        mockMvc.perform(post("/api/users/" + testUser.getId() + "/email-change/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"otp\":\"000000\"}")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isUnauthorized());
+        assertEquals("testuser@example.com",
+                userRepository.findById(testUser.getId()).orElseThrow().getEmail());
+
+        // The real OTP activates the address and revokes the pre-change session.
+        mockMvc.perform(post("/api/users/" + testUser.getId() + "/email-change/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"otp\":\"" + otp + "\"}")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk());
+
+        User confirmed = userRepository.findById(testUser.getId()).orElseThrow();
+        assertEquals("new.address@example.com", confirmed.getEmail());
+        assertNull(confirmed.getPendingEmail());
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .get("/api/users/" + testUser.getId())
                         .header("Authorization", "Bearer " + token))
                 .andExpect(status().isUnauthorized());
     }

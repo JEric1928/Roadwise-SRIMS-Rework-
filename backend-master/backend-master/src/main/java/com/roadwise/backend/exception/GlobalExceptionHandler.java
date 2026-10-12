@@ -4,6 +4,7 @@ import com.roadwise.backend.dto.ErrorResponseDto;
 import jakarta.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -70,6 +71,21 @@ public class GlobalExceptionHandler {
                 request.getRequestURI()
         );
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorDto);
+    }
+
+    // A stale save (concurrent password change, avatar upload racing a status
+    // edit) must surface as an explicit conflict, never as a silent overwrite.
+    @ExceptionHandler(ObjectOptimisticLockingFailureException.class)
+    public ResponseEntity<ErrorResponseDto> handleOptimisticLock(
+            ObjectOptimisticLockingFailureException ex, HttpServletRequest request) {
+        log.warn("Optimistic locking conflict on {} {}", request.getMethod(), request.getRequestURI());
+        ErrorResponseDto errorDto = new ErrorResponseDto(
+                HttpStatus.CONFLICT.value(),
+                "CONFLICT",
+                "The record was modified by another request. Please retry.",
+                request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorDto);
     }
 
     @ExceptionHandler(Exception.class)

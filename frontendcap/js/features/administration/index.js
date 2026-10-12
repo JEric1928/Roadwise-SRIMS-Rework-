@@ -8,6 +8,7 @@
  * code already call.
  */
 import { apiFetch, API_BASE_URL, getAuthHeaders } from '../../core/api.js';
+import { escapeHtml } from '../../core/utils.js';
 import { showToast } from '../../components/toast.js';
 
 // ==========================================
@@ -28,7 +29,11 @@ window.loadUserManagementTable = function() {
 
       let html = '';
       users.forEach(user => {
-        const brgyName = user.barangay ? (user.barangay.barangayName || `Barangay ID: ${user.barangay.id}`) : '<span style="color:red; font-weight: 600;">Pending Assignment</span>';
+        const brgyName = user.barangay
+          ? (user.barangay.barangayName
+              ? escapeHtml(user.barangay.barangayName)
+              : `Barangay ID: ${user.barangay.id}`)
+          : '<span style="color:red; font-weight: 600;">Pending Assignment</span>';
 
         let statusBadge = '';
         if (user.status === 'Deactivated') {
@@ -42,10 +47,10 @@ window.loadUserManagementTable = function() {
         html += `
           <tr style="border-bottom: 1px solid #e2e8f0; transition: 0.2s;">
               <td style="padding: 15px 20px; font-size: 14px; color: #333;">
-                  <strong>${user.firstName || 'N/A'} ${user.lastName || 'N/A'}</strong>
+                  <strong>${escapeHtml(user.firstName || 'N/A')} ${escapeHtml(user.lastName || 'N/A')}</strong>
               </td>
               <td style="padding: 15px 20px; font-size: 14px; color: #495057;">
-                  ${user.username || 'N/A'}
+                  ${escapeHtml(user.username || 'N/A')}
               </td>
               <td style="padding: 15px 20px; font-size: 14px; color: #495057;">
                   <span style="color: #6c757d; margin-right: 5px;">🏛️</span> ${brgyName}
@@ -111,17 +116,17 @@ window.loadBarangayDropdownForAdmin = function() {
         if (isOccupied) {
           itemsHtml += `
             <div style="padding: 9px 14px; font-size: 13px; color: #94a3b8; background: #f8fafc; border-bottom: 1px solid #f1f5f9; cursor: not-allowed; display: flex; justify-content: space-between;">
-              <span>${brgy.barangayName}</span>
-              <span style="font-size: 11px; font-style: italic;">Assigned: ${occupiedMap[brgy.id]}</span>
+              <span>${escapeHtml(brgy.barangayName)}</span>
+              <span style="font-size: 11px; font-style: italic;">Assigned: ${escapeHtml(occupiedMap[brgy.id])}</span>
             </div>
           `;
         } else {
           itemsHtml += `
-            <div class="custom-brgy-option" data-id="${brgy.id}" data-name="${brgy.barangayName}"
+            <div class="custom-brgy-option" data-id="${brgy.id}" data-name="${escapeHtml(brgy.barangayName)}"
                  style="padding: 9px 14px; font-size: 13px; color: #0f172a; border-bottom: 1px solid #f1f5f9; cursor: pointer; transition: background 0.15s ease;"
                  onmouseover="this.style.background='#eff6ff'; this.style.color='#1d4ed8';"
                  onmouseout="this.style.background='#ffffff'; this.style.color='#0f172a';">
-              📍 <strong>${brgy.barangayName}</strong> <span style="font-size: 11px; color: #16a34a; float: right; font-weight: 600;">(Available)</span>
+              📍 <strong>${escapeHtml(brgy.barangayName)}</strong> <span style="font-size: 11px; color: #16a34a; float: right; font-weight: 600;">(Available)</span>
             </div>
           `;
         }
@@ -360,11 +365,11 @@ window.openManageOfficialModal = function(userId) {
       barangays.sort((a, b) => a.barangayName.localeCompare(b.barangayName)).forEach(b => {
         const isCurrentBrgy = currentUser.barangay && currentUser.barangay.id === b.id;
         if (occupiedMap[b.id]) {
-          optionsHtml += `<option value="${b.id}" disabled style="color: #94a3b8;">${b.barangayName} (Occupied: ${occupiedMap[b.id]})</option>`;
+          optionsHtml += `<option value="${b.id}" disabled style="color: #94a3b8;">${escapeHtml(b.barangayName)} (Occupied: ${escapeHtml(occupiedMap[b.id])})</option>`;
         } else if (isCurrentBrgy) {
-          optionsHtml += `<option value="${b.id}" selected>📍 ${b.barangayName} (Currently Assigned)</option>`;
+          optionsHtml += `<option value="${b.id}" selected>📍 ${escapeHtml(b.barangayName)} (Currently Assigned)</option>`;
         } else {
-          optionsHtml += `<option value="${b.id}">📍 ${b.barangayName} (Available)</option>`;
+          optionsHtml += `<option value="${b.id}">📍 ${escapeHtml(b.barangayName)} (Available)</option>`;
         }
       });
 
@@ -564,8 +569,8 @@ window.loadBarangayManagement = function() {
 
         row.innerHTML = `
           <td style="text-align: center; font-weight: bold; color: #6c757d;">${index + 1}</td>
-          <td><strong>${brgy.name}</strong></td>
-          <td>${brgy.contactName || 'Unassigned'}</td>
+          <td><strong>${escapeHtml(brgy.name)}</strong></td>
+          <td>${escapeHtml(brgy.contactName || 'Unassigned')}</td>
           <td>${brgy.roadCount || 0} Roads</td>
           <td>${badgeHtml}</td>
           <td>
@@ -647,9 +652,9 @@ window.openManageBarangayModal = function(id) {
       roads.forEach(road => {
         const row = document.createElement('tr');
         row.innerHTML = `
-  <td style="padding: 10px; font-size: 12px;">${road.roadId || 'N/A'}</td>
-  <td style="padding: 10px; font-size: 12px;"><strong>${road.roadName || 'Unnamed Road'}</strong></td>
-  <td style="padding: 10px; font-size: 12px;">${road.roadImportance || 'Unknown'}</td>
+  <td style="padding: 10px; font-size: 12px;">${escapeHtml(road.roadId || 'N/A')}</td>
+  <td style="padding: 10px; font-size: 12px;"><strong>${escapeHtml(road.roadName || 'Unnamed Road')}</strong></td>
+  <td style="padding: 10px; font-size: 12px;">${escapeHtml(road.roadImportance || 'Unknown')}</td>
   <td style="padding: 10px; text-align: right;">
 
     <!-- 🚀 THE ENHANCED EDIT BUTTON -->

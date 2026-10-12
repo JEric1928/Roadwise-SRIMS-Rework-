@@ -231,12 +231,11 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     if (typeof window.apiFetch === 'function') {
-      window.apiFetch('/api/auth/logout', { method: 'POST' })
-        .catch(() => {})
-        .finally(finishLogout);
-    } else {
-      finishLogout();
+      // Fire the revocation request WITHOUT waiting for it: local credentials
+      // are cleared immediately, even if the network call is slow or fails.
+      window.apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     }
+    finishLogout();
   };
 
   if (logoutBtn && logoutConfirmModal) {

@@ -38,6 +38,11 @@ public class RefreshToken {
     // Last successful refresh; drives the inactivity window.
     private LocalDateTime lastUsedAt;
 
+    // Session version this token was issued under. Rotation is refused when the
+    // account's stamp has moved on (credential change, logout, reuse event).
+    @Column(name = "session_version", nullable = false)
+    private Long sessionVersion = 0L;
+
     public RefreshToken() {}
 
     public RefreshToken(User user, String tokenHash, LocalDateTime expiresAt, String createdByIp) {
@@ -52,6 +57,7 @@ public class RefreshToken {
         this.createdByIp = createdByIp;
         this.sessionExpiresAt = sessionExpiresAt;
         this.lastUsedAt = LocalDateTime.now();
+        this.sessionVersion = user != null ? user.getSessionVersion() : 0L;
     }
 
     public Long getId() { return id; }
@@ -83,4 +89,7 @@ public class RefreshToken {
 
     public LocalDateTime getLastUsedAt() { return lastUsedAt; }
     public void setLastUsedAt(LocalDateTime lastUsedAt) { this.lastUsedAt = lastUsedAt; }
+
+    public Long getSessionVersion() { return sessionVersion == null ? 0L : sessionVersion; }
+    public void setSessionVersion(Long sessionVersion) { this.sessionVersion = sessionVersion; }
 }

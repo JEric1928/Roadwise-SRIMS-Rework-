@@ -365,4 +365,71 @@ class RoadReportWorkflowTest {
                 eq("REMINDER")
         );
     }
+
+    @Test
+    void testStatusChange_EngineerCannotDispatchOrSetDeadlines() throws Exception {
+        RoadReport report = new RoadReport();
+        report.setCityRoadName("Role Matrix Road");
+        report.setStatus("Validated");
+        report = reportRepository.save(report);
+
+        // Dispatch is an administrative transition.
+        mockMvc.perform(put("/api/reports/" + report.getId() + "/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"Dispatched to CEO\"}")
+                        .header("Authorization", "Bearer " + engineerToken))
+                .andExpect(status().isForbidden());
+
+        RoadReport unchanged = reportRepository.findById(report.getId()).orElseThrow();
+        assertEquals("Validated", unchanged.getStatus());
+
+        // Deadline edits belong to administrative scheduling, not the repair flow.
+        RoadReport dispatchable = new RoadReport();
+        dispatchable.setCityRoadName("Deadline Road");
+        dispatchable.setStatus("Dispatched to CEO");
+        dispatchable = reportRepository.save(dispatchable);
+
+        mockMvc.perform(put("/api/reports/" + dispatchable.getId() + "/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"In Progress\",\"targetCompletionDate\":\"2030-01-01\"}")
+                        .header("Authorization", "Bearer " + engineerToken))
+                .andExpect(status().isForbidden());
+        assertNull(reportRepository.findById(dispatchable.getId()).orElseThrow().getTargetCompletionDate());
+
+        // ...while administrators may dispatch.
+        mockMvc.perform(put("/api/reports/" + report.getId() + "/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"Dispatched to CEO\"}")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+        assertEquals("Dispatched to CEO",
+                reportRepository.findById(report.getId()).orElseThrow().getStatus());
+    }
+
+    @Test
+    void testTimeline_EnforcesBarangayOwnership() throws Exception {
+        Barangay otherBarangay = new Barangay();
+        otherBarangay.setBarangayName("Other Barangay");
+        otherBarangay = barangayRepository.save(otherBarangay);
+
+        RoadReport foreign = new RoadReport();
+        foreign.setCityRoadName("Foreign Road");
+        foreign.setStatus("Pending Validation");
+        foreign.setBarangay(otherBarangay);
+        foreign = reportRepository.save(foreign);
+
+        RoadReport own = new RoadReport();
+        own.setCityRoadName("Own Road");
+        own.setStatus("Pending Validation");
+        own.setBarangay(testBarangay);
+        own = reportRepository.save(own);
+
+        mockMvc.perform(get("/api/reports/" + foreign.getId() + "/timeline")
+                        .header("Authorization", "Bearer " + barangayToken))
+                .andExpect(status().isForbidden());
+
+        mockMvc.perform(get("/api/reports/" + own.getId() + "/timeline")
+                        .header("Authorization", "Bearer " + barangayToken))
+                .andExpect(status().isOk());
+    }
 }

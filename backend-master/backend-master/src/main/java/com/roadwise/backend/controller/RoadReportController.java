@@ -24,6 +24,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
@@ -463,6 +464,17 @@ public class RoadReportController {
         ReportStatus currentStatusEnum = ReportStatus.fromString(previousStatusStr);
         ReportStatus targetStatusEnum = ReportStatus.fromString(newStatusStr);
 
+        // Role matrix (state machine + authority check) so this generic
+        // endpoint cannot bypass administrative-only flows such as dispatch.
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        List<String> callerRoles = auth == null ? List.of() : auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .toList();
+        boolean callerIsAdmin = callerRoles.stream().anyMatch(role -> {
+            String normalized = role == null ? "" : role.replaceFirst("^ROLE_", "");
+            return normalized.equalsIgnoreCase("ADMIN") || normalized.equalsIgnoreCase("CPDO Admin");
+        });
+
         boolean isAutoArchivedNoDamage = false;
         if (targetStatusEnum == ReportStatus.VALIDATED) {
             boolean hasNoDamageImage = report.getDamageImage() == null ||
@@ -478,7 +490,7 @@ public class RoadReportController {
             }
         }
 
-        reportWorkflowService.validateTransition(currentStatusEnum, targetStatusEnum);
+        reportWorkflowService.validateTransitionForRole(currentStatusEnum, targetStatusEnum, callerRoles);
 
         // Every terminal repair outcome requires evidence. Without this, a report
         // could go In Progress -> Resolved -> Closed with no proof of repair.
@@ -498,6 +510,12 @@ public class RoadReportController {
 
         String targetDateStr = payload.get("targetCompletionDate");
         if (targetDateStr != null && !targetDateStr.trim().isEmpty()) {
+            // Deadline changes belong to administrative scheduling, not to the
+            // repair workflow.
+            if (!callerIsAdmin) {
+                return ResponseEntity.status(403)
+                        .body("Deadline changes require administrative scheduling approval.");
+            }
             try {
                 report.setTargetCompletionDate(LocalDate.parse(targetDateStr.trim()));
             } catch (Exception ignored) {}
@@ -1221,6 +1239,12 @@ public class RoadReportController {
     // ==========================================
     @GetMapping("/{id}/timeline")
     public ResponseEntity<List<ReportStatusLog>> getReportTimeline(@PathVariable Long id) {
+        User currentUser = getAuthenticatedUser();
+        RoadReport report = repository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Report not found"));
+        // The timeline carries remarks, actor identities and attachment URLs, so
+        // it gets the same barangay ownership check as the report itself.
+        enforceBarangayReportAccess(currentUser, report);
         return ResponseEntity.ok(reportStatusLogService.getTimeline(id));
     }
 

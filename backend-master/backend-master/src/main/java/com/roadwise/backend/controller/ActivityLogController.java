@@ -61,7 +61,7 @@ public class ActivityLogController {
             ActivityLog savedLog = activityLogService.log(actor, category, action, targetEntity, description, "SUCCESS", request);
             return ResponseEntity.ok(savedLog);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body(Map.of("error", "Failed to record activity log: " + e.getMessage()));
+            return ResponseEntity.status(500).body(Map.of("error", "Failed to record activity log."));
         }
     }
 }

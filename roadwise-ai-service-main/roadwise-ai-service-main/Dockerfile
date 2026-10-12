@@ -23,6 +23,10 @@ USER nobody
 # Hugging Face Spaces listens on port 7860
 EXPOSE 7860
 
+# Production guard: main.py refuses to load (and therefore refuses to serve
+# predictions) unless MODEL_SHA256 is provided when AI_ENV=production.
+ENV AI_ENV=production
+
 # Request body ceiling enforced at the app layer (streamed read); uvicorn
 # limits bound connection handling resources.
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "7860", "--limit-concurrency", "32", "--backlog", "64", "--timeout-keep-alive", "5"]

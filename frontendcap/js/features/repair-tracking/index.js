@@ -4,7 +4,7 @@
  * and deadline reminder alerts.
  */
 import { apiFetch, API_BASE_URL, getAuthHeaders } from '../../core/api.js';
-import { resetModalScroll } from '../../core/utils.js';
+import { resetModalScroll, escapeHtml } from '../../core/utils.js';
 import { showToast } from '../../components/toast.js';
 
 export let rawTrackedReports = [];
@@ -137,8 +137,8 @@ export function loadTrackingData() {
         row.innerHTML = `
           <td style="text-align: center;">${checkboxHtml}</td>
           <td><strong>${formatId}</strong></td>
-          <td>${formatBrgy}</td>
-          <td>${roadName}</td>
+          <td>${escapeHtml(formatBrgy)}</td>
+          <td>${escapeHtml(roadName)}</td>
           <td>${badgeHtml}</td>
           <td>${statusHtml}</td>
           <td><button class="btn-small track-btn" onclick="openTrackingModal(${report.id})">Track</button></td>

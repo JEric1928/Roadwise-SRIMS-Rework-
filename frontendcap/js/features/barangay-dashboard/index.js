@@ -533,8 +533,8 @@ function loadReportTimeline(reportId, targetContainerId) {
           badgeClass = 'badge-yellow';
         }
 
-        // Format label
-        const displayAction = (event.action || '').replace(/_/g, ' ');
+        // Format label (server-supplied action token — escaped before HTML use)
+        const displayAction = escapeHtml((event.action || '').replace(/_/g, ' '));
 
         // 🇵🇭 EXACT LINE CHANGED: Guaranteed Philippine Standard Time (Asia/Manila)
         const dateStr = event.createdAt ? formatPST(event.createdAt, true) : 'Recent';
@@ -550,11 +550,14 @@ function loadReportTimeline(reportId, targetContainerId) {
           `;
         }
 
-        // Build attachment thumbnail link
+        // Build attachment thumbnail link. The URL is carried in a data
+        // attribute (never interpolated into an inline handler) and only
+        // http(s) sources are accepted.
         let attachmentHtml = '';
-        if (event.attachmentUrl && event.attachmentUrl !== 'no_image.jpg') {
+        if (event.attachmentUrl && event.attachmentUrl !== 'no_image.jpg'
+            && /^https?:\/\//i.test(event.attachmentUrl)) {
           attachmentHtml = `
-            <a class="timeline-attachment-link" onclick="openFullscreenImage({ src: '${event.attachmentUrl}' })">
+            <a class="timeline-attachment-link" href="#" data-attachment-url="${escapeHtml(event.attachmentUrl)}">
               <span>📸</span> View Logged Attachment
             </a>
           `;
@@ -576,6 +579,17 @@ function loadReportTimeline(reportId, targetContainerId) {
         `;
 
         container.appendChild(item);
+
+        // Event listener instead of a generated inline handler.
+        const attachmentLink = item.querySelector('[data-attachment-url]');
+        if (attachmentLink) {
+          attachmentLink.addEventListener('click', (evt) => {
+            evt.preventDefault();
+            if (typeof window.openFullscreenImage === 'function') {
+              window.openFullscreenImage({ src: attachmentLink.getAttribute('data-attachment-url') });
+            }
+          });
+        }
       });
 
       // 🚀 RESET TIMELINE SCROLL POSITION TO TOP ONCE CONTENT IS INJECTED

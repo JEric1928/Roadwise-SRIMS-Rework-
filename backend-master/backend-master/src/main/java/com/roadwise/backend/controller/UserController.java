@@ -1,12 +1,19 @@
 package com.roadwise.backend.controller;
 
 import com.roadwise.backend.dto.UserResponseDto;
+import com.roadwise.backend.model.MfaChallenge;
+import com.roadwise.backend.model.PasswordResetToken;
+import com.roadwise.backend.model.RefreshToken;
 import com.roadwise.backend.model.User;
 import com.roadwise.backend.repository.BarangayRepository;
+import com.roadwise.backend.repository.MfaChallengeRepository;
+import com.roadwise.backend.repository.PasswordResetTokenRepository;
+import com.roadwise.backend.repository.RefreshTokenRepository;
 import com.roadwise.backend.repository.UserRepository;
 import com.roadwise.backend.service.ActivityLogService;
 import com.roadwise.backend.service.EmailService;
 import com.roadwise.backend.service.NotificationService;
+import com.roadwise.backend.service.RateLimitService;
 import com.roadwise.backend.service.SupabaseStorageService;
 import com.roadwise.backend.util.PasswordPolicy;
 import com.roadwise.backend.util.SecurityUtils;
@@ -55,6 +62,18 @@ public class UserController {
     @Value("${frontend.url:https://roadwise-csjdm.com}")
     private String frontendUrl;
 
+    @Autowired
+    private RefreshTokenRepository refreshTokenRepository;
+
+    @Autowired
+    private MfaChallengeRepository mfaChallengeRepository;
+
+    @Autowired
+    private PasswordResetTokenRepository passwordResetTokenRepository;
+
+    @Autowired
+    private RateLimitService rateLimitService;
+
     // ==========================================
     // 🚀 HELPER: DYNAMICALLY FIND ADMIN ID
     // ==========================================
@@ -93,6 +112,33 @@ public class UserController {
         return sb.toString();
     }
 
+    /**
+     * Credential-change remediation: revoke every refresh token, bump the
+     * access-token security stamp, and consume outstanding MFA/recovery
+     * challenges so a pre-change OTP cannot survive the change.
+     */
+    private void revokeUserSessionsAndChallenges(User user) {
+        List<RefreshToken> activeTokens = refreshTokenRepository.findByUserAndRevokedFalse(user);
+        for (RefreshToken token : activeTokens) {
+            token.setRevoked(true);
+        }
+        refreshTokenRepository.saveAll(activeTokens);
+
+        List<MfaChallenge> pendingChallenges = mfaChallengeRepository.findByUserAndUsedFalse(user);
+        for (MfaChallenge challenge : pendingChallenges) {
+            challenge.setUsed(true);
+        }
+        mfaChallengeRepository.saveAll(pendingChallenges);
+
+        List<PasswordResetToken> pendingResets = passwordResetTokenRepository.findByUserAndUsedFalse(user);
+        for (PasswordResetToken resetToken : pendingResets) {
+            resetToken.setUsed(true);
+        }
+        passwordResetTokenRepository.saveAll(pendingResets);
+
+        user.bumpSessionVersion();
+    }
+
     // ==========================================
     // 1. UPDATE TEXT PROFILE DETAILS
     // ==========================================
@@ -114,7 +160,9 @@ public class UserController {
         User user = userOpt.get();
 
         if (updates.containsKey("phoneNumber")) user.setPhoneNumber(updates.get("phoneNumber"));
-        if (updates.containsKey("email")) user.setEmail(updates.get("email"));
+        // Email is intentionally NOT changed here: it is the MFA/recovery
+        // destination, so it only changes through the verified change-email flow
+        // (current password + OTP confirmed at the new address).
         if (updates.containsKey("gender")) user.setGender(updates.get("gender"));
         if (updates.containsKey("birthday") && updates.get("birthday") != null && !updates.get("birthday").isEmpty()) {
             user.setBirthday(LocalDate.parse(updates.get("birthday")));
@@ -132,7 +180,9 @@ public class UserController {
                 request
         );
 
-        return ResponseEntity.ok(Map.of("message", "Profile updated successfully"));
+        return ResponseEntity.ok(Map.of(
+                "message", "Profile updated successfully",
+                "email", user.getEmail() == null ? "" : user.getEmail()));
     }
 
     // ==========================================
@@ -147,14 +197,14 @@ public class UserController {
             return ResponseEntity.status(403).body(Map.of("error", "You may only update your own profile picture."));
         }
         try {
-            Optional<User> userOpt = userRepository.findById(id);
-            if (userOpt.isEmpty()) return ResponseEntity.notFound().build();
+            if (userRepository.findById(id).isEmpty()) return ResponseEntity.notFound().build();
 
-            User user = userOpt.get();
-
-            // ☁️ UPLOAD DIRECTLY TO SUPABASE OBJECT STORAGE
+            // Upload FIRST, then reload the row: avatar upload can be slow, and
+            // saving a user loaded before it would overwrite concurrent security
+            // changes (@Version turns any residual race into a 409).
             String cloudAvatarUrl = supabaseStorageService.uploadImage(file);
 
+            User user = userRepository.findById(id).orElseThrow();
             user.setProfilePicture(cloudAvatarUrl);
             userRepository.save(user);
 
@@ -262,8 +312,9 @@ public class UserController {
         user.setFailedLoginAttempts(0);
         user.setLockoutUntil(null);
         user.setPassword(passwordEncoder.encode(newPassword));
-        // Revoke every existing session, including the caller's current token.
-        user.bumpSessionVersion();
+        // Revoke every existing session, outstanding refresh token and pending
+        // MFA/recovery challenge; the change is not complete until they are gone.
+        revokeUserSessionsAndChallenges(user);
         userRepository.save(user);
 
         activityLogService.log(
@@ -515,8 +566,9 @@ public class UserController {
         user.setPassword(passwordEncoder.encode(tempPassword));
         user.setFailedLoginAttempts(0);
         user.setLockoutUntil(null);
-        // Force every existing session for the affected account to re-authenticate.
-        user.bumpSessionVersion();
+        // Force re-authentication: revoke refresh tokens, access stamps and any
+        // pending MFA/recovery challenge for the account.
+        revokeUserSessionsAndChallenges(user);
         userRepository.save(user);
 
         notificationService.sendNotification(
@@ -599,8 +651,16 @@ public class UserController {
 
         User currentAdmin = currentAdminOpt.get();
 
+        String adminHandoverThrottle = "HANDOVER_ADMIN:" + currentAdmin.getId();
+        if (rateLimitService.isBlocked(adminHandoverThrottle)) {
+            return ResponseEntity.status(429)
+                    .header("Retry-After", "60")
+                    .body(Map.of("error", "Too many failed attempts. Please try again in a minute."));
+        }
+
         // 🛡️ 1. SECURITY CHECK: Verify Outgoing Admin Password (BCrypt-aware)
         if (!verifyAndMigratePassword(currentAdmin, currentPassword)) {
+            rateLimitService.recordFailure(adminHandoverThrottle);
             userRepository.save(currentAdmin);
             activityLogService.log(
                     currentAdmin,
@@ -613,6 +673,7 @@ public class UserController {
             );
             return ResponseEntity.status(401).body(Map.of("error", "Incorrect current password. Turnover authorization rejected."));
         }
+        rateLimitService.clear(adminHandoverThrottle);
 
         // 🛡️ 2. UNIQUE CONFLICT CHECKS
         if (userRepository.findByUsername(newUsername).isPresent()) {
@@ -644,7 +705,7 @@ public class UserController {
 
         // 5. DEACTIVATE OUTGOING PREDECESSOR (Preserve audit integrity)
         currentAdmin.setStatus("Deactivated");
-        currentAdmin.bumpSessionVersion();
+        revokeUserSessionsAndChallenges(currentAdmin);
         userRepository.save(currentAdmin);
 
         // 📋 6. WRITE PERMANENT SYSTEM ACTIVITY LOG
@@ -724,8 +785,16 @@ public class UserController {
 
         User currentCeo = currentCeoOpt.get();
 
+        String ceoHandoverThrottle = "HANDOVER_CEO:" + currentCeo.getId();
+        if (rateLimitService.isBlocked(ceoHandoverThrottle)) {
+            return ResponseEntity.status(429)
+                    .header("Retry-After", "60")
+                    .body(Map.of("error", "Too many failed attempts. Please try again in a minute."));
+        }
+
         // 🛡️ 1. SECURITY CHECK: Verify Outgoing CEO Password
         if (!verifyAndMigratePassword(currentCeo, currentPassword)) {
+            rateLimitService.recordFailure(ceoHandoverThrottle);
             userRepository.save(currentCeo);
             activityLogService.log(
                     currentCeo,
@@ -738,6 +807,7 @@ public class UserController {
             );
             return ResponseEntity.status(401).body(Map.of("error", "Incorrect current password. Turnover authorization rejected."));
         }
+        rateLimitService.clear(ceoHandoverThrottle);
 
         // 🛡️ 2. UNIQUE CONFLICT CHECKS
         if (userRepository.findByUsername(newUsername).isPresent()) {
@@ -769,7 +839,7 @@ public class UserController {
 
         // 5. DEACTIVATE OUTGOING PREDECESSOR (Preserve audit integrity)
         currentCeo.setStatus("Deactivated");
-        currentCeo.bumpSessionVersion();
+        revokeUserSessionsAndChallenges(currentCeo);
         userRepository.save(currentCeo);
 
         // 📋 6. WRITE SYSTEM ACTIVITY LOG
@@ -812,5 +882,180 @@ public class UserController {
         responseData.put("tempPassword", tempPassword);
 
         return ResponseEntity.ok(responseData);
+    }
+
+    // ==========================================
+    // 11. VERIFIED EMAIL CHANGE (SELF-SERVICE)
+    // ==========================================
+    /**
+     * Step 1: re-enter the current password, then the OTP is delivered to the
+     * NEW address and the OLD address is notified. The real address does not
+     * change until step 2 confirms that OTP, so stolen access tokens cannot
+     * silently redirect recovery mail.
+     */
+    @PostMapping("/{id}/email-change/request")
+    public ResponseEntity<?> requestEmailChange(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> payload,
+            HttpServletRequest request) {
+
+        User caller = SecurityUtils.getCurrentUser();
+        if (caller == null || !caller.getId().equals(id)) {
+            return ResponseEntity.status(403).body(Map.of("error", "You may only change your own email address."));
+        }
+        Optional<User> userOpt = userRepository.findById(id);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        User user = userOpt.get();
+
+        String passwordFailureKey = "EMAIL_CHANGE_PWD:" + id;
+        if (rateLimitService.isBlocked(passwordFailureKey)) {
+            return ResponseEntity.status(429)
+                    .header("Retry-After", "60")
+                    .body(Map.of("error", "Too many failed attempts. Please try again in a minute."));
+        }
+
+        String currentPassword = payload.get("currentPassword");
+        if (!verifyAndMigratePassword(user, currentPassword)) {
+            rateLimitService.recordFailure(passwordFailureKey);
+            return ResponseEntity.status(401).body(Map.of("error", "Incorrect current password."));
+        }
+        rateLimitService.clear(passwordFailureKey);
+
+        // Resend cooldown applies only once a password was accepted, so an
+        // honest retry is never blocked by an earlier typo.
+        String requestKey = "EMAIL_CHANGE:" + id;
+        if (rateLimitService.isRequestThrottled(requestKey, Duration.ofSeconds(60), 5)) {
+            return ResponseEntity.status(429)
+                    .header("Retry-After", "60")
+                    .body(Map.of("error", "A verification code was sent recently. Please wait a minute before requesting another."));
+        }
+        rateLimitService.recordRequest(requestKey);
+
+        String newEmail = payload.get("email") == null ? "" : payload.get("email").trim();
+        if (newEmail.isEmpty() || newEmail.equalsIgnoreCase(user.getEmail() == null ? "" : user.getEmail())) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Provide a different email address."));
+        }
+        if (userRepository.findByEmail(newEmail).isPresent()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "That email is already registered to another user."));
+        }
+
+        String otp = String.format("%06d", SECURE_RANDOM.nextInt(1_000_000));
+        user.setPendingEmail(newEmail);
+        user.setEmailOtpHash(passwordEncoder.encode(otp));
+        user.setEmailOtpExpiresAt(LocalDateTime.now().plusMinutes(10));
+        user.setEmailOtpAttempts(0);
+        userRepository.save(user);
+
+        try {
+            emailService.sendEmail(newEmail, "RoadWise - Confirm Your New Email",
+                    "Hello " + user.getFirstName() + ",\n\n" +
+                    "Your new email verification code is: " + otp + "\n\n" +
+                    "It expires in 10 minutes. If you did not request this, ignore this email.");
+        } catch (Exception e) {
+            System.err.println("Email-change OTP delivery failed: " + e.getMessage());
+        }
+        if (user.getEmail() != null && !user.getEmail().isEmpty()) {
+            try {
+                emailService.sendEmail(user.getEmail(), "RoadWise - Email Change Requested",
+                        "Hello " + user.getFirstName() + ",\n\n" +
+                        "A request was made to change the email on your account to " + newEmail + ".\n\n" +
+                        "If this was not you, contact the CPDO Administrator immediately.");
+            } catch (Exception e) {
+                System.err.println("Email-change notification delivery failed: " + e.getMessage());
+            }
+        }
+
+        activityLogService.log(user, "USER", "EMAIL_CHANGE_REQUESTED", "#USR-" + user.getId(),
+                "Email change requested; OTP sent to the new address.", "SUCCESS", request);
+
+        // Same response shape whether or not the address was accepted, to avoid
+        // leaking which addresses exist.
+        return ResponseEntity.ok(Map.of("message", "If the address is valid, a verification code has been sent to it."));
+    }
+
+    /** Step 2: confirm the OTP that was delivered to the NEW address. */
+    @PostMapping("/{id}/email-change/confirm")
+    public ResponseEntity<?> confirmEmailChange(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> payload,
+            HttpServletRequest request) {
+
+        User caller = SecurityUtils.getCurrentUser();
+        if (caller == null || !caller.getId().equals(id)) {
+            return ResponseEntity.status(403).body(Map.of("error", "You may only change your own email address."));
+        }
+        Optional<User> userOpt = userRepository.findById(id);
+        if (userOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        User user = userOpt.get();
+
+        if (user.getPendingEmail() == null || user.getEmailOtpHash() == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No email change is pending."));
+        }
+        if (user.getEmailOtpExpiresAt() == null || LocalDateTime.now().isAfter(user.getEmailOtpExpiresAt())) {
+            clearPendingEmailChange(user);
+            userRepository.save(user);
+            return ResponseEntity.badRequest().body(Map.of("error", "The verification code expired. Please request a new one."));
+        }
+        if (user.getEmailOtpAttempts() >= 5) {
+            clearPendingEmailChange(user);
+            userRepository.save(user);
+            return ResponseEntity.status(429).header("Retry-After", "600")
+                    .body(Map.of("error", "Maximum verification attempts exceeded. Please request a new code."));
+        }
+
+        String otp = payload.get("otp");
+        if (otp == null || !passwordEncoder.matches(otp, user.getEmailOtpHash())) {
+            user.setEmailOtpAttempts(user.getEmailOtpAttempts() + 1);
+            boolean exhausted = user.getEmailOtpAttempts() >= 5;
+            if (exhausted) {
+                clearPendingEmailChange(user);
+            }
+            userRepository.save(user);
+            return exhausted
+                    ? ResponseEntity.status(429).header("Retry-After", "600")
+                            .body(Map.of("error", "Maximum verification attempts exceeded. Please request a new code."))
+                    : ResponseEntity.status(401).body(Map.of("error", "Invalid verification code."));
+        }
+
+        String oldEmail = user.getEmail();
+        user.setEmail(user.getPendingEmail());
+        clearPendingEmailChange(user);
+        // Completing the change revokes every session and any pending
+        // MFA/recovery challenge (they would still address the old inbox).
+        revokeUserSessionsAndChallenges(user);
+        userRepository.save(user);
+
+        try {
+            emailService.sendEmail(user.getEmail(), "RoadWise - Email Address Changed",
+                    "The email on your RoadWise account is now " + user.getEmail() + ".\n\n" +
+                    "You have been signed out for security; please log in again.");
+        } catch (Exception e) {
+            System.err.println("Email-change confirmation delivery failed: " + e.getMessage());
+        }
+        if (oldEmail != null && !oldEmail.isEmpty()) {
+            try {
+                emailService.sendEmail(oldEmail, "RoadWise - Email Address Changed",
+                        "The email on your RoadWise account was changed to " + user.getEmail() + ".\n\n" +
+                        "If you did not make this change, contact the CPDO Administrator immediately.");
+            } catch (Exception e) {
+                System.err.println("Email-change old-address notice failed: " + e.getMessage());
+            }
+        }
+
+        activityLogService.log(user, "USER", "EMAIL_CHANGE_CONFIRMED", "#USR-" + user.getId(),
+                "Email change verified via OTP; all sessions revoked.", "SUCCESS", request);
+
+        return ResponseEntity.ok(Map.of("message", "Email address updated successfully. Please log in again."));
+    }
+
+    private void clearPendingEmailChange(User user) {
+        user.setPendingEmail(null);
+        user.setEmailOtpHash(null);
+        user.setEmailOtpExpiresAt(null);
+        user.setEmailOtpAttempts(0);
     }
 }

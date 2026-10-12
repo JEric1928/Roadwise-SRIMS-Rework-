@@ -1,12 +1,23 @@
 package com.roadwise.backend.service;
 
 import com.roadwise.backend.model.ReportStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
 
 @Service
 public class ReportWorkflowService {
+
+    // Targets only administrators may request through the generic status
+    // endpoint: review decisions, dispatch, un-archiving and archiving are
+    // administrative actions. Engineers own the repair states only.
+    private static final Set<ReportStatus> ADMIN_ONLY_TARGETS = Set.of(
+            ReportStatus.VALIDATED,
+            ReportStatus.REJECTED,
+            ReportStatus.DISPATCHED_TO_CEO,
+            ReportStatus.PENDING_VALIDATION,
+            ReportStatus.ARCHIVED);
 
     private final Map<ReportStatus, Set<ReportStatus>> allowedTransitions = new EnumMap<>(ReportStatus.class);
 
@@ -92,5 +103,40 @@ public class ReportWorkflowService {
                             currentStatus.getLabel(), targetStatus.getLabel())
             );
         }
+    }
+
+    /**
+     * State-machine check plus the role matrix: administrative targets
+     * (validate/reject/dispatch/archive/un-archive) are refused for engineer
+     * callers, so the generic endpoint cannot bypass dedicated admin flows.
+     *
+     * @param callerRoles authorities of the caller, with or without the
+     *                    {@code ROLE_} prefix.
+     */
+    public void validateTransitionForRole(ReportStatus currentStatus, ReportStatus targetStatus,
+                                          Collection<String> callerRoles) {
+        validateTransition(currentStatus, targetStatus);
+        if (ADMIN_ONLY_TARGETS.contains(targetStatus) && !hasAdminRole(callerRoles)) {
+            throw new AccessDeniedException(
+                    String.format("Transition to '%s' requires administrator permission.",
+                            targetStatus.getLabel())
+            );
+        }
+    }
+
+    private boolean hasAdminRole(Collection<String> callerRoles) {
+        if (callerRoles == null) {
+            return false;
+        }
+        for (String role : callerRoles) {
+            if (role == null) {
+                continue;
+            }
+            String normalized = role.replaceFirst("^ROLE_", "");
+            if (normalized.equalsIgnoreCase("ADMIN") || normalized.equalsIgnoreCase("CPDO Admin")) {
+                return true;
+            }
+        }
+        return false;
     }
 }

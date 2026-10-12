@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -20,4 +21,7 @@ public interface MfaChallengeRepository extends JpaRepository<MfaChallenge, Long
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Transactional
     Optional<MfaChallenge> findTopByUserAndUsedFalseOrderByCreatedAtDesc(User user);
+
+    /** Used to invalidate every outstanding challenge on credential changes. */
+    List<MfaChallenge> findByUserAndUsedFalse(User user);
 }

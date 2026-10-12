@@ -16,6 +16,13 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    // Optimistic locking: a stale save (slow avatar upload, concurrent admin
+    // edit) must fail with 409 rather than silently overwriting a newer
+    // password, status or session stamp.
+    @Version
+    @JsonIgnore
+    private Long version;
+
     @Column(nullable = false, unique = true)
     private String username;
 
@@ -54,6 +61,24 @@ public class User {
     @Column(name = "session_version", nullable = false)
     @JsonIgnore
     private Long sessionVersion = 0L;
+
+    // Unverified email-change request. The real address only changes after the
+    // OTP sent to the NEW address is confirmed.
+    @Column(name = "pending_email")
+    @JsonIgnore
+    private String pendingEmail;
+
+    @Column(name = "email_otp_hash")
+    @JsonIgnore
+    private String emailOtpHash;
+
+    @Column(name = "email_otp_expires_at")
+    @JsonIgnore
+    private LocalDateTime emailOtpExpiresAt;
+
+    @Column(name = "email_otp_attempts")
+    @JsonIgnore
+    private Integer emailOtpAttempts = 0;
 
     // Nullable for CPDO and CEO accounts
     @ManyToOne
@@ -124,6 +149,20 @@ public class User {
     public Long getSessionVersion() { return sessionVersion == null ? 0L : sessionVersion; }
 
     public void setSessionVersion(Long sessionVersion) { this.sessionVersion = sessionVersion; }
+
+    public String getPendingEmail() { return pendingEmail; }
+    public void setPendingEmail(String pendingEmail) { this.pendingEmail = pendingEmail; }
+
+    public String getEmailOtpHash() { return emailOtpHash; }
+    public void setEmailOtpHash(String emailOtpHash) { this.emailOtpHash = emailOtpHash; }
+
+    public LocalDateTime getEmailOtpExpiresAt() { return emailOtpExpiresAt; }
+    public void setEmailOtpExpiresAt(LocalDateTime emailOtpExpiresAt) { this.emailOtpExpiresAt = emailOtpExpiresAt; }
+
+    public Integer getEmailOtpAttempts() { return emailOtpAttempts == null ? 0 : emailOtpAttempts; }
+    public void setEmailOtpAttempts(Integer emailOtpAttempts) { this.emailOtpAttempts = emailOtpAttempts; }
+
+    public Long getVersion() { return version; }
 
     /** Increments the security stamp, revoking all existing tokens. */
     public void bumpSessionVersion() {

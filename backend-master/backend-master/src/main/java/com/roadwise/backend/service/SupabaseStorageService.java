@@ -5,8 +5,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -15,6 +18,7 @@ import java.net.http.HttpResponse;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.Iterator;
 import java.util.List;
 import java.util.UUID;
 
@@ -35,6 +39,7 @@ public class SupabaseStorageService {
     private static final List<String> ALLOWED_EXTENSIONS = Arrays.asList(".jpg", ".jpeg", ".png", ".webp");
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
     private static final int MAX_IMAGE_DIMENSION = 4096;
+    private static final long MAX_TOTAL_PIXELS = 20_000_000L; // decompression-bomb ceiling
 
     public String uploadImage(MultipartFile file) throws Exception {
         return uploadImageInternal(file, "reports/", false);
@@ -71,17 +76,51 @@ public class SupabaseStorageService {
             throw new IllegalArgumentException("Uploaded file is not a valid image format.");
         }
 
-        // Validate image dimensions for decompression bomb protection
+        // Header-only dimension check FIRST: decoding an unverified upload in
+        // full before limits are known is how decompression bombs hurt.
+        int width;
+        int height;
+        try (ImageInputStream imageStream = ImageIO.createImageInputStream(new ByteArrayInputStream(fileBytes))) {
+            Iterator<ImageReader> readers = imageStream == null
+                    ? java.util.Collections.emptyIterator()
+                    : ImageIO.getImageReaders(imageStream);
+            if (!readers.hasNext()) {
+                throw new IllegalArgumentException("Uploaded file is not a decodable image.");
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(imageStream, true, true);
+                width = reader.getWidth(0);
+                height = reader.getHeight(0);
+            } finally {
+                reader.dispose();
+            }
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Uploaded image could not be decoded.");
+        }
+
+        if (width <= 0 || height <= 0) {
+            throw new IllegalArgumentException("Uploaded image has invalid dimensions.");
+        }
+        if (width > MAX_IMAGE_DIMENSION || height > MAX_IMAGE_DIMENSION) {
+            throw new IllegalArgumentException("Image dimensions exceed maximum allowed limit of " + MAX_IMAGE_DIMENSION + "x" + MAX_IMAGE_DIMENSION);
+        }
+        if ((long) width * (long) height > MAX_TOTAL_PIXELS) {
+            throw new IllegalArgumentException("Image pixel count exceeds the allowed limit.");
+        }
+
+        // Full decode is attempted once limits pass; a decode failure rejects the
+        // upload instead of being silently ignored.
         try (InputStream is = new ByteArrayInputStream(fileBytes)) {
-            BufferedImage img = ImageIO.read(is);
-            if (img != null) {
-                if (img.getWidth() > MAX_IMAGE_DIMENSION || img.getHeight() > MAX_IMAGE_DIMENSION) {
-                    throw new IllegalArgumentException("Image dimensions exceed maximum allowed limit of " + MAX_IMAGE_DIMENSION + "x" + MAX_IMAGE_DIMENSION);
-                }
+            BufferedImage decoded = ImageIO.read(is);
+            if (decoded == null) {
+                throw new IllegalArgumentException("Uploaded image could not be decoded.");
             }
         } catch (IllegalArgumentException e) {
             throw e;
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Uploaded image could not be decoded.");
+        }
 
         // Original filename never becomes a storage path; UUID-prefixed only.
         String cleanFileName = folder + UUID.randomUUID() + ".img";
