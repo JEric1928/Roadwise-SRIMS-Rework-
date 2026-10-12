@@ -6,7 +6,7 @@
  * registration behavior) and exposes the same window.* functions the
  * templates and other app.js code already call.
  */
-import { apiFetch, API_BASE_URL } from '../../core/api.js';
+import { apiFetch, API_BASE_URL, getAuthHeaders } from '../../core/api.js';
 import { showToast } from '../../components/toast.js';
 import { formatOfficialName, resetModalScroll } from '../../core/utils.js';
 import { parseToKilometers, formatTerrainType, getReportYear, formatInventoryDate, getReportYearSettings } from '../../domain/inventory.js';
@@ -692,7 +692,7 @@ window.loadDynamicInventoryYears = function() {
   }
 
   fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: { "ngrok-skip-browser-warning": "true" }
+    headers: { ...getAuthHeaders(), "ngrok-skip-browser-warning": "true" }
   })
     .then(res => res.json())
     .then(reports => {
@@ -755,7 +755,7 @@ window.openAnnualReportPreview = async function() {
 
   try {
     const userRes = await fetch(`${API_BASE_URL}/api/users`, {
-      headers: { "ngrok-skip-browser-warning": "true" }
+      headers: { ...getAuthHeaders(), "ngrok-skip-browser-warning": "true" }
     });
     if (userRes.ok) {
       const allUsers = await userRes.json();
@@ -799,7 +799,7 @@ window.openAnnualReportPreview = async function() {
   }
 
   fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: { "ngrok-skip-browser-warning": "true" }
+    headers: { ...getAuthHeaders(), "ngrok-skip-browser-warning": "true" }
   })
     .then(res => {
       if (!res.ok) throw new Error("Failed to fetch reports.");

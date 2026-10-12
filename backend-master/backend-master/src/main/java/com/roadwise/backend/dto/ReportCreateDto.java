@@ -13,7 +13,9 @@ public class ReportCreateDto {
     private Double longitude;
     private Double damageLength;
     private Double damageWidth;
-    private Long cityRoadId;
+    // Accepts either the database id or the human-readable road code; the
+    // controller resolves whichever the client sent.
+    private String cityRoadId;
     private String cityRoadName;
 
     public ReportCreateDto() {}
@@ -48,8 +50,8 @@ public class ReportCreateDto {
     public Double getDamageWidth() { return damageWidth; }
     public void setDamageWidth(Double damageWidth) { this.damageWidth = damageWidth; }
 
-    public Long getCityRoadId() { return cityRoadId; }
-    public void setCityRoadId(Long cityRoadId) { this.cityRoadId = cityRoadId; }
+    public String getCityRoadId() { return cityRoadId; }
+    public void setCityRoadId(String cityRoadId) { this.cityRoadId = cityRoadId; }
 
     public String getCityRoadName() { return cityRoadName; }
     public void setCityRoadName(String cityRoadName) { this.cityRoadName = cityRoadName; }

@@ -2,7 +2,7 @@
  * Priority report masterlist dispatch feature module: handles the CPDO dispatch
  * trigger and API call to transition validated reports to CEO.
  */
-import { API_BASE_URL } from '../../core/api.js';
+import { API_BASE_URL, getAuthOnlyHeaders } from '../../core/api.js';
 import { showToast } from '../../components/toast.js';
 
 export function executePriorityDispatch(event) {
@@ -46,6 +46,7 @@ export function executePriorityDispatch(event) {
   fetch(`${baseUrl}/api/reports/dispatch-masterlist?userId=${currentUserId}`, {
     method: 'PUT',
     headers: {
+      ...getAuthOnlyHeaders(),
       'ngrok-skip-browser-warning': 'true'
     }
   })

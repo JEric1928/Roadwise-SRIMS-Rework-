@@ -1,5 +1,6 @@
 package com.roadwise.backend.controller;
 
+import com.roadwise.backend.dto.UserResponseDto;
 import com.roadwise.backend.model.User;
 import com.roadwise.backend.repository.BarangayRepository;
 import com.roadwise.backend.repository.UserRepository;
@@ -12,10 +13,12 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -62,6 +65,33 @@ public class UserController {
                 .orElse(1L);
     }
 
+    /**
+     * True when the caller is the target user or a system administrator.
+     * Used to stop one user from mutating another user's profile/credentials.
+     */
+    private boolean isSelfOrAdmin(Long targetUserId) {
+        User current = SecurityUtils.getCurrentUser();
+        if (current == null || current.getId() == null) {
+            return false;
+        }
+        if (current.getId().equals(targetUserId)) {
+            return true;
+        }
+        String role = current.getRole();
+        return role != null && (role.equalsIgnoreCase("ADMIN") || role.equalsIgnoreCase("CPDO Admin"));
+    }
+
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    private String generateTemporaryPassword() {
+        final String chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$";
+        StringBuilder sb = new StringBuilder(14);
+        for (int i = 0; i < 14; i++) {
+            sb.append(chars.charAt(SECURE_RANDOM.nextInt(chars.length())));
+        }
+        return sb.toString();
+    }
+
     // ==========================================
     // 1. UPDATE TEXT PROFILE DETAILS
     // ==========================================
@@ -70,6 +100,10 @@ public class UserController {
             @PathVariable Long id,
             @RequestBody Map<String, String> updates,
             HttpServletRequest request) {
+
+        if (!isSelfOrAdmin(id)) {
+            return ResponseEntity.status(403).body(Map.of("error", "You may only update your own profile."));
+        }
 
         Optional<User> userOpt = userRepository.findById(id);
         if (userOpt.isEmpty()) {
@@ -108,6 +142,9 @@ public class UserController {
             @PathVariable Long id,
             @RequestParam("profilePicture") MultipartFile file,
             HttpServletRequest request) {
+        if (!isSelfOrAdmin(id)) {
+            return ResponseEntity.status(403).body(Map.of("error", "You may only update your own profile picture."));
+        }
         try {
             Optional<User> userOpt = userRepository.findById(id);
             if (userOpt.isEmpty()) return ResponseEntity.notFound().build();
@@ -176,6 +213,10 @@ public class UserController {
             @RequestBody Map<String, String> payload,
             HttpServletRequest request) {
 
+        if (!isSelfOrAdmin(id)) {
+            return ResponseEntity.status(403).body(Map.of("error", "You may only change your own password."));
+        }
+
         Optional<User> userOpt = userRepository.findById(id);
         if (userOpt.isEmpty()) return ResponseEntity.notFound().build();
 
@@ -234,8 +275,11 @@ public class UserController {
     // 0. GET ALL SYSTEM USERS
     // ==========================================
     @GetMapping
-    public ResponseEntity<List<User>> getAllUsers() {
-        List<User> users = userRepository.findAll();
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
+    public ResponseEntity<List<UserResponseDto>> getAllUsers() {
+        List<UserResponseDto> users = userRepository.findAll().stream()
+                .map(UserResponseDto::from)
+                .toList();
         return ResponseEntity.ok(users);
     }
 
@@ -243,8 +287,11 @@ public class UserController {
     // 4. FETCH ALL BARANGAY OFFICIALS
     // ==========================================
     @GetMapping("/officials")
-    public ResponseEntity<List<User>> getBarangayOfficials() {
-        List<User> officials = userRepository.findByRole("BARANGAY");
+    @PreAuthorize("hasAnyRole('ENGINEER', 'City Engineer', 'ADMIN', 'CPDO Admin')")
+    public ResponseEntity<List<UserResponseDto>> getBarangayOfficials() {
+        List<UserResponseDto> officials = userRepository.findByRole("BARANGAY").stream()
+                .map(UserResponseDto::from)
+                .toList();
         return ResponseEntity.ok(officials);
     }
 
@@ -252,13 +299,30 @@ public class UserController {
     // 5. PROVISION NEW BARANGAY OFFICIAL ACCOUNT
     // ==========================================
     @PostMapping("/register")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     public ResponseEntity<?> registerOfficial(
             @RequestBody Map<String, String> payload,
             HttpServletRequest request) {
 
         String username = payload.get("username");
+        String rawPassword = payload.get("password");
+
+        if (username == null || username.trim().isEmpty()) {
+            return ResponseEntity.status(400).body(Map.of("error", "Username is required."));
+        }
+        if (rawPassword == null || rawPassword.trim().isEmpty()) {
+            return ResponseEntity.status(400).body(Map.of("error", "Password is required."));
+        }
         if (userRepository.findByUsername(username).isPresent()) {
             return ResponseEntity.status(400).body(Map.of("error", "Username already exists!"));
+        }
+
+        // This endpoint provisions Barangay Officials only. Administrators must
+        // never be able to inject a privileged role through the request body.
+        String requestedRole = payload.get("role");
+        if (requestedRole != null && !requestedRole.trim().isEmpty()
+                && !requestedRole.equalsIgnoreCase("BARANGAY")) {
+            return ResponseEntity.status(403).body(Map.of("error", "Only Barangay Official accounts can be provisioned here."));
         }
 
         User newUser = new User();
@@ -268,9 +332,8 @@ public class UserController {
         newUser.setEmail(payload.get("email"));
         newUser.setUsername(username);
         // Store credentials hashed (BCrypt), consistent with AuthController.
-        String rawPassword = payload.get("password");
         newUser.setPassword(passwordEncoder.encode(rawPassword));
-        newUser.setRole(payload.get("role"));
+        newUser.setRole("BARANGAY");
         newUser.setStatus("Active");
 
         if (payload.get("barangayId") != null && !payload.get("barangayId").isEmpty()) {
@@ -334,16 +397,20 @@ public class UserController {
     // 6. GET SINGLE USER DATA
     // ==========================================
     @GetMapping("/{id}")
-    public ResponseEntity<User> getUserById(@PathVariable Long id) {
+    public ResponseEntity<?> getUserById(@PathVariable Long id) {
+        if (!isSelfOrAdmin(id)) {
+            return ResponseEntity.status(403).body(Map.of("error", "You may only view your own account."));
+        }
         return userRepository.findById(id)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+                .<ResponseEntity<?>>map(user -> ResponseEntity.ok(UserResponseDto.from(user)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     // ==========================================
     // 7. ADMIN: UPDATE OFFICIAL RECORD & STATUS
     // ==========================================
     @PutMapping("/{id}/manage")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     public ResponseEntity<?> manageUserRecord(
             @PathVariable Long id,
             @RequestBody Map<String, String> updates,
@@ -417,6 +484,7 @@ public class UserController {
     // 8. ADMIN: EMERGENCY PASSWORD RESET
     // ==========================================
     @PutMapping("/{id}/emergency-reset")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     public ResponseEntity<?> emergencyPasswordReset(
             @PathVariable Long id,
             @RequestBody(required = false) Map<String, String> payload,
@@ -428,8 +496,13 @@ public class UserController {
         }
 
         User user = userOpt.get();
-        // Reset to the default password, stored hashed like every other credential.
-        user.setPassword(passwordEncoder.encode("RoadWise2026!"));
+        // Generate a per-reset random temporary password instead of a fixed,
+        // publicly known value. It is hashed at rest and returned once to the
+        // authenticated administrator so it can be communicated securely.
+        String tempPassword = generateTemporaryPassword();
+        user.setPassword(passwordEncoder.encode(tempPassword));
+        user.setFailedLoginAttempts(0);
+        user.setLockoutUntil(null);
         userRepository.save(user);
 
         notificationService.sendNotification(
@@ -438,6 +511,21 @@ public class UserController {
                 "Your password has been reset by the City Administrator. Please update it immediately.",
                 "SECURITY"
         );
+
+        if (user.getEmail() != null && !user.getEmail().isEmpty()) {
+            try {
+                emailService.sendEmail(
+                        user.getEmail(),
+                        "RoadWise - Password Reset",
+                        "Hello " + user.getFirstName() + ",\n\n" +
+                        "Your RoadWise password was reset by the City Administrator.\n\n" +
+                        "Temporary Password: " + tempPassword + "\n\n" +
+                        "Please log in and change it immediately.\n\n" +
+                        "Best regards,\nCPDO Administrator - RoadWise SJDM");
+            } catch (Exception e) {
+                System.err.println("Emergency reset email delivery failed: " + e.getMessage());
+            }
+        }
 
         // ⏱️ AUDIT: actor resolved from the authenticated principal; the client-supplied
         // adminId in the payload is ignored so audit attribution cannot be forged.
@@ -451,22 +539,27 @@ public class UserController {
                 "AUTH",
                 "ADMIN_EMERGENCY_PASSWORD_RESET",
                 "#USR-" + user.getId(),
-                "Admin performed emergency default password reset for " + user.getFirstName() + " " + user.getLastName() + ".",
+                "Admin performed emergency password reset for " + user.getFirstName() + " " + user.getLastName() + ".",
                 "WARNING",
                 request
         );
 
-        return ResponseEntity.ok(Map.of("message", "Password successfully reset to default."));
+        return ResponseEntity.ok(Map.of(
+                "message", "Password successfully reset.",
+                "tempPassword", tempPassword
+        ));
     }
 
     // ==========================================
     // 9. CPDO ADMIN: FORMAL OFFICE TURNOVER / SUCCESSION
     // ==========================================
     @PostMapping("/handover-admin")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     public ResponseEntity<?> handoverAdminOffice(
             @RequestBody Map<String, String> payload,
             HttpServletRequest request) {
 
+        User caller = SecurityUtils.getCurrentUser();
         String currentAdminIdStr = payload.get("currentAdminId");
         String currentPassword = payload.get("currentPassword");
         String newFirstName = payload.get("firstName");
@@ -482,6 +575,9 @@ public class UserController {
         }
 
         Long currentAdminId = Long.valueOf(currentAdminIdStr);
+        if (caller == null || !caller.getId().equals(currentAdminId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "You may only turn over your own administrative account."));
+        }
         Optional<User> currentAdminOpt = userRepository.findById(currentAdminId);
         if (currentAdminOpt.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("error", "Current administrator account not found."));
@@ -514,7 +610,7 @@ public class UserController {
         }
 
         // 🛡️ 3. GENERATE SECURE TEMPORARY CREDENTIALS
-        String tempPassword = "RoadWise@" + (1000 + new Random().nextInt(9000)) + "!";
+        String tempPassword = generateTemporaryPassword();
 
         // 4. PROVISION INCOMING SUCCESSOR
         User newAdmin = new User();
@@ -582,10 +678,12 @@ public class UserController {
     // 10. CITY ENGINEER (CEO): FORMAL OFFICE TURNOVER
     // ==========================================
     @PostMapping("/handover-ceo")
+    @PreAuthorize("hasAnyRole('ENGINEER', 'City Engineer')")
     public ResponseEntity<?> handoverCeoOffice(
             @RequestBody Map<String, String> payload,
             HttpServletRequest request) {
 
+        User caller = SecurityUtils.getCurrentUser();
         String currentCeoIdStr = payload.get("currentCeoId");
         String currentPassword = payload.get("currentPassword");
         String newFirstName = payload.get("firstName");
@@ -601,6 +699,9 @@ public class UserController {
         }
 
         Long currentCeoId = Long.valueOf(currentCeoIdStr);
+        if (caller == null || !caller.getId().equals(currentCeoId)) {
+            return ResponseEntity.status(403).body(Map.of("error", "You may only turn over your own City Engineer account."));
+        }
         Optional<User> currentCeoOpt = userRepository.findById(currentCeoId);
         if (currentCeoOpt.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("error", "Current City Engineer account not found."));
@@ -633,7 +734,7 @@ public class UserController {
         }
 
         // 🛡️ 3. GENERATE SECURE TEMPORARY CREDENTIALS
-        String tempPassword = "RoadWise@" + (1000 + new Random().nextInt(9000)) + "!";
+        String tempPassword = generateTemporaryPassword();
 
         // 4. PROVISION INCOMING SUCCESSOR
         User newCeo = new User();

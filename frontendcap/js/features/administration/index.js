@@ -489,12 +489,17 @@ document.addEventListener("DOMContentLoaded", () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ adminId: sessionStorage.getItem("userId") || "" })
       })
-        .then(() => {
+        .then((data) => {
           if (resetConfirmModal) {
             resetConfirmModal.classList.add('hidden');
             resetConfirmModal.style.display = 'none';
           }
-          if (typeof showToast === 'function') showToast("Password successfully reset to default (RoadWise2026!)", "success");
+          const tempPassword = data && data.tempPassword ? data.tempPassword : null;
+          if (typeof showToast === 'function') {
+            showToast(tempPassword
+              ? `Password reset. Temporary password: ${tempPassword}`
+              : "Password successfully reset. Temporary password sent to the user's email.", "success");
+          }
         })
         .catch(err => {
           console.error("Error resetting password:", err);

@@ -7,6 +7,7 @@ import com.roadwise.backend.model.RoadReport;
 import com.roadwise.backend.model.User;
 import com.roadwise.backend.repository.BarangayRepository;
 import com.roadwise.backend.repository.CityRoadRepository;
+import com.roadwise.backend.repository.ReportStatusLogRepository;
 import com.roadwise.backend.repository.RoadReportRepository;
 import com.roadwise.backend.repository.UserRepository;
 import com.roadwise.backend.service.*;
@@ -53,6 +54,9 @@ class RoadReportWorkflowTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private ReportStatusLogRepository reportStatusLogRepository;
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
@@ -163,10 +167,127 @@ class RoadReportWorkflowTest {
         assertEquals(1, reports.size());
         RoadReport saved = reports.get(0);
         assertEquals("RD-101", saved.getCityRoadId());
+        assertEquals(testRoad.getId(), saved.getCityRoadFkId());
         assertEquals("Main Street", saved.getCityRoadName());
         assertEquals("Core", saved.getRoadImportance());
         assertEquals("Concrete", saved.getRoadType());
         assertEquals("Flat", saved.getTerrainType());
+    }
+
+    @Test
+    void testCreateReport_ResolvesHumanReadableRoadCode() throws Exception {
+        MockMultipartFile imageFile = new MockMultipartFile("imageFile", "test.jpg", "image/jpeg", "image content".getBytes());
+
+        mockMvc.perform(multipart("/api/reports")
+                        .file(imageFile)
+                        .param("damageDescription", "Code lookup")
+                        .param("cityRoadId", "RD-101")
+                        .header("Authorization", "Bearer " + barangayToken))
+                .andExpect(status().isOk());
+
+        RoadReport saved = reportRepository.findAll().get(0);
+        assertEquals(testRoad.getId(), saved.getCityRoadFkId());
+        assertEquals("RD-101", saved.getCityRoadId());
+    }
+
+    @Test
+    void testCreateReport_PersistsDuplicateFlag() throws Exception {
+        MockMultipartFile imageFile = new MockMultipartFile("imageFile", "test.jpg", "image/jpeg", "image content".getBytes());
+
+        mockMvc.perform(multipart("/api/reports")
+                        .file(imageFile)
+                        .param("damageDescription", "First pothole")
+                        .param("latitude", "14.0")
+                        .param("longitude", "121.0")
+                        .header("Authorization", "Bearer " + barangayToken))
+                .andExpect(status().isOk());
+
+        RoadReport first = reportRepository.findAll().get(0);
+
+        mockMvc.perform(multipart("/api/reports")
+                        .file(imageFile)
+                        .param("damageDescription", "Second pothole")
+                        .param("latitude", "14.0001")
+                        .param("longitude", "121.0001")
+                        .header("Authorization", "Bearer " + barangayToken))
+                .andExpect(status().isOk());
+
+        List<RoadReport> reports = reportRepository.findAll();
+        assertEquals(2, reports.size());
+        RoadReport second = reports.stream()
+                .filter(r -> !r.getId().equals(first.getId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(Boolean.TRUE, second.getPotentialDuplicate());
+        assertEquals(first.getId(), second.getDuplicateOfReportId());
+    }
+
+    @Test
+    void testEditTerminalReport_Rejected() throws Exception {
+        RoadReport report = new RoadReport();
+        report.setCityRoadName("Closed Road");
+        report.setStatus("Completed");
+        report.setProofOfRepairImage("proof/sample.jpg");
+        report = reportRepository.save(report);
+
+        mockMvc.perform(put("/api/reports/update/" + report.getId())
+                        .param("damageDescription", "Late edit attempt")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void testResolveWithoutProof_Rejected() throws Exception {
+        RoadReport report = new RoadReport();
+        report.setCityRoadName("Unproven Road");
+        report.setStatus("In Progress");
+        report = reportRepository.save(report);
+
+        mockMvc.perform(put("/api/reports/" + report.getId() + "/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"Resolved\"}")
+                        .header("Authorization", "Bearer " + engineerToken))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void testReminderWithoutEngineer_ReturnsConflict() throws Exception {
+        userRepository.deleteById(engineerUser.getId());
+
+        RoadReport report = new RoadReport();
+        report.setCityRoadName("No Engineer Road");
+        report.setStatus("In Progress");
+        report.setTargetCompletionDate(LocalDate.now().plusDays(5));
+        report = reportRepository.save(report);
+
+        mockMvc.perform(post("/api/reports/" + report.getId() + "/remind-due")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isConflict());
+
+        RoadReport unchanged = reportRepository.findById(report.getId()).orElseThrow();
+        assertNull(unchanged.getLastReminderSent());
+    }
+
+    @Test
+    void testAnnualRollover_ArchivesWithTimelineAndVersion() throws Exception {
+        RoadReport report = new RoadReport();
+        report.setCityRoadName("Rollover Road");
+        report.setStatus("Pending Validation");
+        report = reportRepository.save(report);
+        Long versionBefore = report.getVersion();
+
+        mockMvc.perform(post("/api/reports/rollover-annual-cycle")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk());
+
+        RoadReport archived = reportRepository.findById(report.getId()).orElseThrow();
+        assertEquals("Archived", archived.getStatus());
+        assertNotNull(archived.getDateArchived());
+        assertNotNull(versionBefore);
+        assertTrue(archived.getVersion() > versionBefore, "@Version must increment on rollover");
+        assertTrue(reportStatusLogRepository.findByReport_IdOrderByCreatedAtAsc(report.getId()).stream()
+                        .anyMatch(log -> "ARCHIVED".equals(log.getAction())),
+                "Annual rollover must write a timeline entry");
     }
 
     @Test

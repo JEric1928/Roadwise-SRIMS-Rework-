@@ -6,7 +6,7 @@
  * helper reads window.currentFilteredTrackedReports, so it stays compatible
  * with the tracking engine that remains in app.js.
  */
-import { apiFetch, API_BASE_URL } from '../../core/api.js';
+import { apiFetch, API_BASE_URL, getAuthHeaders } from '../../core/api.js';
 import { showToast } from '../../components/toast.js';
 import { formatOfficialName } from '../../core/utils.js';
 
@@ -88,7 +88,7 @@ window.openTrackingReportPreview = async function() {
       users = await apiFetch('/api/users').catch(() => []);
     } else if (typeof API_BASE_URL !== 'undefined') {
       const res = await fetch(`${API_BASE_URL}/api/users`, {
-        headers: { 'ngrok-skip-browser-warning': 'true' }
+        headers: { ...getAuthHeaders(), 'ngrok-skip-browser-warning': 'true' }
       }).catch(() => null);
       if (res && res.ok) users = await res.json();
     }

@@ -3,7 +3,7 @@
  * map/timeline toggles, QA approval/rework submission, schedule extension review,
  * and deadline reminder alerts.
  */
-import { apiFetch, API_BASE_URL } from '../../core/api.js';
+import { apiFetch, API_BASE_URL, getAuthHeaders } from '../../core/api.js';
 import { resetModalScroll } from '../../core/utils.js';
 import { showToast } from '../../components/toast.js';
 
@@ -685,7 +685,7 @@ export function handleReviewExtension(decision) {
   fetch(`${API_BASE_URL}/api/reports/${currentTrackingReportId}/review-extension`, {
     method: 'PUT',
     headers: {
-      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
       'ngrok-skip-browser-warning': 'true'
     },
     body: JSON.stringify({
@@ -746,7 +746,7 @@ export function sendDeadlineReminder() {
   fetch(`${API_BASE_URL}/api/reports/${currentTrackingReportId}/remind-due`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
       'ngrok-skip-browser-warning': 'true'
     },
     body: JSON.stringify({ userId: currentUserId })
@@ -886,7 +886,7 @@ export function handleApproveProject() {
   fetch(`${API_BASE_URL}/api/reports/${currentTrackingReportId}/status`, {
     method: 'PUT',
     headers: {
-      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
       'ngrok-skip-browser-warning': 'true'
     },
     body: JSON.stringify({
@@ -942,7 +942,7 @@ export function submitReworkFeedback() {
   fetch(`${API_BASE_URL}/api/reports/${currentTrackingReportId}/status`, {
     method: 'PUT',
     headers: {
-      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
       'ngrok-skip-browser-warning': 'true'
     },
     body: JSON.stringify({

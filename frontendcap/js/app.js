@@ -1,4 +1,4 @@
-import { API_BASE_URL } from './core/api.js';
+import { API_BASE_URL, clearAuthSession } from './core/api.js';
 import { initNotifications } from './features/notifications/index.js';
 import { initImageLightbox } from './features/image-lightbox/index.js';
 import { initLiveClock } from './features/live-clock/index.js';
@@ -66,8 +66,7 @@ import './features/map-engine/index.js'; // Leaflet map instances, spotlight iso
       })
       .catch(() => {
         // 🛑 Server rejected or account suspended: wipe storage and kick to login
-        sessionStorage.clear();
-        localStorage.removeItem("user");
+        clearAuthSession();
         window.location.replace("login.html");
       });
   }

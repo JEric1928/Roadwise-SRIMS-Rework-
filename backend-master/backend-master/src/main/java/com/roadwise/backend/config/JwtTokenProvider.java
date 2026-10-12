@@ -4,6 +4,7 @@ import com.roadwise.backend.model.User;
 import io.jsonwebtoken.*;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -15,11 +16,33 @@ import java.util.Map;
 @Component
 public class JwtTokenProvider {
 
-    @Value("${jwt.secret:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}")
+    @Value("${jwt.secret:}")
     private String jwtSecret;
 
     @Value("${jwt.access-token-expiration-ms:900000}") // 15 minutes default
     private long jwtExpirationMs;
+
+    /**
+     * Fails fast at startup when no signing secret is configured, instead of
+     * silently falling back to a well-known checked-in key. Deployment must
+     * supply a unique, high-entropy secret via the JWT_SECRET environment
+     * variable (or jwt.secret property).
+     */
+    @PostConstruct
+    void validateConfiguration() {
+        if (jwtSecret == null || jwtSecret.isBlank()) {
+            throw new IllegalStateException(
+                    "jwt.secret is not configured. Set the JWT_SECRET environment variable to a unique, " +
+                    "high-entropy Base64 value before starting the application.");
+        }
+        // Validate that the secret is decodable and long enough for HS256.
+        try {
+            Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtSecret));
+        } catch (RuntimeException e) {
+            throw new IllegalStateException(
+                    "jwt.secret is invalid: expected a Base64-encoded value of at least 256 bits (32 bytes).", e);
+        }
+    }
 
     private SecretKey getSigningKey() {
         byte[] keyBytes = Decoders.BASE64.decode(jwtSecret);

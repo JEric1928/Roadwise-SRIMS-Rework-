@@ -8,7 +8,7 @@
  *
  * Entry point: idempotent initProfileAccount().
  */
-import { API_BASE_URL } from '../../core/api.js';
+import { API_BASE_URL, getAuthHeaders, getAuthOnlyHeaders, clearAuthSession } from '../../core/api.js';
 import { showToast } from '../../components/toast.js';
 import { STRICT_PASSWORD_REGEX } from '../../core/password-policy.js';
 
@@ -223,7 +223,7 @@ export function submitAdminHandover() {
 
   fetch(`${baseUrl}/api/users/handover-admin`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: JSON.stringify({
       currentAdminId: currentAdminId,
       currentPassword: currentPassword,
@@ -275,9 +275,7 @@ export function submitAdminHandover() {
 }
 
 export function terminateHandoverSession() {
-  sessionStorage.clear();
-  localStorage.removeItem('user');
-  localStorage.removeItem('currentUser');
+  clearAuthSession();
   window.location.replace('login.html');
 }
 
@@ -355,7 +353,7 @@ export function submitCeoHandover() {
 
   fetch(`${baseUrl}/api/users/handover-ceo`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: JSON.stringify({
       currentCeoId: currentCeoId,
       currentPassword: currentPassword,
@@ -407,9 +405,7 @@ export function submitCeoHandover() {
 }
 
 export function terminateCeoHandoverSession() {
-  sessionStorage.clear();
-  localStorage.removeItem('user');
-  localStorage.removeItem('currentUser');
+  clearAuthSession();
   window.location.replace('login.html');
 }
 
@@ -510,7 +506,7 @@ function bindEditProfileModal() {
 
       fetch(`${API_BASE_URL}/api/users/${userId}/profile`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(updatedData)
       })
         .then(response => {
@@ -587,6 +583,7 @@ function bindProfilePicture() {
       // Send to the new Spring Boot endpoint
       fetch(`${API_BASE_URL}/api/users/${userId}/profile-picture`, {
         method: 'POST',
+        headers: getAuthOnlyHeaders(),
         body: formData
       })
         .then(response => {
@@ -655,7 +652,7 @@ function bindPasswordForm() {
     // 3. Send Request to Spring Boot Backend
     fetch(`${API_BASE_URL}/api/users/${userId}/password`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
       body: JSON.stringify({
         currentPassword: currentPass,
         newPassword: newPass

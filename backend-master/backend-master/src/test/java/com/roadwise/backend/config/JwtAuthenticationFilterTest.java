@@ -1,6 +1,8 @@
 package com.roadwise.backend.config;
 
+import com.roadwise.backend.model.Barangay;
 import com.roadwise.backend.model.User;
+import com.roadwise.backend.repository.BarangayRepository;
 import com.roadwise.backend.repository.UserRepository;
 import com.roadwise.backend.service.ActivityLogService;
 import com.roadwise.backend.service.EmailService;
@@ -32,6 +34,9 @@ class JwtAuthenticationFilterTest {
 
     @Autowired
     private UserRepository userRepository;
+
+    @Autowired
+    private BarangayRepository barangayRepository;
 
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
@@ -80,12 +85,19 @@ class JwtAuthenticationFilterTest {
         deactivatedUser.setStatus("Deactivated");
         userRepository.save(deactivatedUser);
 
+        // A Barangay Official must be assigned to a barangay to act on reports;
+        // an unassigned official is denied (fail-closed).
+        Barangay testBarangay = new Barangay();
+        testBarangay.setBarangayName("Filter Test Barangay");
+        testBarangay = barangayRepository.save(testBarangay);
+
         activeUser = new User();
         activeUser.setUsername("activeuser");
         activeUser.setPassword("Password123!");
         activeUser.setEmail("active@example.com");
         activeUser.setRole("BARANGAY");
         activeUser.setStatus("Active");
+        activeUser.setBarangay(testBarangay);
         userRepository.save(activeUser);
     }
 

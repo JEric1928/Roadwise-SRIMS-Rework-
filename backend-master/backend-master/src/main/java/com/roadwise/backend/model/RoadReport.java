@@ -89,11 +89,18 @@ public class RoadReport {
     private Double cvConfidenceScore;
 
     // Authoritative FK to the registered city road (the human-readable snapshot
-    // code lives in city_road_code above). Mapped as a plain numeric column so
-    // this entity does not depend on columns that are absent from the baseline
-    // schema (road_id / road_importance / terrain_type / road_type on city_roads).
-    @Column(name = "city_road_id", insertable = false, updatable = false)
+    // code lives in city_road_code above). Writable so submissions persist the
+    // real road relationship while keeping the snapshot columns for display.
+    @Column(name = "city_road_id")
     private Long cityRoadFkId;
+
+    // Duplicate-detection outcome. Persisted so the warning survives restarts and
+    // can be reviewed later instead of existing only in a notification.
+    @Column(name = "potential_duplicate", nullable = false)
+    private Boolean potentialDuplicate = false;
+
+    @Column(name = "duplicate_of_report_id")
+    private Long duplicateOfReportId;
 
     // Relationships
     @JsonIgnoreProperties({"reports", "hibernateLazyInitializer", "handler"})
@@ -176,6 +183,30 @@ public class RoadReport {
 
     public void setCityRoadId(String cityRoadId) {
         this.cityRoadId = cityRoadId;
+    }
+
+    public Long getCityRoadFkId() {
+        return cityRoadFkId;
+    }
+
+    public void setCityRoadFkId(Long cityRoadFkId) {
+        this.cityRoadFkId = cityRoadFkId;
+    }
+
+    public Boolean getPotentialDuplicate() {
+        return potentialDuplicate;
+    }
+
+    public void setPotentialDuplicate(Boolean potentialDuplicate) {
+        this.potentialDuplicate = potentialDuplicate;
+    }
+
+    public Long getDuplicateOfReportId() {
+        return duplicateOfReportId;
+    }
+
+    public void setDuplicateOfReportId(Long duplicateOfReportId) {
+        this.duplicateOfReportId = duplicateOfReportId;
     }
 
     public String getRoadImportance() {

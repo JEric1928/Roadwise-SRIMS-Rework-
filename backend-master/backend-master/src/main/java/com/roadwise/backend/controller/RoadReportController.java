@@ -94,6 +94,22 @@ public class RoadReportController {
         return r.contains("BARANGAY");
     }
 
+    /**
+     * Enforces that a Barangay Official can only touch reports belonging to the
+     * barangay they are assigned to. Fails closed: an unassigned official, or a
+     * report with no barangay, is denied rather than silently allowed.
+     */
+    private void enforceBarangayReportAccess(User user, RoadReport report) {
+        if (!isBarangayRole(user)) {
+            return;
+        }
+        Long userBrgy = user.getBarangay() != null ? user.getBarangay().getId() : null;
+        Long reportBrgy = report.getBarangay() != null ? report.getBarangay().getId() : null;
+        if (userBrgy == null || reportBrgy == null || !userBrgy.equals(reportBrgy)) {
+            throw new AccessDeniedException("Access denied: report is outside your assigned barangay.");
+        }
+    }
+
     private Long getAdminId() {
         return userRepository.findFirstByRoleInIgnoreCase(List.of("cpdo admin", "admin"))
                 .map(User::getId)
@@ -119,6 +135,29 @@ public class RoadReportController {
         return userRepository.findFirstByRoleInIgnoreCase(List.of("engineer", "city engineer"))
                 .map(User::getId)
                 .orElse(null);
+    }
+
+    /**
+     * Resolves a client-supplied road reference. The submission form may send
+     * either the numeric database id or the human-readable {@code road_id} code
+     * (e.g. "3142000000 01"), so both are accepted. Unknown references are
+     * rejected instead of being silently ignored.
+     */
+    private CityRoad resolveCityRoad(String roadRef) {
+        String ref = roadRef == null ? "" : roadRef.trim();
+        if (ref.isEmpty()) {
+            throw new IllegalArgumentException("City road reference is empty.");
+        }
+        try {
+            Optional<CityRoad> byId = cityRoadRepository.findById(Long.valueOf(ref));
+            if (byId.isPresent()) {
+                return byId.get();
+            }
+        } catch (NumberFormatException ignored) {
+            // Not a numeric id; fall through to the road-code lookup.
+        }
+        return cityRoadRepository.findByRoadId(ref)
+                .orElseThrow(() -> new IllegalArgumentException("Unknown city road: " + ref));
     }
 
     // ==========================================
@@ -147,16 +186,16 @@ public class RoadReportController {
         report.setDamageWidth(createDto.getDamageWidth());
         report.setCityRoadName(createDto.getCityRoadName());
 
-        if (createDto.getCityRoadId() != null) {
-            cityRoadRepository.findById(createDto.getCityRoadId()).ifPresent(cityRoad -> {
-                report.setCityRoadId(cityRoad.getRoadId());
-                if (cityRoad.getRoadName() != null && !cityRoad.getRoadName().trim().isEmpty()) {
-                    report.setCityRoadName(cityRoad.getRoadName());
-                }
-                report.setRoadImportance(cityRoad.getRoadImportance());
-                report.setRoadType(cityRoad.getRoadType());
-                report.setTerrainType(cityRoad.getTerrainType());
-            });
+        if (createDto.getCityRoadId() != null && !createDto.getCityRoadId().trim().isEmpty()) {
+            CityRoad cityRoad = resolveCityRoad(createDto.getCityRoadId());
+            report.setCityRoadFkId(cityRoad.getId());
+            report.setCityRoadId(cityRoad.getRoadId());
+            if (cityRoad.getRoadName() != null && !cityRoad.getRoadName().trim().isEmpty()) {
+                report.setCityRoadName(cityRoad.getRoadName());
+            }
+            report.setRoadImportance(cityRoad.getRoadImportance());
+            report.setRoadType(cityRoad.getRoadType());
+            report.setTerrainType(cityRoad.getTerrainType());
         }
 
         report.setUser(currentUser);
@@ -194,12 +233,20 @@ public class RoadReportController {
             }
 
             report.setStatus(ReportStatus.PENDING_VALIDATION.getLabel());
-            RoadReport savedReport = repository.save(report);
 
+            // Duplicate detection runs before the single persist so the flag and
+            // relationship are written atomically with the report. Re-saving a
+            // detached entity would re-proxy its lazy associations and break
+            // response serialization.
+            Optional<RoadReport> duplicateOpt = duplicateDetectionService.findPotentialDuplicate(report);
+            duplicateOpt.ifPresent(existingDup -> {
+                report.setPotentialDuplicate(true);
+                report.setDuplicateOfReportId(existingDup.getId());
+            });
+
+            RoadReport savedReport = repository.save(report);
             Long adminId = getAdminId();
 
-            // Duplicate detection check
-            Optional<RoadReport> duplicateOpt = duplicateDetectionService.findPotentialDuplicate(savedReport);
             if (duplicateOpt.isPresent()) {
                 RoadReport existingDup = duplicateOpt.get();
                 System.out.println("⚠️ [DUPLICATE FLAGGED] Report PRJ-" + savedReport.getId() + " is near existing PRJ-" + existingDup.getId());
@@ -289,9 +336,10 @@ public class RoadReportController {
             List<Predicate> predicates = new ArrayList<>();
 
             if (isBarangayRole(currentUser)) {
-                if (currentUser.getBarangay() != null) {
-                    predicates.add(cb.equal(root.get("barangay").get("id"), currentUser.getBarangay().getId()));
+                if (currentUser.getBarangay() == null) {
+                    throw new AccessDeniedException("Access denied: your account is not assigned to a barangay.");
                 }
+                predicates.add(cb.equal(root.get("barangay").get("id"), currentUser.getBarangay().getId()));
             } else if (barangayId != null) {
                 predicates.add(cb.equal(root.get("barangay").get("id"), barangayId));
             }
@@ -375,13 +423,7 @@ public class RoadReportController {
         RoadReport report = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Report not found"));
 
-        if (isBarangayRole(currentUser)) {
-            if (currentUser.getBarangay() != null && report.getBarangay() != null) {
-                if (!currentUser.getBarangay().getId().equals(report.getBarangay().getId())) {
-                    throw new AccessDeniedException("Access denied: You can only view reports belonging to your barangay.");
-                }
-            }
-        }
+        enforceBarangayReportAccess(currentUser, report);
 
         return ResponseEntity.ok(report);
     }
@@ -390,7 +432,8 @@ public class RoadReportController {
     public List<RoadReport> getReportsByBarangay(@PathVariable Long barangayId) {
         User currentUser = getAuthenticatedUser();
         if (isBarangayRole(currentUser)) {
-            if (currentUser.getBarangay() != null && !currentUser.getBarangay().getId().equals(barangayId)) {
+            if (currentUser.getBarangay() == null
+                    || !currentUser.getBarangay().getId().equals(barangayId)) {
                 throw new AccessDeniedException("Access denied: You can only view reports from your own barangay.");
             }
         }
@@ -437,11 +480,15 @@ public class RoadReportController {
 
         reportWorkflowService.validateTransition(currentStatusEnum, targetStatusEnum);
 
-        if (targetStatusEnum == ReportStatus.COMPLETED) {
+        // Every terminal repair outcome requires evidence. Without this, a report
+        // could go In Progress -> Resolved -> Closed with no proof of repair.
+        if (targetStatusEnum == ReportStatus.COMPLETED
+                || targetStatusEnum == ReportStatus.RESOLVED
+                || targetStatusEnum == ReportStatus.CLOSED) {
             boolean hasProofImage = report.getProofOfRepairImage() != null &&
                     !report.getProofOfRepairImage().trim().isEmpty();
             if (!hasProofImage) {
-                return ResponseEntity.badRequest().body("Completion requires proof of repair image.");
+                return ResponseEntity.badRequest().body("Repair proof of image is required before resolution or closure.");
             }
         }
 
@@ -521,21 +568,39 @@ public class RoadReportController {
                                           @RequestParam(value = "damageType", required = false) String damageType,
                                           @RequestParam(value = "damageLength", required = false) Double damageLength,
                                           @RequestParam(value = "damageWidth", required = false) Double damageWidth,
+                                          @RequestParam(value = "cityRoadId", required = false) String cityRoadId,
                                           @RequestParam(value = "imageFile", required = false) MultipartFile imageFile,
                                           HttpServletRequest request) {
         User currentUser = getAuthenticatedUser();
         RoadReport existingReport = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Report not found"));
 
-        if (isBarangayRole(currentUser)) {
-            if (currentUser.getBarangay() != null && existingReport.getBarangay() != null) {
-                if (!currentUser.getBarangay().getId().equals(existingReport.getBarangay().getId())) {
-                    throw new AccessDeniedException("Access denied: You can only update reports belonging to your barangay.");
-                }
-            }
-        }
+        enforceBarangayReportAccess(currentUser, existingReport);
 
         String previousStatus = existingReport.getStatus();
+
+        // Only reports still in the barangay intake/rework stage may be edited.
+        // Terminal (Completed/Closed/Resolved/Archived) or in-flight reports must
+        // not be silently reset back to Pending Validation.
+        String editableStatus = previousStatus == null ? "" : previousStatus.trim().toLowerCase();
+        if (!(editableStatus.equals("pending validation")
+                || editableStatus.equals("rejected")
+                || editableStatus.equals("resubmitted"))) {
+            return ResponseEntity.status(409).body(Map.of("error",
+                    "This report can no longer be edited because it is already in the '" + previousStatus + "' stage."));
+        }
+
+        if (cityRoadId != null && !cityRoadId.trim().isEmpty()) {
+            CityRoad cityRoad = resolveCityRoad(cityRoadId);
+            existingReport.setCityRoadFkId(cityRoad.getId());
+            existingReport.setCityRoadId(cityRoad.getRoadId());
+            if (cityRoad.getRoadName() != null && !cityRoad.getRoadName().trim().isEmpty()) {
+                existingReport.setCityRoadName(cityRoad.getRoadName());
+            }
+            existingReport.setRoadImportance(cityRoad.getRoadImportance());
+            existingReport.setRoadType(cityRoad.getRoadType());
+            existingReport.setTerrainType(cityRoad.getTerrainType());
+        }
 
         if (description != null) existingReport.setDamageDescription(description);
         if (length != null) existingReport.setLength(length);
@@ -887,20 +952,25 @@ public class RoadReportController {
             return ResponseEntity.badRequest().body(Map.of("error", "This project has no scheduled target completion date."));
         }
 
+        // A reminder must not report success (or stamp lastReminderSent) when
+        // there is no engineer account to receive it.
+        Long engineerId = getCeoId();
+        if (engineerId == null) {
+            return ResponseEntity.status(409).body(Map.of("error",
+                    "No City Engineer account is available to receive deadline reminders."));
+        }
+
         LocalDateTime nowPst = LocalDateTime.now(ZoneId.of("Asia/Manila"));
         report.setLastReminderSent(nowPst);
         repository.save(report);
 
-        Long engineerId = getCeoId();
-        if (engineerId != null) {
-            notificationService.sendNotification(
-                    engineerId,
-                    "⏰ Deadline Expedite Reminder",
-                    "CPDO Admin issued an expedite reminder for report PRJ-" + report.getId() +
-                            " (" + report.getCityRoadName() + "). Scheduled target date: " + report.getTargetCompletionDate() + ".",
-                    "REMINDER"
-            );
-        }
+        notificationService.sendNotification(
+                engineerId,
+                "⏰ Deadline Expedite Reminder",
+                "CPDO Admin issued an expedite reminder for report PRJ-" + report.getId() +
+                        " (" + report.getCityRoadName() + "). Scheduled target date: " + report.getTargetCompletionDate() + ".",
+                "REMINDER"
+        );
 
         reportStatusLogService.log(
                 report,
@@ -1106,7 +1176,31 @@ public class RoadReportController {
     @CacheEvict(value = "dashboardStats", allEntries = true)
     public ResponseEntity<?> executeAnnualRollover(HttpServletRequest request) {
         User currentUser = getAuthenticatedUser();
-        int archivedCount = repository.archiveAnnualCycleReports();
+
+        // Archive each report through the normal entity lifecycle so the
+        // archival timestamp, a timeline entry and the @Version increment are
+        // all persisted (the previous bulk UPDATE silently skipped all three).
+        List<RoadReport> reportsToArchive = repository.findAnnualCycleArchivableReports();
+        LocalDateTime nowPst = LocalDateTime.now(ZoneId.of("Asia/Manila"));
+        for (RoadReport report : reportsToArchive) {
+            String previousStatus = report.getStatus();
+            report.setStatus(ReportStatus.ARCHIVED.getLabel());
+            report.setDateArchived(nowPst);
+
+            reportStatusLogService.log(
+                    report,
+                    "ARCHIVED",
+                    previousStatus,
+                    ReportStatus.ARCHIVED.getLabel(),
+                    "Archived by the annual rollover cycle.",
+                    currentUser,
+                    currentUser.getFirstName() + " " + currentUser.getLastName(),
+                    "ADMIN",
+                    null
+            );
+        }
+        repository.saveAll(reportsToArchive);
+        int archivedCount = reportsToArchive.size();
 
         activityLogService.log(
                 currentUser,

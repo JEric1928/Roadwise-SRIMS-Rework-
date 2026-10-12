@@ -20,7 +20,7 @@
  * window.loadReportTimeline (barangay-dashboard), loadSecureImage
  * (secure-image), and the live-updates/navigation reload guards.
  */
-import { apiFetch, API_BASE_URL } from '../../core/api.js';
+import { apiFetch, API_BASE_URL, getAuthHeaders, getAuthOnlyHeaders } from '../../core/api.js';
 import { showToast } from '../../components/toast.js';
 import { calculateEstimatedDays } from '../../domain/repair-estimates.js';
 
@@ -950,7 +950,7 @@ window.submitCeoExtensionRequest = function() {
   fetch(`${API_BASE_URL}/api/reports/${currentCEOProjectID}/request-extension`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
+      ...getAuthHeaders(),
       'ngrok-skip-browser-warning': 'true'
     },
     body: JSON.stringify({
@@ -1254,7 +1254,7 @@ document.addEventListener('DOMContentLoaded', () => {
       fetch(`${API_BASE_URL}/api/reports/${currentCEOProjectID}/status`, {
         method: 'PUT',
         headers: {
-          'Content-Type': 'application/json',
+          ...getAuthHeaders(),
           'ngrok-skip-browser-warning': 'true'
         },
         body: JSON.stringify({
@@ -1420,7 +1420,7 @@ window.executeBatchDeferral = function() {
 
   fetch(`${API_BASE_URL}/api/reports/batch/defer`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: JSON.stringify({
       repairRemarks: reason,
       reportIds: selectedIds
@@ -1515,6 +1515,7 @@ window.submitCEOCompletion = function() {
   // Send to Backend
   fetch(`${API_BASE_URL}/api/reports/${currentCEOProjectID}/complete`, {
     method: 'POST',
+    headers: getAuthOnlyHeaders(),
     body: formData
   })
     .then(res => {
