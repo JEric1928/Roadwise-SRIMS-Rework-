@@ -3,7 +3,7 @@
  * confirmation modal step transitions, single-flight submission locking,
  * and form/image/GPS resets.
  */
-import { API_BASE_URL } from '../../core/api.js';
+import { API_BASE_URL, getAuthOnlyHeaders } from '../../core/api.js';
 import { showToast } from '../../components/toast.js';
 
 let isSubmittingReport = false;
@@ -148,6 +148,7 @@ export function executeFinalSubmission() {
 
   fetch(`${API_BASE_URL}/api/reports`, {
     method: "POST",
+    headers: getAuthOnlyHeaders(),
     body: formData
   })
     .then(async response => {

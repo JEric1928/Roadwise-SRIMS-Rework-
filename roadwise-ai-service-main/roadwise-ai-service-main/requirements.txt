@@ -1,10 +1,14 @@
-fastapi
-uvicorn
-onnxruntime
-pillow
-numpy
-scipy
-pydantic
-python-multipart
-pytest
-requests
+# Pinned with compatible-release bounds so Docker builds are reproducible within
+# a major.minor line while still receiving patch/security updates.
+# Verify the image still builds and test_validation.py/test_forecasting_engines.py
+# pass after changing any bound.
+fastapi~=0.115
+uvicorn~=0.34
+onnxruntime~=1.20
+pillow~=11.1
+numpy~=2.1
+scipy~=1.15
+pydantic~=2.11
+python-multipart~=0.0.20
+pytest~=8.3
+requests~=2.32

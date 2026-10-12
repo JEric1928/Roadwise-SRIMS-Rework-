@@ -19,6 +19,9 @@ public class ForecastingOrchestratorController {
     @Value("${ai.service.url:http://localhost:8000}")
     private String aiServiceUrl;
 
+    @Value("${ai.service.api-key:}")
+    private String aiServiceApiKey;
+
     @PostMapping("/pavement-decay")
     public ResponseEntity<?> getPavementDecay(@RequestBody Map<String, Object> request) {
         return forwardRequest("/api/v1/forecasting/pavement-decay", request);
@@ -49,6 +52,11 @@ public class ForecastingOrchestratorController {
             String url = aiServiceUrl + path;
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
+            // Service-to-service authentication; the AI service is fail-closed
+            // without a matching X-API-Key.
+            if (aiServiceApiKey != null && !aiServiceApiKey.isBlank()) {
+                headers.set("X-API-Key", aiServiceApiKey);
+            }
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
             return restTemplate.postForEntity(url, entity, Map.class);
         } catch (Exception e) {

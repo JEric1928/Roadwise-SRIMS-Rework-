@@ -2,9 +2,14 @@
  * Centralized API service wrapper
  */
 
-export let API_BASE_URL = "http://localhost:8080";
+// Deployment override: hosts may set window.__ROADWISE_API_BASE__ before the
+// bundle loads (e.g. an inline script next to js/config.js). Falls back to the
+// historical defaults when unset.
+const DEPLOYED_API_BASE = (typeof window !== 'undefined' && window.__ROADWISE_API_BASE__) || null;
 
-if (typeof window !== 'undefined' && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+export let API_BASE_URL = DEPLOYED_API_BASE || "http://localhost:8080";
+
+if (!DEPLOYED_API_BASE && typeof window !== 'undefined' && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
   API_BASE_URL = "https://backend-hmxf.onrender.com";
 }
 
@@ -17,6 +22,34 @@ export function getAuthHeaders() {
     headers['Authorization'] = 'Bearer ' + token;
   }
   return headers;
+}
+
+/**
+ * Authorization-only headers for requests whose body is FormData. The browser
+ * must set the multipart Content-Type (including the boundary) itself, so this
+ * deliberately omits Content-Type.
+ */
+export function getAuthOnlyHeaders() {
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  return token ? { Authorization: 'Bearer ' + token } : {};
+}
+
+/**
+ * Clears every place a session token or identity can be persisted. Logout must
+ * not leave access/refresh tokens behind in localStorage.
+ */
+export function clearAuthSession() {
+  try {
+    if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('user');
+      localStorage.removeItem('currentUser');
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+    }
+  } catch (e) {
+    // Storage may be unavailable (private mode); nothing else to do.
+  }
 }
 
 export function getErrorMessage(status, fallbackText = "Request failed") {
@@ -52,4 +85,7 @@ export async function apiFetch(endpoint, options = {}) {
 if (typeof window !== 'undefined') {
   window.apiFetch = apiFetch;
   window.API_BASE_URL = API_BASE_URL;
+  window.getAuthHeaders = getAuthHeaders;
+  window.getAuthOnlyHeaders = getAuthOnlyHeaders;
+  window.clearAuthSession = clearAuthSession;
 }

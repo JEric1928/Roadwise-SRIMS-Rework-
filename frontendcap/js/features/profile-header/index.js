@@ -223,7 +223,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (btnConfirmLogout) {
     btnConfirmLogout.addEventListener('click', () => {
-      sessionStorage.clear();
+      if (typeof window.clearAuthSession === 'function') {
+        window.clearAuthSession();
+      } else {
+        sessionStorage.clear();
+        localStorage.removeItem('user');
+        localStorage.removeItem('currentUser');
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+      }
       window.location.replace('login.html');
     });
   }

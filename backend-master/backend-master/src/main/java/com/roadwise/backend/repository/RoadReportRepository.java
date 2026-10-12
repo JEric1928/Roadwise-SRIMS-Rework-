@@ -8,11 +8,9 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
-import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 @Repository
 public interface RoadReportRepository extends JpaRepository<RoadReport, Long>, JpaSpecificationExecutor<RoadReport> {
@@ -49,12 +47,13 @@ public interface RoadReportRepository extends JpaRepository<RoadReport, Long>, J
     boolean existsByIdAndUser_Id(Long id, Long userId);
 
     // ==========================================
-    // ⚡ HIGH-EFFICIENCY ANNUAL ROLLOVER QUERY
+    // ⚡ ANNUAL ROLLOVER SELECTION
     // ==========================================
-    // Archives everything EXCEPT active repairs: 'Dispatched to CEO', 'In Progress', 'Completed' (Pending QA)
-    @Modifying
-    @Transactional
-    @Query("UPDATE RoadReport r SET r.status = 'Archived' " +
+    // Selects everything EXCEPT active repairs: 'Dispatched to CEO', 'In Progress',
+    // 'Completed' (Pending QA) and already-archived rows. The caller archives each
+    // report individually so archival timestamps, timeline entries and optimistic
+    // version increments are written (a bulk UPDATE cannot do any of these).
+    @Query("SELECT r FROM RoadReport r " +
             "WHERE LOWER(TRIM(r.status)) NOT IN ('dispatched to ceo', 'in progress', 'completed', 'archived')")
-    int archiveAnnualCycleReports();
+    List<RoadReport> findAnnualCycleArchivableReports();
 }

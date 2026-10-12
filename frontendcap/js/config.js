@@ -1,7 +1,12 @@
 // js/config.js
-let API_BASE_URL = "http://localhost:8080";
+// Deployment override: a host may define window.__ROADWISE_API_BASE__ before
+// this script loads (inline <script> or environment-specific file). Otherwise
+// fall back to the historical defaults.
+const DEPLOYED_API_BASE = (typeof window !== 'undefined' && window.__ROADWISE_API_BASE__) || null;
 
-if (window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
+let API_BASE_URL = DEPLOYED_API_BASE || "http://localhost:8080";
+
+if (!DEPLOYED_API_BASE && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
   API_BASE_URL = "https://backend-hmxf.onrender.com";
 }
 
@@ -16,12 +21,29 @@ function getAuthHeaders() {
   return headers;
 }
 
+// Live auth headers. The Proxy computes the current token on each access, and
+// also exposes enumerable own keys so that `{ ...API_HEADERS }` (and fetch's
+// HeadersInit iteration) actually forwards the Authorization header.
 const API_HEADERS = new Proxy({}, {
   get: function(target, prop) {
     const headers = getAuthHeaders();
     return headers[prop];
+  },
+  ownKeys: function() {
+    return Object.keys(getAuthHeaders());
+  },
+  getOwnPropertyDescriptor: function(target, prop) {
+    const headers = getAuthHeaders();
+    if (Object.prototype.hasOwnProperty.call(headers, prop)) {
+      return { enumerable: true, configurable: true, value: headers[prop] };
+    }
+    return undefined;
   }
 });
+
+if (typeof window !== 'undefined') {
+  window.API_HEADERS = API_HEADERS;
+}
 
 // Utility: Debounce user input events
 function debounce(func, delay = 300) {

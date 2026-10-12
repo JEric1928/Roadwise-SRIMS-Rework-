@@ -1,6 +1,8 @@
 package com.roadwise.backend.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -18,6 +20,7 @@ public class User {
     private String username;
 
     @Column(nullable = false)
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
 
     @Column(nullable = false)
@@ -96,7 +99,9 @@ public class User {
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
 
-    // Rate Limiting Getters & Setters
+    // Rate Limiting Getters & Setters. These are internal security state and
+    // must never leak to API clients.
+    @JsonIgnore
     public int getFailedLoginAttempts() {
         return failedLoginAttempts == null ? 0 : failedLoginAttempts;
     }
@@ -105,6 +110,7 @@ public class User {
         this.failedLoginAttempts = failedLoginAttempts;
     }
 
+    @JsonIgnore
     public LocalDateTime getLockoutUntil() { return lockoutUntil; }
     public void setLockoutUntil(LocalDateTime lockoutUntil) { this.lockoutUntil = lockoutUntil; }
 }

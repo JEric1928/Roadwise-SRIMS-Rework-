@@ -16,7 +16,7 @@
  * window.jumpToReportsAndReview, window.jumpToAllReports, window.jumpToArchiveTab,
  * window.toggleAdminReviewTimeline, window.closeReviewModal, window.toggleAdminReviewMap.
  */
-import { apiFetch, API_BASE_URL } from '../../core/api.js';
+import { apiFetch, API_BASE_URL, getAuthHeaders } from '../../core/api.js';
 import { resetModalScroll } from '../../core/utils.js';
 import { showToast } from '../../components/toast.js';
 
@@ -535,7 +535,7 @@ if (btnConfirmReject) {
     fetch(`${API_BASE_URL}/api/reports/${targetReportId}/status`, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
         'ngrok-skip-browser-warning': 'true'
       },
       body: JSON.stringify({
@@ -596,7 +596,7 @@ if (btnAcceptValidate) {
     fetch(`${API_BASE_URL}/api/reports/${targetReportId}/status`, {
       method: 'PUT',
       headers: {
-        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
         'ngrok-skip-browser-warning': 'true'
       },
       body: JSON.stringify({

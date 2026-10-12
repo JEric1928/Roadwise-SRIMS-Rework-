@@ -2,6 +2,8 @@ package com.roadwise.backend.exception;
 
 import com.roadwise.backend.dto.ErrorResponseDto;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -16,6 +18,8 @@ import java.util.Map;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ErrorResponseDto> handleValidationExceptions(MethodArgumentNotValidException ex, HttpServletRequest request) {
@@ -70,6 +74,8 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponseDto> handleGenericException(Exception ex, HttpServletRequest request) {
+        // Log the full cause server-side; the client only receives a generic message.
+        log.error("Unhandled exception on {} {}", request.getMethod(), request.getRequestURI(), ex);
         ErrorResponseDto errorDto = new ErrorResponseDto(
                 HttpStatus.INTERNAL_SERVER_ERROR.value(),
                 "INTERNAL_SERVER_ERROR",

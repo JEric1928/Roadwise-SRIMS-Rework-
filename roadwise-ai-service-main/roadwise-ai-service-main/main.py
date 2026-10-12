@@ -1,15 +1,18 @@
 import hashlib
 import io
+import os
 import numpy as np
 import onnxruntime as ort
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Header, Depends
+from fastapi.responses import JSONResponse
 from collections import OrderedDict
 import threading
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
 
 import forecasting_engines as fe
+import validation as V
 from csjdm_parameters import CSJDM_GEOMORPHIC_PROFILE
 
 app = FastAPI(
@@ -18,18 +21,36 @@ app = FastAPI(
     description="ISO/IEC 25010 compliant analytical microservice hosting 5 continuous-time stochastic and differential forecasting engines."
 )
 
-# 1. Load ONNX Model on Startup
+# 1. Load ONNX Model on Startup (with supply-chain checksum verification)
 MODEL_PATH = "rdd2022_d4_resnet38.onnx"
-try:
-    opts = ort.SessionOptions()
-    opts.intra_op_num_threads = 1
-    opts.inter_op_num_threads = 1
-    session = ort.InferenceSession(MODEL_PATH, sess_options=opts, providers=['CPUExecutionProvider'])
-    input_name = session.get_inputs()[0].name
-    print(f">>> [AI READY] Model '{MODEL_PATH}' loaded successfully.")
-except Exception as e:
-    print(f">>> [AI ERROR] Failed to load model: {e}")
+if not V.verify_model_file(MODEL_PATH):
+    print(f">>> [AI ERROR] Model checksum verification failed for '{MODEL_PATH}'; refusing to load.")
     session = None
+    input_name = None
+else:
+    try:
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = 1
+        opts.inter_op_num_threads = 1
+        session = ort.InferenceSession(MODEL_PATH, sess_options=opts, providers=['CPUExecutionProvider'])
+        input_name = session.get_inputs()[0].name
+        print(f">>> [AI READY] Model '{MODEL_PATH}' loaded successfully.")
+    except Exception as e:
+        print(f">>> [AI ERROR] Failed to load model: {e}")
+        session = None
+        input_name = None
+
+# Service-to-service authentication. Fail closed when the shared secret is not
+# configured: the service refuses to serve predictions rather than running open.
+AI_SERVICE_API_KEY = os.environ.get("AI_SERVICE_API_KEY", "").strip()
+
+
+def require_api_key(x_api_key: Optional[str] = Header(default=None)):
+    if not AI_SERVICE_API_KEY:
+        raise HTTPException(status_code=503,
+                            detail="AI service authentication is not configured (AI_SERVICE_API_KEY missing).")
+    if not x_api_key or x_api_key != AI_SERVICE_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key.")
 
 SEVERITY_LEVELS = ["Low", "Medium", "High"]
 CONFIDENCE_FLOOR = 0.40
@@ -136,59 +157,85 @@ class DataAssimilationRequest(BaseModel):
 # ==============================================================================
 @app.get("/")
 def health_check():
-    return {
-        "status": "online",
+    payload = {
         "service": "RoadWise AI Inference & Mathematical Forecasting Engine",
         "model_loaded": session is not None,
+        "auth_configured": bool(AI_SERVICE_API_KEY),
         "csjdm_profile": CSJDM_GEOMORPHIC_PROFILE
+    }
+    if session is None:
+        payload["status"] = "degraded"
+        # Model-aware readiness: a process that is up but cannot serve
+        # predictions must not report healthy to orchestrators.
+        return JSONResponse(status_code=503, content=payload)
+    payload["status"] = "online"
+    return payload
+
+
+def _unassessed(status: str, message: str, image_quality: str = "UNKNOWN") -> dict:
+    return {
+        "severity": "Unassessed",
+        "confidence": 0.0,
+        "status": status,
+        "message": message,
+        "modelVersion": MODEL_VERSION,
+        "reviewRequired": True,
+        "imageQuality": image_quality,
     }
 
 
 @app.post("/predict")
-async def predict_severity(file: UploadFile = File(...)):
+async def predict_severity(file: UploadFile = File(...), _: None = Depends(require_api_key)):
     if session is None:
         raise HTTPException(status_code=503, detail="AI Model session is not initialized.")
 
     contents = await file.read()
-    if not contents:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    # Layer 1: file / security validation (size, MIME, magic bytes).
+    err_status, err_message = V.validate_upload_bytes(contents, file.content_type)
+    if err_status:
+        return _unassessed(err_status, err_message, "REJECTED")
 
     img_hash = hashlib.sha256(contents).hexdigest()
     cached_res = cache_get(img_hash)
     if cached_res is not None:
         return cached_res
 
-    try:
-        raw_image = Image.open(io.BytesIO(contents))
-        is_invalid, reason, image_quality = is_non_road_upload(raw_image)
-        if is_invalid:
-            res = {
-                "severity": "Unassessed",
-                "confidence": 0.0,
-                "status": "INVALID_SURFACE",
-                "message": reason,
-                "modelVersion": MODEL_VERSION,
-                "reviewRequired": True,
-                "imageQuality": image_quality
-            }
-            cache_set(img_hash, res)
-            return res
+    # Layer 2: safe decode + structural / decompression-bomb checks.
+    raw_image, err_status, err_message = V.safe_decode_image(contents)
+    if raw_image is None:
+        return _unassessed(err_status or "INVALID_INPUT", err_message or "Image rejected.", "REJECTED")
 
+    # Layer 3: quality / road-scene heuristics.
+    quality = V.prescreen_quality(raw_image)
+    if not quality.ok:
+        res = _unassessed(quality.status, quality.message, quality.image_quality)
+        cache_set(img_hash, res)
+        return res
+    image_quality = quality.image_quality
+
+    try:
         image_resized = raw_image.convert("RGB").resize((224, 224))
         img_np = np.array(image_resized, dtype=np.float32) / 255.0
         img_np = np.transpose(img_np, (2, 0, 1))
         img_np = np.expand_dims(img_np, axis=0)
 
         outputs = session.run(None, {input_name: img_np})
-        logits = outputs[0][0]
 
-        exp_logits = np.exp(logits - np.max(logits))
-        probs = exp_logits / np.sum(exp_logits)
+        # Layer 4: validate raw model outputs before interpreting them.
+        logits, model_err = V.validate_model_outputs(outputs, expected_num_classes=len(SEVERITY_LEVELS))
+        if model_err:
+            res = _unassessed("MODEL_ERROR", model_err, image_quality)
+            cache_set(img_hash, res)
+            return res
+
+        probs = V.softmax(np.asarray(logits, dtype=np.float64))
         max_idx = int(np.argmax(probs))
         top_confidence = float(probs[max_idx])
         predicted_severity = SEVERITY_LEVELS[max_idx]
 
-        review_required = top_confidence < 0.70 or image_quality == "LOW_QUALITY"
+        review_required = (top_confidence < 0.70 or image_quality == "LOW_QUALITY"
+                           or V.margin_is_too_small(probs))
 
         if top_confidence < CONFIDENCE_FLOOR:
             res = {
@@ -220,7 +267,7 @@ async def predict_severity(file: UploadFile = File(...)):
 
 # --- ENGINE 1 ENDPOINT ---
 @app.post("/api/v1/forecasting/pavement-decay")
-def predict_pavement_decay(req: PavementDecayRequest):
+def predict_pavement_decay(req: PavementDecayRequest, _: None = Depends(require_api_key)):
     try:
         return fe.simulate_pavement_lifecycle(
             road_id=req.road_id,
@@ -235,7 +282,7 @@ def predict_pavement_decay(req: PavementDecayRequest):
 
 # --- ENGINE 2 ENDPOINT ---
 @app.post("/api/v1/forecasting/hydrological-shock")
-def predict_hydrological_shock(req: HydrologicalShockRequest):
+def predict_hydrological_shock(req: HydrologicalShockRequest, _: None = Depends(require_api_key)):
     try:
         return fe.simulate_hydrological_shock(
             road_id=req.road_id,
@@ -250,7 +297,7 @@ def predict_hydrological_shock(req: HydrologicalShockRequest):
 
 # --- ENGINE 3 ENDPOINT ---
 @app.post("/api/v1/forecasting/defect-propagation")
-def predict_defect_propagation(req: DefectPropagationRequest):
+def predict_defect_propagation(req: DefectPropagationRequest, _: None = Depends(require_api_key)):
     try:
         return fe.simulate_defect_propagation(
             num_nodes=req.num_nodes,
@@ -264,7 +311,7 @@ def predict_defect_propagation(req: DefectPropagationRequest):
 
 # --- ENGINE 4 ENDPOINT ---
 @app.post("/api/v1/forecasting/financial-var")
-def predict_financial_risk(req: FinancialRiskRequest):
+def predict_financial_risk(req: FinancialRiskRequest, _: None = Depends(require_api_key)):
     try:
         return fe.simulate_financial_risk_var(
             base_budget_php=req.base_budget_php,
@@ -279,7 +326,7 @@ def predict_financial_risk(req: FinancialRiskRequest):
 
 # --- ENGINE 5 ENDPOINT ---
 @app.post("/api/v1/forecasting/data-assimilation")
-def assimilate_sensor_data(req: DataAssimilationRequest):
+def assimilate_sensor_data(req: DataAssimilationRequest, _: None = Depends(require_api_key)):
     try:
         return fe.assimilate_multi_sensor_data(
             vision_score=req.vision_score,

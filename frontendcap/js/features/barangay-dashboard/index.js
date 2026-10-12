@@ -15,7 +15,7 @@
  * window.redIcon, which app.js publishes once it builds the icon inside the
  * main DOMContentLoaded listener.
  */
-import { apiFetch, API_BASE_URL } from '../../core/api.js';
+import { apiFetch, API_BASE_URL, getAuthOnlyHeaders } from '../../core/api.js';
 import { escapeHtml, resetModalScroll } from '../../core/utils.js';
 import { formatPST } from '../../core/format-pst.js';
 import { showToast } from '../../components/toast.js';
@@ -854,7 +854,7 @@ function submitEditedReport() {
 
   fetch(`${API_BASE_URL}/api/reports/update/${reportId}`, {
     method: 'PUT',
-    headers: { 'ngrok-skip-browser-warning': 'true' },
+    headers: { ...getAuthOnlyHeaders(), 'ngrok-skip-browser-warning': 'true' },
     body: formData
   })
     .then(response => {
