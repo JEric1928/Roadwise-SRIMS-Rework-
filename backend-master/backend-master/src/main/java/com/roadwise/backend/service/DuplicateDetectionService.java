@@ -2,6 +2,9 @@ package com.roadwise.backend.service;
 
 import com.roadwise.backend.model.RoadReport;
 import com.roadwise.backend.repository.RoadReportRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -11,6 +14,11 @@ import java.util.Optional;
 
 @Service
 public class DuplicateDetectionService {
+
+    private static final Logger log = LoggerFactory.getLogger(DuplicateDetectionService.class);
+
+    /** Duplicate radius in meters, shared by the PostGIS predicate and the Java check. */
+    private static final double DUPLICATE_RADIUS_METERS = 50.0;
 
     private final RoadReportRepository repository;
 
@@ -47,16 +55,12 @@ public class DuplicateDetectionService {
 
         double lat = candidate.getLatitude();
         double lng = candidate.getLongitude();
-        double minLat = lat - 0.001;
-        double maxLat = lat + 0.001;
-        double minLng = lng - 0.001;
-        double maxLng = lng + 0.001;
 
         Long barangayId = candidate.getBarangay() != null ? candidate.getBarangay().getId() : null;
         String cityRoadName = candidate.getCityRoadName();
 
-        List<RoadReport> recentReports = repository.findCandidateDuplicates(
-                minDate, maxDate, minLat, maxLat, minLng, maxLng, barangayId, cityRoadName);
+        List<RoadReport> recentReports = findCandidates(
+                minDate, maxDate, lat, lng, barangayId, cityRoadName);
 
         for (RoadReport existing : recentReports) {
             if (candidate.getId() != null && candidate.getId().equals(existing.getId())) {
@@ -75,7 +79,7 @@ public class DuplicateDetectionService {
                         existing.getLatitude(), existing.getLongitude()
                 );
 
-                if (distanceMeters <= 50.0) {
+                if (distanceMeters <= DUPLICATE_RADIUS_METERS) {
                     boolean sameBarangay = candidate.getBarangay() != null && existing.getBarangay() != null &&
                             candidate.getBarangay().getId().equals(existing.getBarangay().getId());
                     boolean sameRoad = candidate.getCityRoadName() != null && existing.getCityRoadName() != null &&
@@ -89,5 +93,33 @@ public class DuplicateDetectionService {
         }
 
         return Optional.empty();
+    }
+
+    /**
+     * Candidate lookup with graceful degradation. The primary path is the
+     * indexed PostGIS radius query over the generated {@code geom} column;
+     * when the spatial extension is unavailable (H2 tests, a database where
+     * V13 could not enable PostGIS), it falls back to the legacy
+     * bounding-box JPQL prefilter. The Java-side Haversine and
+     * same-barangay-or-road checks above apply identically to both paths, so
+     * the outcome is the same either way.
+     */
+    private List<RoadReport> findCandidates(LocalDate minDate, LocalDate maxDate,
+                                            double lat, double lng,
+                                            Long barangayId, String cityRoadName) {
+        try {
+            return repository.findNearbyCandidates(
+                    lng, lat, DUPLICATE_RADIUS_METERS,
+                    minDate, maxDate, barangayId, cityRoadName);
+        } catch (DataAccessException ex) {
+            log.warn("PostGIS candidate search unavailable ({}); using bounding-box fallback.",
+                    ex.getMessage());
+            double minLat = lat - 0.001;
+            double maxLat = lat + 0.001;
+            double minLng = lng - 0.001;
+            double maxLng = lng + 0.001;
+            return repository.findCandidateDuplicates(
+                    minDate, maxDate, minLat, maxLat, minLng, maxLng, barangayId, cityRoadName);
+        }
     }
 }
