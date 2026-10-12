@@ -19,6 +19,7 @@
 import { apiFetch, API_BASE_URL, getAuthHeaders } from '../../core/api.js';
 import { resetModalScroll } from '../../core/utils.js';
 import { showToast } from '../../components/toast.js';
+import { openModal, closeModal } from '../../components/modal.js';
 
 // ==========================================
 // ADMIN DASHBOARD: LOAD ALL REPORTS (INBOX)
@@ -201,14 +202,8 @@ function reviewReport(reportId) {
   currentReviewReportId = reportId;
   isReviewSubmitting = false;
 
-  // 1. Grab and unhide modal
-  const modal = document.getElementById('review-modal');
-  if (!modal) return;
-
-  modal.classList.remove('hidden');
-
-  // 2. 🚀 Initial Scroll Reset to Top
-  resetModalScroll(modal);
+  // 1. Grab and open modal
+  openModal('review-modal');
 
   // 3. Force map container closed on open
   const mapContainer = document.getElementById('admin-review-map-container');
@@ -329,8 +324,7 @@ function reviewReport(reportId) {
 // ADMIN DASHBOARD: CLOSE REVIEW MODAL
 // ==========================================
 window.closeReviewModal = function() {
-  const modal = document.getElementById('review-modal');
-  if (modal) modal.classList.add('hidden');
+  closeModal('review-modal');
 
   const mapContainer = document.getElementById('admin-review-map-container');
   if (mapContainer) mapContainer.style.display = 'none';

@@ -19,6 +19,7 @@ import { apiFetch, API_BASE_URL, getAuthOnlyHeaders } from '../../core/api.js';
 import { escapeHtml, resetModalScroll } from '../../core/utils.js';
 import { formatPST } from '../../core/format-pst.js';
 import { showToast } from '../../components/toast.js';
+import { openModal, closeModal } from '../../components/modal.js';
 
 // ==========================================
 // 🚀 BARANGAY DASHBOARD: REAL DATA ENGINE & RENDERER
@@ -207,7 +208,10 @@ function renderFilteredCards(reportsList) {
   if (reportsList.length === 0) {
     listContainer.innerHTML = `
       <div style="text-align: center; padding: 35px; background: #ffffff; border-radius: 10px; border: 1px solid #e2e8f0; color: #64748b;">
-        No inspection records match your search filter.
+        <div>No inspection records match your search filter.</div>
+        <button type="button" class="btn-secondary" style="margin-top: 12px; padding: 6px 14px; font-size: 12.5px; cursor: pointer;" onclick="clearCurrentTableFilter(this)">
+          Clear Filters
+        </button>
       </div>
     `;
     return;
@@ -388,10 +392,8 @@ function updateSeverityChart(dataArray) {
 
 // 6. View & Edit Modals Controller
 function closeBdModals() {
-  const viewModal = document.getElementById('bd-view-modal');
-  const editModal = document.getElementById('bd-edit-modal');
-  if (viewModal !== null) viewModal.classList.remove('active');
-  if (editModal !== null) editModal.classList.remove('active');
+  closeModal('bd-view-modal');
+  closeModal('bd-edit-modal');
 }
 
 // ==========================================
@@ -648,10 +650,7 @@ function openViewModal(reportId) {
   if (arrow) arrow.style.transform = 'rotate(0deg)';
 
   // 2. Reveal modal & run initial scroll reset
-  if (viewModal) {
-    viewModal.classList.add('active');
-    resetModalScroll(viewModal);
-  }
+  openModal('bd-view-modal');
 
   // 3. Fetch and populate details
   apiFetch(`/api/reports/${reportId}`)
@@ -753,10 +752,7 @@ function openEditModal(reportId) {
   if (arrow) arrow.style.transform = 'rotate(0deg)';
 
   // 2. Reveal modal & run initial scroll reset
-  if (editModal) {
-    editModal.classList.add('active');
-    resetModalScroll(editModal);
-  }
+  openModal('bd-edit-modal');
 
   // 3. Fetch report details
   apiFetch(`/api/reports/${reportId}`)

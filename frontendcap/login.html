@@ -61,7 +61,7 @@
         <p class="step-desc">Enter the 6-digit authentication code dispatched to your official email.</p>
 
         <div class="form-group">
-          <input type="text" id="mfa-code" placeholder="• • • • • •" maxlength="6" class="otp-input" required aria-label="MFA verification code">
+          <input type="text" id="mfa-code" placeholder="• • • • • •" maxlength="6" class="otp-input" required autocomplete="one-time-code" inputmode="numeric" aria-label="MFA verification code">
         </div>
 
         <button type="button" id="verify-btn" class="btn-login" onclick="handleVerifyMfa()">Verify Code ➔</button>
@@ -96,18 +96,18 @@
         <p class="step-desc">Enter the 6-digit code and your new credentials below.</p>
 
         <div class="form-group">
-          <input type="text" id="reset-code" placeholder="• • • • • •" maxlength="6" class="otp-input" style="margin-bottom: 15px;" required aria-label="Reset Code">
+          <input type="text" id="reset-code" placeholder="• • • • • •" maxlength="6" class="otp-input" style="margin-bottom: 15px;" required autocomplete="one-time-code" inputmode="numeric" aria-label="Reset Code">
         </div>
 
         <div class="form-group input-icon-wrapper">
           <span class="input-icon" aria-hidden="true">🔒</span>
-          <input type="password" id="new-password" placeholder="New Password" required aria-label="New Password">
+          <input type="password" id="new-password" placeholder="New Password" required autocomplete="new-password" aria-label="New Password">
           <button type="button" class="input-icon-right" onclick="togglePasswordVisibility('new-password', this)" aria-label="Show new password" style="background:none; border:none; cursor:pointer;">👁️</button>
         </div>
 
         <div class="form-group input-icon-wrapper">
           <span class="input-icon" aria-hidden="true">🔒</span>
-          <input type="password" id="confirm-new-password" placeholder="Confirm New Password" required aria-label="Confirm New Password">
+          <input type="password" id="confirm-new-password" placeholder="Confirm New Password" required autocomplete="new-password" aria-label="Confirm New Password">
           <button type="button" class="input-icon-right" onclick="togglePasswordVisibility('confirm-new-password', this)" aria-label="Show confirm new password" style="background:none; border:none; cursor:pointer;">👁️</button>
         </div>
 

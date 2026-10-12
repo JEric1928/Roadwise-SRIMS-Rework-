@@ -1,12 +1,41 @@
 /**
  * Report submission feature module: handles road inspection report creation,
  * confirmation modal step transitions, single-flight submission locking,
- * and form/image/GPS resets.
+ * form/image/GPS resets, unsaved changes warnings, and online/offline status notifications.
  */
 import { API_BASE_URL, getAuthOnlyHeaders } from '../../core/api.js';
 import { showToast } from '../../components/toast.js';
 
 let isSubmittingReport = false;
+
+export function isReportFormDirty() {
+  const roadName = document.getElementById("cityRoadName")?.value;
+  const length = document.getElementById("length")?.value;
+  const width = document.getElementById("width")?.value;
+  const damageType = document.getElementById("damageType")?.value;
+  const desc = document.getElementById("damageDescription")?.value;
+  const fileInput = document.getElementById("damageImageFile");
+  const hasFile = Boolean(fileInput && fileInput.files && fileInput.files.length > 0);
+
+  return Boolean(roadName || length || width || damageType || desc || hasFile);
+}
+
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('beforeunload', (e) => {
+    if (isReportFormDirty()) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
+  window.addEventListener('online', () => {
+    showToast('Network connection restored.', 'success');
+  });
+
+  window.addEventListener('offline', () => {
+    showToast('You are currently offline. Changes will sync when reconnected.', 'warning');
+  });
+}
 
 export function toggleOtherDamageType() {
   const select = document.getElementById('damageType');

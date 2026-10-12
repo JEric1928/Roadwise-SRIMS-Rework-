@@ -1,9 +1,8 @@
 /**
  * Sidebar navigation and SPA history (switchView).
  *
- * Extracted verbatim from app.js. The original code ran inside the main
- * DOMContentLoaded listener, so the slice is wrapped in its own
- * DOMContentLoaded listener to preserve timing.
+ * Updates aria-current="page" on active navigation items, manages mobile drawer
+ * aria-expanded state and focus management upon view switching.
  */
 document.addEventListener('DOMContentLoaded', () => {
 // ==========================================
@@ -11,6 +10,8 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==========================================
   const navLinks = document.querySelectorAll('.nav-menu li[data-target]');
   const contentSections = document.querySelectorAll('.content-section');
+  const menuToggleBtn = document.querySelector('.menu-toggle, #menu-toggle, .hamburger-btn');
+  const sidebarNav = document.querySelector('.sidebar, .nav-sidebar');
 
 // 🗺️ VIEW DISPATCH REGISTRY: Maps views directly to their loaders
   const viewDispatchers = {
@@ -88,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   };
 
-// 🛠 Safe View Switching Engine with Unified History Tracking
+// 🛠 Safe View Switching Engine with Unified History Tracking & Accessibility
   window.switchView = function(targetId, updateHistory = true) {
     if (!targetId) return;
 
@@ -113,18 +114,41 @@ document.addEventListener('DOMContentLoaded', () => {
       modal.classList.add('hidden');
     });
 
-    // 4. Toggle active tab indicator & section visibility
-    navLinks.forEach(nav => nav.classList.remove('active'));
+    // 4. Toggle active tab indicator, aria-current & section visibility
+    navLinks.forEach(nav => {
+      nav.classList.remove('active');
+      nav.removeAttribute('aria-current');
+    });
+
     contentSections.forEach(section => {
       section.classList.add('hidden');
       section.style.display = '';
     });
 
     const activeLink = document.querySelector(`.nav-menu li[data-target="${targetId}"]`);
-    if (activeLink) activeLink.classList.add('active');
+    if (activeLink) {
+      activeLink.classList.add('active');
+      activeLink.setAttribute('aria-current', 'page');
+    }
 
     targetSection.classList.remove('hidden');
     targetSection.style.display = '';
+
+    // Close mobile drawer if active and update aria-expanded
+    if (sidebarNav && sidebarNav.classList.contains('mobile-open')) {
+      sidebarNav.classList.remove('mobile-open');
+      if (menuToggleBtn) menuToggleBtn.setAttribute('aria-expanded', 'false');
+    }
+
+    // Move focus to target section heading for keyboard navigation accessibility
+    const heading = targetSection.querySelector('h1, h2, h3');
+    if (heading) {
+      heading.setAttribute('tabindex', '-1');
+      heading.focus({ preventScroll: true });
+    } else {
+      targetSection.setAttribute('tabindex', '-1');
+      targetSection.focus({ preventScroll: true });
+    }
 
     // 5. Targeted View Scroll Reset
     const contentArea = document.querySelector('.content-area');
@@ -153,37 +177,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ⏪ Browser Back & Forward Navigation Watcher
   window.addEventListener('popstate', function(event) {
-    // 1. Check state target first
     let target = event.state && event.state.target;
 
-    // 2. Fallback to URL hash (e.g., "#view-reports" -> "view-reports")
     if (!target) {
       target = window.location.hash.replace('#', '').trim();
     }
 
-    // 3. Fallback to saved tab or first visible section
     if (!target || !document.getElementById(target)) {
       target = sessionStorage.getItem('roadwise_active_tab');
     }
 
     if (target && document.getElementById(target)) {
-      // Pass false to prevent re-pushing redundant entries into history
       switchView(target, false);
     }
   });
 
-// 🟢 Initial Page Boot Handler (Universal for Admin, CEO, and Barangay)
+// 🟢 Initial Page Boot Handler
   (function initializeView() {
     const hash = window.location.hash.replace('#', '').trim();
     const savedTab = sessionStorage.getItem('roadwise_active_tab');
 
-    // Find the first available view section in the DOM as safe baseline
     const firstSection = document.querySelector('.content-section');
     const fallbackDefault = firstSection ? firstSection.id : 'view-dashboard';
 
     let finalTarget = hash || savedTab || fallbackDefault;
 
-    // Verify element existence
     if (!document.getElementById(finalTarget)) {
       finalTarget = fallbackDefault;
     }
