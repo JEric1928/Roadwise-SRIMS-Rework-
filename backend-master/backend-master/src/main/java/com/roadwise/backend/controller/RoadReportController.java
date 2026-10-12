@@ -5,6 +5,7 @@ import com.roadwise.backend.dto.ReportCreateDto;
 import com.roadwise.backend.dto.ReportListDto;
 import com.roadwise.backend.model.*;
 import com.roadwise.backend.repository.BarangayRepository;
+import com.roadwise.backend.repository.CityRoadRepository;
 import com.roadwise.backend.repository.RoadReportRepository;
 import com.roadwise.backend.repository.UserRepository;
 import com.roadwise.backend.service.*;
@@ -45,6 +46,9 @@ public class RoadReportController {
 
     @Autowired
     private BarangayRepository barangayRepository;
+
+    @Autowired
+    private CityRoadRepository cityRoadRepository;
 
     @Autowired
     private UserRepository userRepository;
@@ -143,6 +147,18 @@ public class RoadReportController {
         report.setDamageWidth(createDto.getDamageWidth());
         report.setCityRoadName(createDto.getCityRoadName());
 
+        if (createDto.getCityRoadId() != null) {
+            cityRoadRepository.findById(createDto.getCityRoadId()).ifPresent(cityRoad -> {
+                report.setCityRoadId(cityRoad.getRoadId());
+                if (cityRoad.getRoadName() != null && !cityRoad.getRoadName().trim().isEmpty()) {
+                    report.setCityRoadName(cityRoad.getRoadName());
+                }
+                report.setRoadImportance(cityRoad.getRoadImportance());
+                report.setRoadType(cityRoad.getRoadType());
+                report.setTerrainType(cityRoad.getTerrainType());
+            });
+        }
+
         report.setUser(currentUser);
         report.setReportedBy(currentUser.getFirstName() + " " + currentUser.getLastName());
         report.setBarangay(currentUser.getBarangay());
@@ -185,6 +201,13 @@ public class RoadReportController {
             if (duplicateOpt.isPresent()) {
                 RoadReport existingDup = duplicateOpt.get();
                 System.out.println("⚠️ [DUPLICATE FLAGGED] Report PRJ-" + savedReport.getId() + " is near existing PRJ-" + existingDup.getId());
+                notificationService.sendNotification(
+                        adminId,
+                        "⚠️ Potential Duplicate Report Flagged",
+                        "Report PRJ-" + savedReport.getId() + " on " + savedReport.getCityRoadName() +
+                                " was flagged as a potential duplicate of PRJ-" + existingDup.getId() + ".",
+                        "DUPLICATE_WARNING"
+                );
             }
 
             reportStatusLogService.log(
@@ -412,6 +435,14 @@ public class RoadReportController {
         }
 
         reportWorkflowService.validateTransition(currentStatusEnum, targetStatusEnum);
+
+        if (targetStatusEnum == ReportStatus.COMPLETED) {
+            boolean hasProofImage = report.getProofOfRepairImage() != null &&
+                    !report.getProofOfRepairImage().trim().isEmpty();
+            if (!hasProofImage) {
+                return ResponseEntity.badRequest().body("Completion requires proof of repair image.");
+            }
+        }
 
         if (targetStatusEnum.getLabel().equalsIgnoreCase(previousStatusStr)) {
             return ResponseEntity.ok("ALREADY_UPDATED");
@@ -685,6 +716,7 @@ public class RoadReportController {
 
         for (RoadReport r : reportsToDefer) {
             String prev = r.getStatus();
+            reportWorkflowService.validateTransition(ReportStatus.fromString(prev), ReportStatus.PENDING_BUDGET);
             r.setStatus(ReportStatus.PENDING_BUDGET.getLabel());
             r.setRepairRemarks(reason);
 
@@ -734,14 +766,16 @@ public class RoadReportController {
         RoadReport report = repository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Report not found"));
 
+        if (proofImage == null || proofImage.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Proof of repair image is required to complete the report."));
+        }
+
         String previousStatus = report.getStatus();
         reportWorkflowService.validateTransition(ReportStatus.fromString(previousStatus), ReportStatus.COMPLETED);
 
         try {
-            if (proofImage != null && !proofImage.isEmpty()) {
-                String cloudProofUrl = supabaseStorageService.uploadImage(proofImage);
-                report.setProofOfRepairImage(cloudProofUrl);
-            }
+            String cloudProofUrl = supabaseStorageService.uploadImage(proofImage);
+            report.setProofOfRepairImage(cloudProofUrl);
         } catch (Exception e) {
             throw new RuntimeException("Failed to upload proof of repair image: " + e.getMessage());
         }
@@ -855,6 +889,17 @@ public class RoadReportController {
         LocalDateTime nowPst = LocalDateTime.now(ZoneId.of("Asia/Manila"));
         report.setLastReminderSent(nowPst);
         repository.save(report);
+
+        Long engineerId = getCeoId();
+        if (engineerId != null) {
+            notificationService.sendNotification(
+                    engineerId,
+                    "⏰ Deadline Expedite Reminder",
+                    "CPDO Admin issued an expedite reminder for report PRJ-" + report.getId() +
+                            " (" + report.getCityRoadName() + "). Scheduled target date: " + report.getTargetCompletionDate() + ".",
+                    "REMINDER"
+            );
+        }
 
         reportStatusLogService.log(
                 report,
