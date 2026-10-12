@@ -4,6 +4,7 @@ import com.roadwise.backend.model.SystemSettings;
 import com.roadwise.backend.repository.SystemSettingsRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -22,8 +23,9 @@ public class SystemSettingsController {
         });
     }
 
-    // Toggle Maintenance Mode
+    // Toggle Maintenance Mode (Restricted to Administrator roles)
     @PostMapping("/toggle-maintenance")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     public ResponseEntity<SystemSettings> toggleMaintenance(@RequestParam boolean status) {
         SystemSettings settings = getSettings();
         settings.setMaintenanceMode(status);

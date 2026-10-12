@@ -36,16 +36,6 @@ public class SupabaseStorageService {
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
     private static final int MAX_IMAGE_DIMENSION = 4096;
 
-    public String computeSha256(byte[] bytes) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(bytes);
-            return HexFormat.of().formatHex(hash);
-        } catch (Exception e) {
-            return "";
-        }
-    }
-
     public String uploadImage(MultipartFile file) throws Exception {
         return uploadImageInternal(file, "reports/", false);
     }

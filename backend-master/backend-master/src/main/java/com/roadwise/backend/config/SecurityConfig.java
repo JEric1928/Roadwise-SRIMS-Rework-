@@ -33,6 +33,7 @@ public class SecurityConfig {
                 // CityRoadController is mapped at /api/roads — the old /api/city-roads
                 // rule never matched any endpoint. Keep both for backwards compatibility.
                 .requestMatchers(HttpMethod.GET, "/api/barangays/**", "/api/roads/**", "/api/city-roads/**").permitAll()
+                .requestMatchers("/api/settings/toggle-maintenance").hasAnyRole("ADMIN", "CPDO Admin")
                 .anyRequest().authenticated()
             )
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

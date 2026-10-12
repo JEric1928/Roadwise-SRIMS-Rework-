@@ -43,9 +43,6 @@ public interface RoadReportRepository extends JpaRepository<RoadReport, Long>, J
     @Query("SELECT r.status, COUNT(r) FROM RoadReport r GROUP BY r.status")
     List<Object[]> countReportsGroupByStatus();
 
-    @Query("SELECT r.barangay.id, COUNT(r) FROM RoadReport r GROUP BY r.barangay.id")
-    List<Object[]> countReportsGroupByBarangay();
-
     @Query("SELECT r.severity, COUNT(r) FROM RoadReport r GROUP BY r.severity")
     List<Object[]> countReportsGroupBySeverity();
 

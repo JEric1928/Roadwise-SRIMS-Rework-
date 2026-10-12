@@ -39,6 +39,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                 User user = userRepository.findByUsername(username).orElse(null);
                 if (user != null) {
+                    if ("Suspended".equalsIgnoreCase(user.getStatus()) || "Deactivated".equalsIgnoreCase(user.getStatus())) {
+                        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                        response.setContentType("application/json");
+                        response.getWriter().write("{\"error\":\"Account status ineligible: " + user.getStatus() + "\"}");
+                        return;
+                    }
+
                     String roleName = user.getRole();
                     if (!roleName.startsWith("ROLE_")) {
                         roleName = "ROLE_" + roleName;
