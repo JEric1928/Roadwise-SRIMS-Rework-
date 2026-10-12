@@ -5,6 +5,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 
@@ -14,7 +15,14 @@ import java.util.Map;
 @RequestMapping("/api/v1/forecasting")
 public class ForecastingOrchestratorController {
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    private final RestTemplate restTemplate;
+
+    public ForecastingOrchestratorController() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(5000);
+        factory.setReadTimeout(15000);
+        this.restTemplate = new RestTemplate(factory);
+    }
 
     @Value("${ai.service.url:http://localhost:8000}")
     private String aiServiceUrl;
@@ -60,9 +68,9 @@ public class ForecastingOrchestratorController {
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
             return restTemplate.postForEntity(url, entity, Map.class);
         } catch (Exception e) {
+            System.err.println(">>> [FORECASTING PROXY ERROR] " + e.getMessage());
             return ResponseEntity.internalServerError().body(Map.of(
-                    "error", "Forecasting Service Orchestration Exception",
-                    "details", e.getMessage()
+                    "error", "Forecasting Service temporarily unavailable."
             ));
         }
     }

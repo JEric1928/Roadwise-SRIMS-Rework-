@@ -95,15 +95,28 @@ public class BarangayController {
 
     @GetMapping
     @Cacheable("barangays")
-    public ResponseEntity<List<Barangay>> getAllBarangays() {
+    public ResponseEntity<List<Map<String, Object>>> getAllBarangays() {
         List<Barangay> barangays = barangayRepository.findAll();
-        return ResponseEntity.ok(barangays);
+        List<Map<String, Object>> publicList = new ArrayList<>();
+        // Return a read-only projection that strips official personal contact details
+        // without mutating attached JPA entities.
+        for (Barangay b : barangays) {
+            Map<String, Object> dto = new HashMap<>();
+            dto.put("id", b.getId());
+            dto.put("barangayName", b.getBarangayName());
+            dto.put("brgyCaptain", null);
+            dto.put("contactNumber", null);
+            dto.put("emailAddress", null);
+            publicList.add(dto);
+        }
+        return ResponseEntity.ok(publicList);
     }
 
     // ==========================================
     // FETCH SPECIFIC BARANGAY DETAILS & ATTACH USER INFO
     // ==========================================
     @GetMapping("/{id}")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Barangay> getBarangayById(@PathVariable Long id) {
         Optional<Barangay> brgyOpt = barangayRepository.findById(id);
 

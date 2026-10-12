@@ -80,6 +80,13 @@ public class User {
     @JsonIgnore
     private Integer emailOtpAttempts = 0;
 
+    @Column(name = "password_change_required", nullable = false)
+    private Boolean passwordChangeRequired = false;
+
+    @Column(name = "temp_password_expires_at")
+    @JsonIgnore
+    private LocalDateTime tempPasswordExpiresAt;
+
     // Nullable for CPDO and CEO accounts
     @ManyToOne
     @JoinColumn(name = "barangay_id", nullable = true)
@@ -161,6 +168,12 @@ public class User {
 
     public Integer getEmailOtpAttempts() { return emailOtpAttempts == null ? 0 : emailOtpAttempts; }
     public void setEmailOtpAttempts(Integer emailOtpAttempts) { this.emailOtpAttempts = emailOtpAttempts; }
+
+    public Boolean getPasswordChangeRequired() { return passwordChangeRequired != null && passwordChangeRequired; }
+    public void setPasswordChangeRequired(Boolean passwordChangeRequired) { this.passwordChangeRequired = passwordChangeRequired; }
+
+    public LocalDateTime getTempPasswordExpiresAt() { return tempPasswordExpiresAt; }
+    public void setTempPasswordExpiresAt(LocalDateTime tempPasswordExpiresAt) { this.tempPasswordExpiresAt = tempPasswordExpiresAt; }
 
     public Long getVersion() { return version; }
 
