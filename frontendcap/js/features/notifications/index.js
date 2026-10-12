@@ -9,17 +9,11 @@
  * - initNotifications(): idempotent startup; bridges HTML-callable globals,
  *   binds the bell UI, and performs the initial load.
  * - refreshNotifications(): explicit refresh for external owners (WebSocket
- *   live updates). Do not add a second refresh owner.
- *
- * The window.* assignments below are a temporary compatibility bridge for
- * existing inline HTML handlers (markAllAsRead, viewAllActivity, and the
- * dynamically generated openSingleNotification rows) until those handlers are
- * migrated to registered listeners.
+ *   live updates).
  */
 import { apiFetch, API_BASE_URL } from '../../core/api.js';
 import { timeAgo } from '../../core/time-ago.js';
 
-// 🚀 DYNAMIC USER ID: Fetch the actual logged-in user's ID from session storage
 const currentUserId = sessionStorage.getItem("userId");
 
 let initialized = false;
@@ -47,9 +41,13 @@ function loadNotifications() {
   if (!currentUserId) return;
   fetchUnreadBadgeCount();
 
+  const listContainer = document.getElementById('notification-list');
+  if (listContainer) {
+    listContainer.innerHTML = '<div style="padding: 24px; text-align: center; color: #64748b; font-size: 13px;">Loading notifications...</div>';
+  }
+
   apiFetch(`/api/notifications/me`)
     .then(notifications => {
-      const listContainer = document.getElementById('notification-list');
       if (!listContainer) return;
 
       if (!notifications || notifications.length === 0) {
@@ -65,7 +63,6 @@ function loadNotifications() {
         const weightClass = notif.read ? '600' : '700';
         const dotHtml = notif.read ? '' : '<span class="notif-dot" style="height: 8px; width: 8px; background: #3b82f6; border-radius: 50%; display: inline-block; margin-top: 4px; box-shadow: 0 0 5px rgba(59,130,246,0.5);"></span>';
 
-        // Escaping text so quotes don't break the HTML attributes
         const safeTitle = notif.title ? notif.title.replace(/"/g, '&quot;') : 'Notification';
         const safeMessage = notif.message ? notif.message.replace(/"/g, '&quot;') : '';
         const timeStr = timeAgo(notif.createdAt);
@@ -89,30 +86,37 @@ function loadNotifications() {
       });
       listContainer.innerHTML = html;
     })
-    .catch(err => console.error("Failed to load notifications:", err));
+    .catch(err => {
+      console.error("Failed to load notifications:", err);
+      if (listContainer) {
+        listContainer.innerHTML = `
+          <div style="padding: 24px; text-align: center; color: #dc2626; font-size: 13px;">
+            <div>Failed to load notifications.</div>
+            <button type="button" class="btn-secondary" style="margin-top: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer;" onclick="loadNotifications()">
+              Retry
+            </button>
+          </div>
+        `;
+      }
+    });
 }
 
-// 3. 🚀 THE NEW LOGIC: OPEN POPUP MODAL & MARK READ
+// 3. OPEN POPUP MODAL & MARK READ
 function openSingleNotification(notifId, element) {
-  // A. Get the data stored safely inside the clicked element
   const title = element.getAttribute('data-title');
   const message = element.getAttribute('data-message');
   const time = element.getAttribute('data-time');
 
-  // B. Populate the modal with the specific notification data
   document.getElementById('single-notif-title').innerText = title;
   document.getElementById('single-notif-message').innerText = message;
   document.getElementById('single-notif-time').innerText = time;
 
-  // C. Open the detail modal and hide the dropdown bell
   document.getElementById('single-notif-modal').classList.remove('hidden');
   const dropdown = document.getElementById('notification-dropdown');
   if (dropdown) dropdown.classList.add('hidden');
 
-  // D. If it's already read, we are done!
   if (element.getAttribute('data-read') === 'true') return;
 
-  // E. Instantly update UI locally to "Read" state
   element.setAttribute('data-read', 'true');
   element.style.backgroundColor = '#ffffff';
 
@@ -122,12 +126,10 @@ function openSingleNotification(notifId, element) {
   const titleEl = element.querySelector('.notif-title');
   if (titleEl) titleEl.style.fontWeight = '600';
 
-  // F. Send the read request to the backend silently
   apiFetch(`/api/notifications/${notifId}/read`, { method: 'PUT' })
     .then(() => fetchUnreadBadgeCount())
     .catch(err => {
       console.error("Error marking as read:", err);
-      // Rollback optimistic UI update on failure
       element.setAttribute('data-read', 'false');
       element.style.backgroundColor = '#eff6ff';
       if (dot) dot.style.display = 'inline-block';
@@ -199,23 +201,27 @@ function viewAllActivity() {
         modalList.innerHTML = html;
       })
       .catch(err => {
-        modalList.innerHTML = '<div style="padding: 20px; text-align: center; color: red;">Failed to load history.</div>';
+        modalList.innerHTML = `
+          <div style="padding: 30px; text-align: center; color: #dc2626;">
+            <div>Failed to load notification history.</div>
+            <button type="button" class="btn-secondary" style="margin-top: 10px; padding: 6px 12px; font-size: 12.5px; cursor: pointer;" onclick="viewAllActivity()">
+              Retry
+            </button>
+          </div>
+        `;
       });
   }
 }
 
-// Bell dropdown open/close behavior. Registered once by initNotifications().
 function bindBellUI() {
   const bellBtn = document.getElementById('btn-notification');
   const dropdown = document.getElementById('notification-dropdown');
 
   if (bellBtn && dropdown) {
-    // 1. Toggle dropdown when clicking the bell
     bellBtn.addEventListener('click', (e) => {
-      e.stopPropagation(); // Prevents the document click listener below from instantly closing it
+      e.stopPropagation();
       dropdown.classList.toggle('hidden');
 
-      // 🚀 THE SCROLL BUG FIX: Force scroll to top when opened
       if (!dropdown.classList.contains('hidden')) {
         const listContainer = document.getElementById('notification-list');
         if (listContainer) {
@@ -224,7 +230,6 @@ function bindBellUI() {
       }
     });
 
-    // 2. Close dropdown if the user clicks anywhere else on the screen
     document.addEventListener('click', (e) => {
       if (!dropdown.contains(e.target) && !bellBtn.contains(e.target)) {
         dropdown.classList.add('hidden');
@@ -233,23 +238,14 @@ function bindBellUI() {
   }
 }
 
-/**
- * Explicit refresh operation for external refresh owners (WebSocket live
- * updates). Startup and successful mutations are the other documented
- * triggers; do not add more owners.
- */
 export function refreshNotifications() {
   loadNotifications();
 }
 
-/**
- * Idempotent feature entry point. Called once on DOMContentLoaded by app.js.
- */
 export function initNotifications() {
   if (initialized) return;
   initialized = true;
 
-  // Temporary HTML/global compatibility bridge for inline handlers.
   window.loadNotifications = loadNotifications;
   window.fetchUnreadBadgeCount = fetchUnreadBadgeCount;
   window.openSingleNotification = openSingleNotification;

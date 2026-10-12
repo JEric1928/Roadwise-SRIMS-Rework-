@@ -1,5 +1,6 @@
 /**
  * Toast Notification Component
+ * Consolidates screen-reader announcements via role="status" and aria-live="polite".
  */
 
 let toastTimeout = null;
@@ -13,7 +14,7 @@ export function showToast(message, type = 'success', duration = 4000) {
 
   if (!toast) {
     const toastHtml = `
-      <div id="toast-notification" style="position: fixed; top: 20px; right: 20px; padding: 14px 20px; border-radius: 8px; color: white; transition: all 0.3s ease; z-index: 999999; opacity: 0; transform: translateY(-20px); pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 10px; max-width: 380px;">
+      <div id="toast-notification" role="status" aria-live="polite" aria-atomic="true" style="position: fixed; top: 20px; right: 20px; padding: 14px 20px; border-radius: 8px; color: white; transition: all 0.3s ease; z-index: 999999; opacity: 0; transform: translateY(-20px); pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: flex; align-items: center; gap: 10px; max-width: 380px;">
         <span id="toast-icon" style="font-size: 18px;">ℹ️</span>
         <span id="toast-message" style="font-weight: 600; font-size: 13px;"></span>
       </div>`;
@@ -50,6 +51,9 @@ export function showToast(message, type = 'success', duration = 4000) {
   if (toast) {
     toast.style.backgroundColor = bg;
     if (toastIcon) toastIcon.textContent = icon;
+
+    toast.setAttribute('role', 'status');
+    toast.setAttribute('aria-live', 'polite');
 
     toast.style.opacity = '1';
     toast.style.transform = 'translateY(0)';

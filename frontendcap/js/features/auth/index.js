@@ -1,40 +1,37 @@
 /**
  * Authentication feature: login, MFA verification, and password recovery.
  *
- * Owns the login form workflow, its DOM step transitions, remember-me
- * storage, and the Enter-to-login keyboard bindings for login.html.
- *
- * Entry points:
- * - initAuth(): idempotent startup; installs the temporary window
- *   compatibility bridge for login.html inline onclick handlers, binds
- *   Enter-to-login once, and restores the remembered username.
- *
- * The functions are exported for headless tests. Browser calls from
- * login.html go through the bridge installed by initAuth().
+ * Handles step transitions, focus shifting, Enter-to-submit key bindings across
+ * active steps, remember-me storage, and API workflows.
  */
 import { API_BASE_URL } from '../../core/api.js';
 import { showToast } from '../../components/toast.js';
 import { STRICT_PASSWORD_REGEX } from '../../core/password-policy.js';
 
-// Re-exported so existing tests and callers keep the same import path.
 export { STRICT_PASSWORD_REGEX };
 
 let initialized = false;
 
-function bindEnterKeyLogin() {
-  ['username', 'password'].forEach(id => {
-    document.getElementById(id)?.addEventListener('keypress', function (e) {
-      if (e.key === 'Enter') {
-        e.preventDefault(); // Prevent form from refreshing the page
-        handleLogin();
-      }
+function bindEnterKeyStepSubmit() {
+  const stepConfigs = [
+    { ids: ['username', 'password'], action: handleLogin },
+    { ids: ['mfa-code'], action: handleVerifyMfa },
+    { ids: ['reset-email'], action: handleForgotPasswordRequest },
+    { ids: ['reset-code', 'new-password', 'confirm-new-password'], action: handlePasswordReset }
+  ];
+
+  stepConfigs.forEach(cfg => {
+    cfg.ids.forEach(id => {
+      document.getElementById(id)?.addEventListener('keypress', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          cfg.action();
+        }
+      });
     });
   });
 }
 
-// Restores the "Remember me" username. The original app.js registered this
-// twice with equivalent conditions; the superset (username input present)
-// is kept here.
 function restoreRememberedUsername() {
   const rememberedUsername = localStorage.getItem("roadwise_remembered_username");
   const usernameInput = document.getElementById("username");
@@ -85,7 +82,6 @@ export function handleLogin() {
       return response.json();
     })
     .then(data => {
-    // 🚀 MFA TRIGGER: Move to Step 2
     if (data.mfaRequired) {
       sessionStorage.setItem("tempUserId", data.userId);
 
@@ -95,7 +91,6 @@ export function handleLogin() {
       if (step1) step1.style.display = "none";
       if (step2) step2.style.display = "block";
 
-      // 🎯 Show Demo OTP in the toast banner for 10 seconds (10000ms)
       const toastMsg = data.demoOtp
         ? `🔑 DEMO OTP: [ ${data.demoOtp} ] (Expires in 5 mins)`
         : (data.message || "A 6-digit code has been sent to your email.");
@@ -104,10 +99,12 @@ export function handleLogin() {
         showToast(toastMsg, "success", 10000);
       }
 
-      // Optional convenience: auto-fill the field so you don't even have to type it
       const otpField = document.getElementById("mfa-code");
-      if (otpField && data.demoOtp) {
-        otpField.value = data.demoOtp;
+      if (otpField) {
+        if (data.demoOtp) {
+          otpField.value = data.demoOtp;
+        }
+        otpField.focus();
       }
 
       if (loginBtn) {
@@ -118,7 +115,6 @@ export function handleLogin() {
     }
   })
     .catch(error => {
-      // Clear password field on failed attempt
       if (passwordInput) passwordInput.value = "";
 
       if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
@@ -176,15 +172,12 @@ export function handleVerifyMfa() {
       return response.json();
     })
     .then(data => {
-      // 1. Cleanup temp MFA state
       sessionStorage.removeItem("tempUserId");
 
-      // 2. Clean middle name (prevent storing "null" string)
       const cleanMiddleName = (data.middleName && String(data.middleName).toLowerCase() !== "null" && String(data.middleName).toLowerCase() !== "undefined")
         ? String(data.middleName).trim()
         : "";
 
-      // 3. Save individual sessionStorage keys
       sessionStorage.setItem("userId", data.userId);
       sessionStorage.setItem("username", data.username || "N/A");
       sessionStorage.setItem("userRole", data.role || "");
@@ -202,7 +195,6 @@ export function handleVerifyMfa() {
       }
       sessionStorage.setItem("barangayName", data.barangayName || "City Hall Central");
 
-      // Store JWT Tokens
       if (data.accessToken) {
         localStorage.setItem("accessToken", data.accessToken);
       }
@@ -210,7 +202,6 @@ export function handleVerifyMfa() {
         localStorage.setItem("refreshToken", data.refreshToken);
       }
 
-      // 4. Save synced user object in localStorage for cross-component compatibility
       const userPayload = {
         id: data.userId,
         username: data.username,
@@ -224,7 +215,6 @@ export function handleVerifyMfa() {
       localStorage.setItem("user", JSON.stringify(userPayload));
       localStorage.setItem("currentUser", JSON.stringify(userPayload));
 
-      // 5. Remember Me Logic
       const rememberCheckbox = document.getElementById("remember-me");
       const usernameInput = document.getElementById("username")?.value.trim();
 
@@ -238,7 +228,6 @@ export function handleVerifyMfa() {
         showToast("Access Granted!", "success");
       }
 
-      // 6. Dynamic Routing by Role
       setTimeout(() => {
         const userRole = String(data.role).toLowerCase();
         if (userRole.includes("admin") || userRole.includes("cpdo")) {
@@ -251,13 +240,11 @@ export function handleVerifyMfa() {
       }, 1000);
     })
     .catch(error => {
-      // 1. Clear the invalid OTP input and refocus
       if (otpField) {
         otpField.value = "";
         otpField.focus();
       }
 
-      // 2. Display proper error toast
       if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
         if (typeof showToast === "function") {
           showToast("System is currently offline or unreachable. Please try again later.", "error");
@@ -268,7 +255,6 @@ export function handleVerifyMfa() {
         }
       }
 
-      // 3. Reset the VERIFY button (not loginBtn)
       if (verifyBtn) {
         verifyBtn.innerHTML = originalBtnText;
         verifyBtn.disabled = false;
@@ -284,22 +270,29 @@ export function showForgotPassword() {
   document.getElementById("login-step-1").style.display = "none";
   document.getElementById("login-step-2").style.display = "none";
   document.getElementById("forgot-step-1").style.display = "block";
+
+  const emailField = document.getElementById("reset-email");
+  if (emailField) emailField.focus();
 }
 
 // ==========================================
 // FORGOT PASSWORD: SEND OTP TO EMAIL
 // ==========================================
 export function handleForgotPasswordRequest() {
-  const email = document.getElementById("reset-email").value.trim();
+  const emailInput = document.getElementById("reset-email");
+  const email = emailInput ? emailInput.value.trim() : "";
 
   if (!email) {
     showToast("Please enter your registered email address.", "error");
+    if (emailInput) emailInput.focus();
     return;
   }
 
   const btn = document.getElementById("request-reset-btn");
-  btn.innerHTML = "Sending... ⏳";
-  btn.disabled = true;
+  if (btn) {
+    btn.innerHTML = "Sending... ⏳";
+    btn.disabled = true;
+  }
 
   fetch(`${API_BASE_URL}/api/auth/forgot-password/request`, {
     method: 'POST',
@@ -314,27 +307,31 @@ export function handleForgotPasswordRequest() {
       return response.json();
     })
     .then(data => {
-      // The backend no longer returns a userId (account-enumeration fix).
-      // The submitted email is what the confirm step will carry.
       sessionStorage.setItem("resetEmail", email);
       showToast(data.message, "success");
 
       document.getElementById("forgot-step-1").style.display = "none";
       document.getElementById("forgot-step-2").style.display = "block";
 
-      btn.innerHTML = "Send Code ➔";
-      btn.disabled = false;
+      const resetCodeInput = document.getElementById("reset-code");
+      if (resetCodeInput) resetCodeInput.focus();
+
+      if (btn) {
+        btn.innerHTML = "Send Code ➔";
+        btn.disabled = false;
+      }
     })
     .catch(error => {
-      // 🚀 SMART CHECK: User-friendly Network Error
       if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
         showToast("System is currently offline or unreachable. Please try again later.", "error");
       } else {
         showToast(error.message, "error");
       }
 
-      btn.innerHTML = "Send Code ➔";
-      btn.disabled = false;
+      if (btn) {
+        btn.innerHTML = "Send Code ➔";
+        btn.disabled = false;
+      }
     });
 }
 
@@ -342,13 +339,15 @@ export function handleForgotPasswordRequest() {
 // FORGOT PASSWORD: VERIFY OTP & SAVE PASSWORD
 // ==========================================
 export function handlePasswordReset() {
-  const otp = document.getElementById("reset-code").value.trim();
-  const newPassword = document.getElementById("new-password").value.trim();
-  const confirmPassword = document.getElementById("confirm-new-password").value.trim();
+  const otpInput = document.getElementById("reset-code");
+  const otp = otpInput ? otpInput.value.trim() : "";
+  const newPassword = document.getElementById("new-password")?.value.trim();
+  const confirmPassword = document.getElementById("confirm-new-password")?.value.trim();
   const email = sessionStorage.getItem("resetEmail");
 
   if (!otp || otp.length !== 6) {
     showToast("Please enter the 6-digit code.", "error");
+    if (otpInput) otpInput.focus();
     return;
   }
 
@@ -357,21 +356,21 @@ export function handlePasswordReset() {
     return;
   }
 
-  // 🚀 NEW: STRICT ENTERPRISE PASSWORD REGEX
   if (!STRICT_PASSWORD_REGEX.test(newPassword)) {
     showToast("Password must be 8+ characters, with 1 uppercase letter, 1 number, and 1 special character.", "error");
     return;
   }
 
-  // PASSWORD MATCH VALIDATION
   if (newPassword !== confirmPassword) {
     showToast("Passwords do not match!", "error");
     return;
   }
 
   const btn = document.getElementById("submit-reset-btn");
-  btn.innerHTML = "Resetting... ⏳";
-  btn.disabled = true;
+  if (btn) {
+    btn.innerHTML = "Resetting... ⏳";
+    btn.disabled = true;
+  }
 
   fetch(`${API_BASE_URL}/api/auth/forgot-password/reset`, {
     method: 'POST',
@@ -388,19 +387,22 @@ export function handlePasswordReset() {
     .then(data => {
       showToast(data.message, "success");
       backToLogin();
-      btn.innerHTML = "Confirm & Reset ➔";
-      btn.disabled = false;
+      if (btn) {
+        btn.innerHTML = "Confirm & Reset ➔";
+        btn.disabled = false;
+      }
     })
     .catch(error => {
-      // 🚀 SMART CHECK: User-friendly Network Error
       if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
         showToast("System is currently offline or unreachable. Please try again later.", "error");
       } else {
         showToast(error.message, "error");
       }
 
-      btn.innerHTML = "Confirm & Reset ➔";
-      btn.disabled = false;
+      if (btn) {
+        btn.innerHTML = "Confirm & Reset ➔";
+        btn.disabled = false;
+      }
     });
 }
 
@@ -408,24 +410,23 @@ export function handlePasswordReset() {
 // UI HELPER: GO BACK TO LOGIN SCREEN
 // ==========================================
 export function backToLogin() {
-  // Hide all secondary steps
   document.getElementById("login-step-2").style.display = "none";
   document.getElementById("forgot-step-1").style.display = "none";
   document.getElementById("forgot-step-2").style.display = "none";
 
-  // Show primary login
   document.getElementById("login-step-1").style.display = "block";
 
-  // Wipe inputs clean for security
   if (document.getElementById("mfa-code")) document.getElementById("mfa-code").value = "";
   if (document.getElementById("reset-email")) document.getElementById("reset-email").value = "";
   if (document.getElementById("reset-code")) document.getElementById("reset-code").value = "";
   if (document.getElementById("new-password")) document.getElementById("new-password").value = "";
   if (document.getElementById("confirm-new-password")) document.getElementById("confirm-new-password").value = "";
 
-  // Wipe temporary memory
   sessionStorage.removeItem("tempUserId");
   sessionStorage.removeItem("resetEmail");
+
+  const usernameInput = document.getElementById("username");
+  if (usernameInput) usernameInput.focus();
 }
 
 /**
@@ -435,7 +436,6 @@ export function initAuth() {
   if (initialized) return;
   initialized = true;
 
-  // Temporary HTML/global compatibility bridge for login.html inline onclick.
   window.handleLogin = handleLogin;
   window.handleVerifyMfa = handleVerifyMfa;
   window.showForgotPassword = showForgotPassword;
@@ -443,6 +443,6 @@ export function initAuth() {
   window.handlePasswordReset = handlePasswordReset;
   window.backToLogin = backToLogin;
 
-  bindEnterKeyLogin();
+  bindEnterKeyStepSubmit();
   restoreRememberedUsername();
 }

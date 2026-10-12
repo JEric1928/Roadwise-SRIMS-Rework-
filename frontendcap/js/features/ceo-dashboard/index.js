@@ -23,6 +23,7 @@
 import { apiFetch, API_BASE_URL, getAuthHeaders, getAuthOnlyHeaders } from '../../core/api.js';
 import { showToast } from '../../components/toast.js';
 import { calculateEstimatedDays } from '../../domain/repair-estimates.js';
+import { openModal, closeModal } from '../../components/modal.js';
 
 // ==========================================
 // CEO DASHBOARD WATCHDOGS (lifted from the main app.js listener)
@@ -479,12 +480,7 @@ window.openCEOManageModal = function(reportId) {
   const mapContainer = document.getElementById('ceo-manage-map-container');
   if (mapContainer) mapContainer.style.display = 'none';
 
-  const modal = document.getElementById('manage-modal');
-  if (!modal) return;
-
-  modal.classList.remove('hidden');
-  const modalBody = modal.querySelector('.modal-body');
-  if (modalBody) modalBody.scrollTop = 0;
+  openModal('manage-modal');
 
   // 🕒 1. RESET AND LOAD LIFECYCLE AUDIT TRAIL TIMELINE
   const tlContainer = document.getElementById('ceo-manage-timeline-container');
@@ -1328,7 +1324,7 @@ window.markAsPendingBudget = function() {
   }
 
   window.deferringSingleId = currentCEOProjectID;
-  document.getElementById('manage-modal').classList.add('hidden');
+  closeModal('manage-modal');
 
   const titleEl = document.getElementById('defer-modal-title');
   const warningEl = document.getElementById('defer-modal-warning');
@@ -1340,7 +1336,7 @@ window.markAsPendingBudget = function() {
 
   const reasonField = document.getElementById('batch-defer-reason');
   if (reasonField) reasonField.value = '';
-  document.getElementById('batch-defer-modal').classList.remove('hidden');
+  openModal('batch-defer-modal');
 };
 
 // 2. OPEN FROM BATCH ACTION BAR (The Checkboxes)
@@ -1395,7 +1391,7 @@ window.submitBatchDefer = function() {
     if (confirmBtn) confirmBtn.innerText = "Yes, Defer Projects";
   }
 
-  document.getElementById('confirm-action-modal').classList.remove('hidden');
+  openModal('confirm-action-modal');
 };
 
 // 4. EXECUTE THE API CALL
@@ -1433,8 +1429,8 @@ window.executeBatchDeferral = function() {
       } else {
         if (typeof showToast === 'function') showToast(data.message, "success");
 
-        document.getElementById('confirm-action-modal').classList.add('hidden');
-        document.getElementById('batch-defer-modal').classList.add('hidden');
+        closeModal('confirm-action-modal');
+        closeModal('batch-defer-modal');
 
         const actionBar = document.getElementById('batch-action-bar');
         if (actionBar) actionBar.style.display = 'none';
@@ -1526,7 +1522,7 @@ window.submitCEOCompletion = function() {
       showToast("Project marked as Completed!", "success");
 
       // Close modal and refresh data
-      document.getElementById('manage-modal').classList.add('hidden');
+      closeModal('manage-modal');
       if (typeof loadCEODashboardData === "function") {
         loadCEODashboardData();
       }
