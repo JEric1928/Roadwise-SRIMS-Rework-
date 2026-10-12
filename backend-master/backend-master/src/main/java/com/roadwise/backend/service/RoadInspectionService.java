@@ -13,6 +13,8 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.http.HttpMethod;
+import org.springframework.core.ParameterizedTypeReference;
 
 import java.util.Map;
 import java.util.Set;
@@ -136,17 +138,17 @@ public class RoadInspectionService {
             body.add("file", fileResource);
             HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
-            ResponseEntity<Map> response;
+            ResponseEntity<Map<String, Object>> response;
             try {
-                response = restTemplate.postForEntity(
-                        aiServiceUrl + "/predict", requestEntity, Map.class);
+                response = restTemplate.exchange(
+                        aiServiceUrl + "/predict", HttpMethod.POST, requestEntity, new ParameterizedTypeReference<Map<String, Object>>() {});
             } catch (HttpStatusCodeException hce) {
                 // 4xx from the AI service is a VALIDATED rejection (invalid input,
                 // bad quality, non-road, uncertain...). Surface it as Unassessed +
                 // reviewRequired; never invent a severity.
                 recordFailure();
-                String status = mapRejectionStatus(hce.getRawStatusCode());
-                System.err.println(">>> [AI REJECTION] HTTP " + hce.getRawStatusCode());
+                String status = mapRejectionStatus(hce.getStatusCode().value());
+                System.err.println(">>> [AI REJECTION] HTTP " + hce.getStatusCode().value());
                 return InspectionResult.unassessed(status,
                         "Image was rejected by the AI validation pipeline; manual review required.");
             }
