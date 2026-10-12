@@ -721,6 +721,50 @@
   </div>
 </div>
 
+<!-- SINGLE NOTIFICATION MODAL -->
+<div id="single-notif-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="single-notif-title">
+  <div class="modal-content" style="max-width: 520px; width: 92%;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;" aria-hidden="true">🔔</span>
+        <h3 id="single-notif-title" style="margin: 0; font-size: 16px; font-weight: 700; color: #0f172a;">Notification Details</h3>
+      </div>
+      <button type="button" class="close-modal-btn" onclick="document.getElementById('single-notif-modal').classList.add('hidden')" aria-label="Close notification modal">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 20px;">
+      <p id="single-notif-message" style="margin: 0 0 16px 0; font-size: 14px; color: #334155; line-height: 1.5; white-space: pre-wrap;"></p>
+      <div style="font-size: 12px; color: #64748b; text-align: right; border-top: 1px solid #e2e8f0; padding-top: 12px; font-weight: 500;">
+        Received <span id="single-notif-time">Just now</span>
+      </div>
+    </div>
+    <div class="modal-actions" style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; justify-content: flex-end;">
+      <button type="button" class="btn-secondary" onclick="document.getElementById('single-notif-modal').classList.add('hidden')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ALL NOTIFICATIONS ACTIVITY HISTORY MODAL -->
+<div id="all-notifications-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="all-notif-title">
+  <div class="modal-content" style="max-width: 600px; width: 92%;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;" aria-hidden="true">📜</span>
+        <h3 id="all-notif-title" style="margin: 0; font-size: 16px; font-weight: 700; color: #0f172a;">Notification History</h3>
+      </div>
+      <button type="button" class="close-modal-btn" onclick="document.getElementById('all-notifications-modal').classList.add('hidden')" aria-label="Close notification history modal">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 0; max-height: 400px; overflow-y: auto;">
+      <div id="all-notifications-list">
+        <!-- Dynamic list or empty state -->
+      </div>
+    </div>
+    <div class="modal-actions" style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; justify-content: space-between; align-items: center;">
+      <button type="button" class="btn-secondary btn-small" onclick="markAllAsRead()">Mark all as read</button>
+      <button type="button" class="btn-secondary" onclick="document.getElementById('all-notifications-modal').classList.add('hidden')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- TWO-COLUMN REVIEW MODAL FOR CPDO ADMIN VALIDATION -->
 <div id="review-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-header-id">
   <div class="modal-content" style="max-width: 900px; width: 95%;">
