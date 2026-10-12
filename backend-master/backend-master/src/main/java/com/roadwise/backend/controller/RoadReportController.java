@@ -9,6 +9,7 @@ import com.roadwise.backend.repository.CityRoadRepository;
 import com.roadwise.backend.repository.RoadReportRepository;
 import com.roadwise.backend.repository.UserRepository;
 import com.roadwise.backend.service.*;
+import com.roadwise.backend.util.ExifGpsExtractor;
 import jakarta.persistence.criteria.Predicate;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -161,6 +162,36 @@ public class RoadReportController {
                 .orElseThrow(() -> new IllegalArgumentException("Unknown city road: " + ref));
     }
 
+    /**
+     * Resolves the coordinates to store for a submission. An explicitly
+     * provided fix always wins; otherwise the attached photo's EXIF GPS tags
+     * are used when present. EXIF recovery is best-effort and never blocks
+     * the submission.
+     *
+     * @return a two-element array {@code [latitude, longitude]}.
+     */
+    private Double[] resolveReportCoordinates(Double latitude, Double longitude,
+                                              MultipartFile imageFile) {
+        Double lat = latitude;
+        Double lng = longitude;
+        boolean missing = lat == null || lng == null || (lat == 0.0 && lng == 0.0);
+        if (missing && imageFile != null && !imageFile.isEmpty()) {
+            try {
+                Optional<ExifGpsExtractor.GpsCoordinates> exif =
+                        ExifGpsExtractor.extract(imageFile.getBytes());
+                if (exif.isPresent()) {
+                    lat = exif.get().latitude();
+                    lng = exif.get().longitude();
+                    System.out.println("📍 [EXIF GEOTAG] Coordinates recovered from photo metadata: "
+                            + lat + ", " + lng);
+                }
+            } catch (Exception ignored) {
+                // A missing or unreadable fix must never block the submission.
+            }
+        }
+        return new Double[]{lat, lng};
+    }
+
     // ==========================================
     // 1. CREATE REPORT
     // ==========================================
@@ -181,8 +212,13 @@ public class RoadReportController {
         report.setWidth(createDto.getWidth());
         report.setLengthOfCulverts(createDto.getLengthOfCulverts());
         report.setNumberOfBridges(createDto.getNumberOfBridges());
-        report.setLatitude(createDto.getLatitude());
-        report.setLongitude(createDto.getLongitude());
+        // Automatic geotagging: fall back to the photo's EXIF GPS fix when the
+        // submission carries no usable coordinates (absent, or the 0.0/0.0
+        // sentinel the form sends when no map pin was dropped).
+        Double[] resolvedCoords = resolveReportCoordinates(
+                createDto.getLatitude(), createDto.getLongitude(), imageFile);
+        report.setLatitude(resolvedCoords[0]);
+        report.setLongitude(resolvedCoords[1]);
         report.setDamageLength(createDto.getDamageLength());
         report.setDamageWidth(createDto.getDamageWidth());
         report.setCityRoadName(createDto.getCityRoadName());
@@ -633,6 +669,27 @@ public class RoadReportController {
         if (damageType != null) existingReport.setDamageType(damageType);
         if (damageLength != null) existingReport.setDamageLength(damageLength);
         if (damageWidth != null) existingReport.setDamageWidth(damageWidth);
+
+        // Automatic geotagging on resubmission: when neither explicit
+        // coordinates nor a stored fix exist, recover the replacement photo's
+        // EXIF GPS fix (explicit values always win).
+        if (latitude == null && longitude == null
+                && (existingReport.getLatitude() == null || existingReport.getLongitude() == null
+                    || (existingReport.getLatitude() == 0.0 && existingReport.getLongitude() == 0.0))
+                && imageFile != null && !imageFile.isEmpty()) {
+            try {
+                Optional<ExifGpsExtractor.GpsCoordinates> exif =
+                        ExifGpsExtractor.extract(imageFile.getBytes());
+                if (exif.isPresent()) {
+                    existingReport.setLatitude(exif.get().latitude());
+                    existingReport.setLongitude(exif.get().longitude());
+                    System.out.println("📍 [EXIF GEOTAG] Coordinates recovered from replacement photo: "
+                            + exif.get().latitude() + ", " + exif.get().longitude());
+                }
+            } catch (Exception ignored) {
+                // A missing or unreadable fix must never block the update.
+            }
+        }
 
         try {
             if (imageFile != null && !imageFile.isEmpty()) {
