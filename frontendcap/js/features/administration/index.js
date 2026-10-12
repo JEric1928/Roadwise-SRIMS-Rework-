@@ -7,7 +7,7 @@
  * and exposes the same window.* functions that templates and other app.js
  * code already call.
  */
-import { apiFetch, API_BASE_URL } from '../../core/api.js';
+import { apiFetch, API_BASE_URL, getAuthHeaders } from '../../core/api.js';
 import { showToast } from '../../components/toast.js';
 
 // ==========================================
@@ -301,7 +301,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const response = await apiFetch(`/api/users/register`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify(payload)
         });
 
@@ -442,7 +442,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const response = await apiFetch(`/api/users/${userId}/manage`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify(payload)
         });
 
@@ -486,7 +486,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
       apiFetch(`/api/users/${userId}/emergency-reset`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ adminId: sessionStorage.getItem("userId") || "" })
       })
         .then((data) => {
@@ -735,7 +735,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // Send to the Java backend
       fetch(`${API_BASE_URL}/api/barangays`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload)
       })
         .then(async res => {
@@ -803,7 +803,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       fetch(`${API_BASE_URL}/api/roads`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload)
       })
         .then(async res => {
@@ -909,7 +909,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       fetch(`${API_BASE_URL}/api/roads/${dbId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload)
       })
         .then(async res => {
@@ -979,7 +979,7 @@ document.addEventListener('DOMContentLoaded', () => {
       // currentManageBarangayId is the global variable tracking which Manage modal is open
       fetch(`${API_BASE_URL}/api/barangays/${currentManageBarangayId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload)
       })
         .then(async res => {

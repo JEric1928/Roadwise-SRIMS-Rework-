@@ -7,6 +7,8 @@ import com.roadwise.backend.repository.*;
 import com.roadwise.backend.service.ActivityLogService;
 import com.roadwise.backend.service.EmailService;
 import com.roadwise.backend.service.NotificationService;
+import com.roadwise.backend.util.PasswordPolicy;
+import com.roadwise.backend.util.SecurityUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 
@@ -62,7 +65,20 @@ public class AuthController {
     @Value("${jwt.refresh-token-expiration-ms:604800000}") // 7 days default
     private long refreshTokenExpirationMs;
 
+    // Absolute login-session lifetime; rotation never extends it.
+    @Value("${jwt.session-absolute-expiration-ms:28800000}") // 8 hours default
+    private long sessionAbsoluteExpirationMs;
+
+    // Inactivity window enforced when a refresh is attempted.
+    @Value("${jwt.session-idle-expiration-ms:1800000}") // 30 minutes default
+    private long sessionIdleExpirationMs;
+
     private final SecureRandom secureRandom = new SecureRandom();
+
+    // Failed-attempt counters age out after this window instead of blocking forever.
+    private static final Duration RATE_WINDOW = Duration.ofMinutes(15);
+    private static final Duration RESET_REQUEST_COOLDOWN = Duration.ofSeconds(60);
+    private static final int RESET_REQUEST_MAX_PER_WINDOW = 5;
 
     private Long getAdminId() {
         return userRepository.findFirstByRoleInIgnoreCase(List.of("cpdo admin", "admin"))
@@ -74,10 +90,19 @@ public class AuthController {
         return DigestUtils.md5DigestAsHex(rawToken.getBytes(StandardCharsets.UTF_8));
     }
 
+    private boolean isWindowExpired(LoginRateLimit rateLimit) {
+        return rateLimit.getFirstAttemptAt() != null
+                && rateLimit.getFirstAttemptAt().isBefore(LocalDateTime.now().minus(RATE_WINDOW));
+    }
+
     private boolean checkRateLimit(String keyIdentifier) {
         Optional<LoginRateLimit> rateLimitOpt = loginRateLimitRepository.findByKeyIdentifier(keyIdentifier);
         if (rateLimitOpt.isPresent()) {
             LoginRateLimit rateLimit = rateLimitOpt.get();
+            if (isWindowExpired(rateLimit)) {
+                loginRateLimitRepository.delete(rateLimit);
+                return true;
+            }
             if (rateLimit.getBlockedUntil() != null && LocalDateTime.now().isBefore(rateLimit.getBlockedUntil())) {
                 return false;
             }
@@ -86,8 +111,12 @@ public class AuthController {
     }
 
     private void recordFailedAttempt(String keyIdentifier) {
-        LoginRateLimit rateLimit = loginRateLimitRepository.findByKeyIdentifier(keyIdentifier)
-                .orElse(new LoginRateLimit(keyIdentifier));
+        LoginRateLimit rateLimit = loginRateLimitRepository.findByKeyIdentifier(keyIdentifier).orElse(null);
+        if (rateLimit == null || isWindowExpired(rateLimit)) {
+            rateLimit = new LoginRateLimit(keyIdentifier);
+            rateLimit.setAttemptCount(0);
+            rateLimit.setFirstAttemptAt(LocalDateTime.now());
+        }
 
         rateLimit.setAttemptCount(rateLimit.getAttemptCount() + 1);
         rateLimit.setLastAttemptAt(LocalDateTime.now());
@@ -99,8 +128,52 @@ public class AuthController {
         loginRateLimitRepository.save(rateLimit);
     }
 
+    private boolean isResetRequestThrottled(String keyIdentifier) {
+        Optional<LoginRateLimit> opt = loginRateLimitRepository.findByKeyIdentifier(keyIdentifier);
+        if (opt.isEmpty()) {
+            return false;
+        }
+        LoginRateLimit rateLimit = opt.get();
+        if (isWindowExpired(rateLimit)) {
+            return false;
+        }
+        if (rateLimit.getLastAttemptAt() != null
+                && rateLimit.getLastAttemptAt().isAfter(LocalDateTime.now().minus(RESET_REQUEST_COOLDOWN))) {
+            return true;
+        }
+        return rateLimit.getAttemptCount() >= RESET_REQUEST_MAX_PER_WINDOW;
+    }
+
+    private void recordResetRequest(String keyIdentifier) {
+        LoginRateLimit rateLimit = loginRateLimitRepository.findByKeyIdentifier(keyIdentifier).orElse(null);
+        if (rateLimit == null || isWindowExpired(rateLimit)) {
+            rateLimit = new LoginRateLimit(keyIdentifier);
+            rateLimit.setAttemptCount(0);
+            rateLimit.setFirstAttemptAt(LocalDateTime.now());
+        }
+        rateLimit.setAttemptCount(rateLimit.getAttemptCount() + 1);
+        rateLimit.setLastAttemptAt(LocalDateTime.now());
+        loginRateLimitRepository.save(rateLimit);
+    }
+
     private void clearRateLimit(String keyIdentifier) {
         loginRateLimitRepository.findByKeyIdentifier(keyIdentifier).ifPresent(loginRateLimitRepository::delete);
+    }
+
+    private LocalDateTime effectiveRefreshExpiry(LocalDateTime now, LocalDateTime sessionExpiresAt) {
+        LocalDateTime configured = now.plusNanos(refreshTokenExpirationMs * 1_000_000L);
+        if (sessionExpiresAt != null && sessionExpiresAt.isBefore(configured)) {
+            return sessionExpiresAt;
+        }
+        return configured;
+    }
+
+    private void revokeAllRefreshTokens(User user) {
+        List<RefreshToken> activeTokens = refreshTokenRepository.findByUserAndRevokedFalse(user);
+        for (RefreshToken token : activeTokens) {
+            token.setRevoked(true);
+        }
+        refreshTokenRepository.saveAll(activeTokens);
     }
 
     // ==========================================
@@ -114,7 +187,9 @@ public class AuthController {
         String clientIp = request.getRemoteAddr();
 
         if (!checkRateLimit("IP:" + clientIp) || !checkRateLimit("USER:" + username)) {
-            return ResponseEntity.status(429).body(Map.of("error", "Too many attempts. Account or IP temporarily rate-limited."));
+            return ResponseEntity.status(429)
+                    .header("Retry-After", "60")
+                    .body(Map.of("error", "Too many attempts. Account or IP temporarily rate-limited."));
         }
 
         Optional<User> userOpt = userRepository.findByUsername(username)
@@ -132,7 +207,10 @@ public class AuthController {
 
         if (user.getLockoutUntil() != null && LocalDateTime.now().isBefore(user.getLockoutUntil())) {
             activityLogService.log(null, "AUTH", "AUTH_ACCOUNT_LOCKED", formattedUserId, "Blocked login attempt during active lockout penalty.", "WARNING", request);
-            return ResponseEntity.status(429).body(Map.of("error", "Too many failed attempts. Account temporarily rate-limited for security."));
+            long retryAfter = Math.max(1, java.time.Duration.between(LocalDateTime.now(), user.getLockoutUntil()).getSeconds());
+            return ResponseEntity.status(429)
+                    .header("Retry-After", String.valueOf(retryAfter))
+                    .body(Map.of("error", "Too many failed attempts. Account temporarily rate-limited for security."));
         }
 
         boolean passwordMatches;
@@ -168,11 +246,10 @@ public class AuthController {
             return ResponseEntity.status(401).body(Map.of("error", "Invalid username or password."));
         }
 
-        user.setFailedLoginAttempts(0);
-        user.setLockoutUntil(null);
+        // Persist any legacy-plaintext→BCrypt upgrade. Lockout counters and rate
+        // limits are only cleared after MFA succeeds, so possession of a stolen
+        // password alone cannot reset brute-force protections.
         userRepository.save(user);
-        clearRateLimit("IP:" + clientIp);
-        clearRateLimit("USER:" + username);
 
         SystemSettings settings = systemSettingsRepository.findById(1L).orElse(null);
         if (settings != null && settings.isMaintenanceMode()) {
@@ -196,13 +273,22 @@ public class AuthController {
             return ResponseEntity.status(403).body(Map.of("error", "No official email is linked to this account. Cannot proceed with MFA. Contact Admin."));
         }
 
-        String rawOtp = String.format("%06d", secureRandom.nextInt(1000000));
-        String otpHash = passwordEncoder.encode(rawOtp);
-
-        mfaChallengeRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user).ifPresent(c -> {
+        // MFA resend cooldown: reject a new code while a recent challenge is
+        // still fresh, so OTP email cannot be spammed.
+        Optional<MfaChallenge> existingChallenge = mfaChallengeRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user);
+        if (existingChallenge.isPresent() && existingChallenge.get().getCreatedAt() != null
+                && existingChallenge.get().getCreatedAt().isAfter(LocalDateTime.now().minusSeconds(60))) {
+            return ResponseEntity.status(429)
+                    .header("Retry-After", "60")
+                    .body(Map.of("error", "A verification code was just sent. Please wait a minute before requesting another."));
+        }
+        existingChallenge.ifPresent(c -> {
             c.setUsed(true);
             mfaChallengeRepository.save(c);
         });
+
+        String rawOtp = String.format("%06d", secureRandom.nextInt(1000000));
+        String otpHash = passwordEncoder.encode(rawOtp);
 
         MfaChallenge challenge = new MfaChallenge(user, otpHash, LocalDateTime.now().plusMinutes(5));
         mfaChallengeRepository.save(challenge);
@@ -270,13 +356,23 @@ public class AuthController {
         challenge.setUsed(true);
         mfaChallengeRepository.save(challenge);
 
+        // MFA succeeded: only now is the login fully validated, so reset the
+        // failed-password counters and per-IP/per-user rate limits.
+        user.setFailedLoginAttempts(0);
+        user.setLockoutUntil(null);
+        userRepository.save(user);
+        clearRateLimit("IP:" + request.getRemoteAddr());
+        clearRateLimit("USER:" + user.getUsername());
+
         String accessToken = jwtTokenProvider.generateAccessToken(user);
 
         String rawRefreshToken = UUID.randomUUID().toString() + "-" + UUID.randomUUID().toString();
         String refreshTokenHash = hashToken(rawRefreshToken);
-        LocalDateTime refreshExpiresAt = LocalDateTime.now().plusNanos(refreshTokenExpirationMs * 1_000_000L);
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime sessionExpiresAt = now.plusNanos(sessionAbsoluteExpirationMs * 1_000_000L);
+        LocalDateTime refreshExpiresAt = effectiveRefreshExpiry(now, sessionExpiresAt);
 
-        RefreshToken refreshTokenEntity = new RefreshToken(user, refreshTokenHash, refreshExpiresAt, request.getRemoteAddr());
+        RefreshToken refreshTokenEntity = new RefreshToken(user, refreshTokenHash, refreshExpiresAt, request.getRemoteAddr(), sessionExpiresAt);
         refreshTokenRepository.save(refreshTokenEntity);
 
         activityLogService.log(user, "AUTH", "AUTH_LOGIN_SUCCESS", String.format("#USR-%04d", user.getId()), "User successfully verified MFA and established active session for " + user.getRole(), "SUCCESS", request);
@@ -316,29 +412,67 @@ public class AuthController {
         String rawToken = refreshDto.getRefreshToken();
         String tokenHash = hashToken(rawToken);
 
-        Optional<RefreshToken> refreshTokenOpt = refreshTokenRepository.findByTokenHash(tokenHash);
+        Optional<RefreshToken> refreshTokenOpt = refreshTokenRepository.findWithLockByTokenHash(tokenHash);
         if (refreshTokenOpt.isEmpty()) {
             return ResponseEntity.status(401).body(Map.of("error", "Invalid refresh token."));
         }
 
         RefreshToken token = refreshTokenOpt.get();
-        if (token.isRevoked() || LocalDateTime.now().isAfter(token.getExpiresAt())) {
+        User user = token.getUser();
+
+        if (token.isRevoked()) {
+            if (token.getReplacedByTokenHash() != null) {
+                // A rotated token was replayed: treat the family as compromised
+                // and revoke every remaining token plus all access tokens.
+                revokeAllRefreshTokens(user);
+                user.bumpSessionVersion();
+                userRepository.save(user);
+                activityLogService.log(user, "SECURITY", "REFRESH_TOKEN_REUSE_DETECTED",
+                        String.format("#USR-%04d", user.getId()),
+                        "A previously rotated refresh token was replayed; all sessions were revoked.",
+                        "WARNING", request);
+            }
             return ResponseEntity.status(401).body(Map.of("error", "Expired or revoked refresh token."));
         }
 
-        token.setRevoked(true);
+        if (LocalDateTime.now().isAfter(token.getExpiresAt())) {
+            return ResponseEntity.status(401).body(Map.of("error", "Expired or revoked refresh token."));
+        }
 
-        User user = token.getUser();
+        if ("Suspended".equalsIgnoreCase(user.getStatus()) || "Deactivated".equalsIgnoreCase(user.getStatus())) {
+            return ResponseEntity.status(403).body(Map.of("error", "Account access revoked."));
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime sessionExpiresAt = token.getSessionExpiresAt();
+
+        // Absolute lifetime: rotation must not extend the original session.
+        if (sessionExpiresAt != null && now.isAfter(sessionExpiresAt)) {
+            token.setRevoked(true);
+            refreshTokenRepository.save(token);
+            return ResponseEntity.status(401).body(Map.of("error", "Session expired. Please log in again."));
+        }
+
+        // Idle timeout: reject a refresh when the session has been inactive for
+        // longer than the configured window.
+        if (token.getLastUsedAt() != null
+                && now.isAfter(token.getLastUsedAt().plusNanos(sessionIdleExpirationMs * 1_000_000L))) {
+            token.setRevoked(true);
+            refreshTokenRepository.save(token);
+            return ResponseEntity.status(401).body(Map.of("error", "Session timed out due to inactivity. Please log in again."));
+        }
+
+        token.setRevoked(true);
         String newAccessToken = jwtTokenProvider.generateAccessToken(user);
 
         String newRawRefreshToken = UUID.randomUUID().toString() + "-" + UUID.randomUUID().toString();
         String newRefreshTokenHash = hashToken(newRawRefreshToken);
-        LocalDateTime refreshExpiresAt = LocalDateTime.now().plusNanos(refreshTokenExpirationMs * 1_000_000L);
+        LocalDateTime refreshExpiresAt = effectiveRefreshExpiry(now, sessionExpiresAt);
 
         token.setReplacedByTokenHash(newRefreshTokenHash);
         refreshTokenRepository.save(token);
 
-        RefreshToken newTokenEntity = new RefreshToken(user, newRefreshTokenHash, refreshExpiresAt, request.getRemoteAddr());
+        RefreshToken newTokenEntity = new RefreshToken(user, newRefreshTokenHash, refreshExpiresAt, request.getRemoteAddr(), sessionExpiresAt);
         refreshTokenRepository.save(newTokenEntity);
 
         Map<String, String> tokens = new HashMap<>();
@@ -354,7 +488,21 @@ public class AuthController {
     @PostMapping("/forgot-password/request")
     @Transactional
     public ResponseEntity<?> requestPasswordReset(@Valid @RequestBody PasswordResetRequestDto resetDto, HttpServletRequest request) {
-        String email = resetDto.getEmail();
+        String email = resetDto.getEmail() == null ? "" : resetDto.getEmail().trim();
+        String emailThrottleKey = "RESET_EMAIL:" + email.toLowerCase(Locale.ROOT);
+        String ipThrottleKey = "RESET_IP:" + request.getRemoteAddr();
+
+        // Throttle BEFORE looking the account up so request timing/response
+        // cannot be used to enumerate registered emails.
+        if (isResetRequestThrottled(emailThrottleKey) || isResetRequestThrottled(ipThrottleKey)) {
+            return ResponseEntity.status(429)
+                    .header("Retry-After", String.valueOf(RESET_REQUEST_COOLDOWN.getSeconds()))
+                    .body(Map.of(
+                            "error", "Too many reset requests. Please wait a minute and try again.",
+                            "message", "If this email exists, a recovery code will be sent shortly."));
+        }
+        recordResetRequest(emailThrottleKey);
+        recordResetRequest(ipThrottleKey);
 
         Optional<User> userOpt = userRepository.findByEmail(email);
         if (userOpt.isEmpty()) {
@@ -397,7 +545,9 @@ public class AuthController {
 
         activityLogService.log(user, "AUTH", "AUTH_PASSWORD_RESET_REQUEST", formattedUserId, "Password recovery OTP requested.", "SUCCESS", request);
 
-        return ResponseEntity.ok(Map.of("message", "If this email exists, a recovery code will be sent shortly.", "userId", user.getId()));
+        // Deliberately identical to the unknown-email response (no userId, no
+        // existence signal).
+        return ResponseEntity.ok(Map.of("message", "If this email exists, a recovery code will be sent shortly."));
     }
 
     // ==========================================
@@ -406,12 +556,12 @@ public class AuthController {
     @PostMapping("/forgot-password/reset")
     @Transactional
     public ResponseEntity<?> resetPassword(@Valid @RequestBody PasswordResetConfirmDto confirmDto, HttpServletRequest request) {
-        Long userId = confirmDto.getUserId();
+        String email = confirmDto.getEmail() == null ? "" : confirmDto.getEmail().trim();
         String submittedOtp = confirmDto.getOtp();
         String newPassword = confirmDto.getNewPassword();
 
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found."));
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new IllegalArgumentException("Invalid recovery request."));
 
         Optional<PasswordResetToken> tokenOpt = passwordResetTokenRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user);
         if (tokenOpt.isEmpty()) {
@@ -420,6 +570,14 @@ public class AuthController {
 
         PasswordResetToken resetToken = tokenOpt.get();
 
+        if (resetToken.getAttempts() >= resetToken.getMaxAttempts()) {
+            resetToken.setUsed(true);
+            passwordResetTokenRepository.save(resetToken);
+            return ResponseEntity.status(429)
+                    .header("Retry-After", "600")
+                    .body(Map.of("error", "Maximum recovery attempts exceeded. Please request a new code."));
+        }
+
         if (LocalDateTime.now().isAfter(resetToken.getExpiresAt())) {
             resetToken.setUsed(true);
             passwordResetTokenRepository.save(resetToken);
@@ -427,23 +585,38 @@ public class AuthController {
         }
 
         if (!passwordEncoder.matches(submittedOtp, resetToken.getTokenHash())) {
-            activityLogService.log(user, "AUTH", "AUTH_PASSWORD_RESET_FAILED", String.format("#USR-%04d", userId), "Invalid reset OTP submitted.", "FAILED", request);
+            resetToken.setAttempts(resetToken.getAttempts() + 1);
+            boolean exhausted = resetToken.getAttempts() >= resetToken.getMaxAttempts();
+            if (exhausted) {
+                resetToken.setUsed(true);
+            }
+            passwordResetTokenRepository.save(resetToken);
+            activityLogService.log(user, "AUTH", "AUTH_PASSWORD_RESET_FAILED", String.format("#USR-%04d", user.getId()), "Invalid reset OTP submitted.", "FAILED", request);
+            if (exhausted) {
+                return ResponseEntity.status(429)
+                        .header("Retry-After", "600")
+                        .body(Map.of("error", "Maximum recovery attempts exceeded. Please request a new code."));
+            }
             return ResponseEntity.status(401).body(Map.of("error", "Invalid recovery code. Please try again."));
+        }
+
+        String policyError = PasswordPolicy.validate(newPassword);
+        if (policyError != null) {
+            return ResponseEntity.badRequest().body(Map.of("error", policyError));
         }
 
         user.setPassword(passwordEncoder.encode(newPassword));
         user.setFailedLoginAttempts(0);
         user.setLockoutUntil(null);
+        user.bumpSessionVersion();
         userRepository.save(user);
 
         resetToken.setUsed(true);
         passwordResetTokenRepository.save(resetToken);
 
-        List<RefreshToken> activeRefreshTokens = refreshTokenRepository.findByUserAndRevokedFalse(user);
-        for (RefreshToken rt : activeRefreshTokens) {
-            rt.setRevoked(true);
-            refreshTokenRepository.save(rt);
-        }
+        // Recovery invalidates every existing session.
+        revokeAllRefreshTokens(user);
+        clearRateLimit("RESET_EMAIL:" + email.toLowerCase(Locale.ROOT));
 
         activityLogService.log(user, "AUTH", "AUTH_PASSWORD_RESET_SUCCESS", String.format("#USR-%04d", user.getId()), "Password successfully updated via recovery verification.", "SUCCESS", request);
 
@@ -454,50 +627,60 @@ public class AuthController {
     // 6. VERIFY SESSION
     // ==========================================
     @PostMapping("/verify-session")
-    public ResponseEntity<?> verifySession(@RequestBody Map<String, Object> payload, HttpServletRequest request) {
-        Object rawId = payload.get("userId");
-        String claimedRole = (String) payload.get("role");
-
-        if (rawId == null || claimedRole == null) {
-            return ResponseEntity.status(401).body(Map.of("valid", false, "error", "Missing session identity."));
+    public ResponseEntity<?> verifySession(HttpServletRequest request) {
+        // Identity is derived exclusively from the authenticated JWT. The old
+        // implementation trusted client-supplied userId/role, which let any
+        // caller assert another account's identity.
+        User principal = SecurityUtils.getCurrentUser();
+        if (principal == null) {
+            return ResponseEntity.status(401).body(Map.of("valid", false, "error", "Authentication required."));
         }
 
-        Long userId;
-        try {
-            userId = Long.valueOf(rawId.toString());
-        } catch (NumberFormatException e) {
-            return ResponseEntity.status(401).body(Map.of("valid", false, "error", "Invalid user ID format."));
+        return userRepository.findById(principal.getId())
+                .<ResponseEntity<?>>map(user -> {
+                    if ("Suspended".equalsIgnoreCase(user.getStatus()) || "Deactivated".equalsIgnoreCase(user.getStatus())) {
+                        return ResponseEntity.status(403).body(Map.of("valid", false, "error", "Account access revoked."));
+                    }
+                    Map<String, Object> result = new HashMap<>();
+                    result.put("valid", true);
+                    result.put("role", user.getRole());
+                    result.put("status", user.getStatus());
+                    return ResponseEntity.ok(result);
+                })
+                .orElseGet(() -> ResponseEntity.status(401)
+                        .body(Map.of("valid", false, "error", "User record no longer exists.")));
+    }
+
+    // ==========================================
+    // 7. LOGOUT / SIGN OUT ALL DEVICES
+    // ==========================================
+    @PostMapping("/logout")
+    @Transactional
+    public ResponseEntity<?> logout(HttpServletRequest request) {
+        User principal = SecurityUtils.getCurrentUser();
+        if (principal == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Authentication required."));
         }
 
-        Optional<User> userOpt = userRepository.findById(userId);
-        if (userOpt.isEmpty()) {
-            return ResponseEntity.status(401).body(Map.of("valid", false, "error", "User record no longer exists."));
+        User user = userRepository.findById(principal.getId()).orElse(null);
+        if (user != null) {
+            revokeAllRefreshTokens(user);
+            // Bump the security stamp so the current access token (and every
+            // other outstanding access token) stops working immediately.
+            user.bumpSessionVersion();
+            userRepository.save(user);
+            activityLogService.log(user, "AUTH", "AUTH_LOGOUT", String.format("#USR-%04d", user.getId()),
+                    "User logged out; all refresh tokens revoked and session version bumped.", "SUCCESS", request);
         }
 
-        User user = userOpt.get();
+        return ResponseEntity.ok(Map.of("message", "Logged out successfully."));
+    }
 
-        if ("Suspended".equalsIgnoreCase(user.getStatus()) || "Deactivated".equalsIgnoreCase(user.getStatus())) {
-            return ResponseEntity.status(403).body(Map.of("valid", false, "error", "Account access revoked."));
-        }
-
-        if (!user.getRole().equalsIgnoreCase(claimedRole)) {
-            activityLogService.log(
-                    user,
-                    "SECURITY",
-                    "ROLE_SPOOF_ATTEMPT",
-                    String.format("#USR-%04d", user.getId()),
-                    "Client role mismatch detected. Claimed: '" + claimedRole + "', DB: '" + user.getRole() + "'.",
-                    "WARNING",
-                    request
-            );
-            return ResponseEntity.status(403).body(Map.of("valid", false, "error", "Role mismatch detected."));
-        }
-
-        Map<String, Object> result = new HashMap<>();
-        result.put("valid", true);
-        result.put("role", user.getRole());
-        result.put("status", user.getStatus());
-
-        return ResponseEntity.ok(result);
+    @PostMapping("/logout-all")
+    @Transactional
+    public ResponseEntity<?> logoutAllDevices(HttpServletRequest request) {
+        // Semantically identical to /logout: every refresh token is revoked and
+        // the security stamp is bumped, which invalidates all devices at once.
+        return logout(request);
     }
 }

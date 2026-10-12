@@ -8,6 +8,7 @@ import com.roadwise.backend.service.ActivityLogService;
 import com.roadwise.backend.service.EmailService;
 import com.roadwise.backend.service.NotificationService;
 import com.roadwise.backend.service.SupabaseStorageService;
+import com.roadwise.backend.util.PasswordPolicy;
 import com.roadwise.backend.util.SecurityUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -253,9 +254,16 @@ public class UserController {
             return ResponseEntity.status(401).body(Map.of("error", "Incorrect current password. " + remaining + " attempt(s) remaining."));
         }
 
+        String policyError = PasswordPolicy.validate(newPassword);
+        if (policyError != null) {
+            return ResponseEntity.badRequest().body(Map.of("error", policyError));
+        }
+
         user.setFailedLoginAttempts(0);
         user.setLockoutUntil(null);
         user.setPassword(passwordEncoder.encode(newPassword));
+        // Revoke every existing session, including the caller's current token.
+        user.bumpSessionVersion();
         userRepository.save(user);
 
         activityLogService.log(
@@ -312,6 +320,10 @@ public class UserController {
         }
         if (rawPassword == null || rawPassword.trim().isEmpty()) {
             return ResponseEntity.status(400).body(Map.of("error", "Password is required."));
+        }
+        String policyError = PasswordPolicy.validate(rawPassword);
+        if (policyError != null) {
+            return ResponseEntity.status(400).body(Map.of("error", policyError));
         }
         if (userRepository.findByUsername(username).isPresent()) {
             return ResponseEntity.status(400).body(Map.of("error", "Username already exists!"));
@@ -503,6 +515,8 @@ public class UserController {
         user.setPassword(passwordEncoder.encode(tempPassword));
         user.setFailedLoginAttempts(0);
         user.setLockoutUntil(null);
+        // Force every existing session for the affected account to re-authenticate.
+        user.bumpSessionVersion();
         userRepository.save(user);
 
         notificationService.sendNotification(
@@ -630,6 +644,7 @@ public class UserController {
 
         // 5. DEACTIVATE OUTGOING PREDECESSOR (Preserve audit integrity)
         currentAdmin.setStatus("Deactivated");
+        currentAdmin.bumpSessionVersion();
         userRepository.save(currentAdmin);
 
         // 📋 6. WRITE PERMANENT SYSTEM ACTIVITY LOG
@@ -754,6 +769,7 @@ public class UserController {
 
         // 5. DEACTIVATE OUTGOING PREDECESSOR (Preserve audit integrity)
         currentCeo.setStatus("Deactivated");
+        currentCeo.bumpSessionVersion();
         userRepository.save(currentCeo);
 
         // 📋 6. WRITE SYSTEM ACTIVITY LOG

@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -55,6 +56,7 @@ public class CityRoadController {
     // ADD NEW CITY ROAD (WITH VALIDATION & SMART AUTO-ID)
     // ==========================================
     @PostMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     @CacheEvict(value = "cityRoads", allEntries = true)
     public ResponseEntity<?> createCityRoad(@RequestBody CityRoad cityRoad) {
         // 1. Ensure a Barangay is attached
@@ -120,6 +122,7 @@ public class CityRoadController {
     // UPDATE AN EXISTING CITY ROAD (With smart validation)
     // ==========================================
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     @CacheEvict(value = "cityRoads", allEntries = true)
     public ResponseEntity<?> updateCityRoad(@PathVariable Long id, @RequestBody CityRoad updatedInfo) {
         // 1. Find the exact road in the database

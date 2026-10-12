@@ -9,6 +9,7 @@ import com.roadwise.backend.util.SecurityUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -29,12 +30,14 @@ public class ActivityLogController {
 
     // 1. GET ALL ACTIVITY LOGS (Ordered by Newest First)
     @GetMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     public List<ActivityLog> getAllLogs() {
         return activityLogRepository.findAllByOrderByTimestampDesc();
     }
 
     // 2. GET SINGLE LOG BY ID (For Audit Inspector Modal)
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     public ResponseEntity<ActivityLog> getLogById(@PathVariable Long id) {
         return activityLogRepository.findById(id)
                 .map(ResponseEntity::ok)

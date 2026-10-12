@@ -14,7 +14,7 @@ public class LoginRateLimit {
     @Column(nullable = false, unique = true)
     private String keyIdentifier;
 
-    private int attemptCount = 1;
+    private int attemptCount = 0;
 
     private LocalDateTime blockedUntil;
 

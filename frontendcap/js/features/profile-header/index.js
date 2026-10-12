@@ -214,15 +214,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const logoutConfirmModal = document.getElementById('logout-confirm-modal');
   const btnConfirmLogout = document.getElementById('btn-confirm-logout');
 
-  if (logoutBtn && logoutConfirmModal) {
-    logoutBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      logoutConfirmModal.classList.remove('hidden');
-    });
-  }
-
-  if (btnConfirmLogout) {
-    btnConfirmLogout.addEventListener('click', () => {
+  // Performs a best-effort server-side revocation (refresh tokens + session
+  // version), then always clears local credentials and returns to login.
+  window.performLogout = function() {
+    const finishLogout = () => {
       if (typeof window.clearAuthSession === 'function') {
         window.clearAuthSession();
       } else {
@@ -233,7 +228,32 @@ document.addEventListener('DOMContentLoaded', () => {
         localStorage.removeItem('refreshToken');
       }
       window.location.replace('login.html');
+    };
+
+    if (typeof window.apiFetch === 'function') {
+      window.apiFetch('/api/auth/logout', { method: 'POST' })
+        .catch(() => {})
+        .finally(finishLogout);
+    } else {
+      finishLogout();
+    }
+  };
+
+  if (logoutBtn && logoutConfirmModal) {
+    logoutBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      logoutConfirmModal.classList.remove('hidden');
     });
+  } else if (logoutBtn) {
+    // No confirmation modal on this page: sign out directly.
+    logoutBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.performLogout();
+    });
+  }
+
+  if (btnConfirmLogout) {
+    btnConfirmLogout.addEventListener('click', () => window.performLogout());
   }
 
 // --- BACK TO DASHBOARD BUTTON ---

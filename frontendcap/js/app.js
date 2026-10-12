@@ -50,10 +50,14 @@ import './features/map-engine/index.js'; // Leaflet map instances, spotlight iso
 
   // 3. SERVER-SIDE AUDIT: If on a dashboard, verify identity with Spring Boot
   if (isLoggedIn && currentPath.includes("dashboard")) {
+    const sessionToken = localStorage.getItem('accessToken');
     fetch(`${API_BASE_URL}/api/auth/verify-session`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: storedUserId, role: storedRole })
+      headers: {
+        'Content-Type': 'application/json',
+        ...(sessionToken ? { Authorization: 'Bearer ' + sessionToken } : {})
+      },
+      body: JSON.stringify({})
     })
       .then(res => {
         if (!res.ok) throw new Error("Session invalid on server");
@@ -82,6 +86,16 @@ import './features/map-engine/index.js'; // Leaflet map instances, spotlight iso
     }
   }
 })();
+
+// ==========================================
+// CENTRALIZED SESSION-EXPIRY HANDLING
+// ==========================================
+window.addEventListener('roadwise:session-expired', () => {
+  clearAuthSession();
+  if (!window.location.pathname.toLowerCase().includes('login')) {
+    window.location.replace('login.html');
+  }
+});
 
 // ==========================================
 // FEATURE STARTUP (composition)

@@ -72,7 +72,33 @@ export async function apiFetch(endpoint, options = {}) {
   const response = await fetch(url, { ...options, headers });
 
   if (!response.ok) {
-    throw new Error(`API request failed with status: ${response.status}`);
+    let message = getErrorMessage(response.status, `API request failed with status: ${response.status}`);
+    try {
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const body = await response.clone().json();
+        if (body && (body.error || body.message)) {
+          message = body.error || body.message;
+        }
+      }
+    } catch (e) {
+      // Non-JSON error body; keep the status-based message.
+    }
+
+    const error = new Error(message);
+    error.status = response.status;
+
+    if (response.status === 401) {
+      // Expired/revoked session: clear local credentials and let the shell
+      // redirect to login. Distinct from 403 (authenticated but not allowed).
+      error.code = 'SESSION_EXPIRED';
+      clearAuthSession();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('roadwise:session-expired'));
+      }
+    }
+
+    throw error;
   }
 
   const contentType = response.headers.get('content-type') || '';
@@ -88,4 +114,11 @@ if (typeof window !== 'undefined') {
   window.getAuthHeaders = getAuthHeaders;
   window.getAuthOnlyHeaders = getAuthOnlyHeaders;
   window.clearAuthSession = clearAuthSession;
+
+  // Cross-tab logout: when another tab clears the token, mirror it here.
+  window.addEventListener('storage', (event) => {
+    if (event.key === 'accessToken' && !event.newValue && !localStorage.getItem('accessToken')) {
+      window.dispatchEvent(new CustomEvent('roadwise:session-expired'));
+    }
+  });
 }

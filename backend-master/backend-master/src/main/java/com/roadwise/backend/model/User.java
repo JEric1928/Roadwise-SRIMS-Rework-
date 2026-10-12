@@ -48,6 +48,13 @@ public class User {
     @Column(name = "lockout_until")
     private LocalDateTime lockoutUntil;
 
+    // Security stamp embedded in every access token (claim "sv"). Incrementing
+    // it revokes all previously issued tokens for this account immediately,
+    // without waiting for the 15-minute access-token expiry.
+    @Column(name = "session_version", nullable = false)
+    @JsonIgnore
+    private Long sessionVersion = 0L;
+
     // Nullable for CPDO and CEO accounts
     @ManyToOne
     @JoinColumn(name = "barangay_id", nullable = true)
@@ -112,5 +119,15 @@ public class User {
 
     @JsonIgnore
     public LocalDateTime getLockoutUntil() { return lockoutUntil; }
+
+    @JsonIgnore
+    public Long getSessionVersion() { return sessionVersion == null ? 0L : sessionVersion; }
+
+    public void setSessionVersion(Long sessionVersion) { this.sessionVersion = sessionVersion; }
+
+    /** Increments the security stamp, revoking all existing tokens. */
+    public void bumpSessionVersion() {
+        this.sessionVersion = getSessionVersion() + 1;
+    }
     public void setLockoutUntil(LocalDateTime lockoutUntil) { this.lockoutUntil = lockoutUntil; }
 }

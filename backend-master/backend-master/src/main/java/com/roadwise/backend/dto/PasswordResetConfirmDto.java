@@ -1,11 +1,10 @@
 package com.roadwise.backend.dto;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 
 public class PasswordResetConfirmDto {
-    @NotNull(message = "User ID is required")
-    private Long userId;
+    @NotBlank(message = "Email is required")
+    private String email;
 
     @NotBlank(message = "OTP recovery code is required")
     private String otp;
@@ -15,8 +14,8 @@ public class PasswordResetConfirmDto {
 
     public PasswordResetConfirmDto() {}
 
-    public Long getUserId() { return userId; }
-    public void setUserId(Long userId) { this.userId = userId; }
+    public String getEmail() { return email; }
+    public void setEmail(String email) { this.email = email; }
 
     public String getOtp() { return otp; }
     public void setOtp(String otp) { this.otp = otp; }

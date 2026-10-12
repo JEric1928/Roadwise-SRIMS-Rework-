@@ -53,6 +53,9 @@ public class JwtTokenProvider {
         Map<String, Object> claims = new HashMap<>();
         claims.put("id", user.getId());
         claims.put("role", user.getRole());
+        // Security stamp: the filter rejects the token when it no longer matches
+        // the account's current session version (logout/password change).
+        claims.put("sv", user.getSessionVersion());
         if (user.getBarangay() != null) {
             claims.put("barangayId", user.getBarangay().getId());
         }
@@ -73,6 +76,31 @@ public class JwtTokenProvider {
                 .parseSignedClaims(token)
                 .getPayload()
                 .getSubject();
+    }
+
+    /**
+     * @return the session-version security stamp carried by the token, or
+     *         {@code null} for legacy tokens issued before the claim existed
+     *         (which are treated as revoked).
+     */
+    public Long getSessionVersionFromToken(String token) {
+        Object raw = Jwts.parser()
+                .verifyWith(getSigningKey())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .get("sv");
+        if (raw == null) {
+            return null;
+        }
+        if (raw instanceof Number number) {
+            return number.longValue();
+        }
+        try {
+            return Long.valueOf(raw.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     public boolean validateToken(String token) {

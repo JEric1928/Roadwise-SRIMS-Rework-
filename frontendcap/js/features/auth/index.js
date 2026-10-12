@@ -314,7 +314,9 @@ export function handleForgotPasswordRequest() {
       return response.json();
     })
     .then(data => {
-      sessionStorage.setItem("resetUserId", data.userId);
+      // The backend no longer returns a userId (account-enumeration fix).
+      // The submitted email is what the confirm step will carry.
+      sessionStorage.setItem("resetEmail", email);
       showToast(data.message, "success");
 
       document.getElementById("forgot-step-1").style.display = "none";
@@ -343,7 +345,7 @@ export function handlePasswordReset() {
   const otp = document.getElementById("reset-code").value.trim();
   const newPassword = document.getElementById("new-password").value.trim();
   const confirmPassword = document.getElementById("confirm-new-password").value.trim();
-  const userId = sessionStorage.getItem("resetUserId");
+  const email = sessionStorage.getItem("resetEmail");
 
   if (!otp || otp.length !== 6) {
     showToast("Please enter the 6-digit code.", "error");
@@ -374,7 +376,7 @@ export function handlePasswordReset() {
   fetch(`${API_BASE_URL}/api/auth/forgot-password/reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId: userId, otp: otp, newPassword: newPassword })
+    body: JSON.stringify({ email: email, otp: otp, newPassword: newPassword })
   })
     .then(async response => {
       if (!response.ok) {
@@ -423,7 +425,7 @@ export function backToLogin() {
 
   // Wipe temporary memory
   sessionStorage.removeItem("tempUserId");
-  sessionStorage.removeItem("resetUserId");
+  sessionStorage.removeItem("resetEmail");
 }
 
 /**

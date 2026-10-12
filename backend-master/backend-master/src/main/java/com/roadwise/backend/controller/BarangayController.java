@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -55,6 +56,7 @@ public class BarangayController {
     // 1. ADD NEW BARANGAY (WITH VALIDATION)
     // ==========================================
     @PostMapping
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     @CacheEvict(value = "barangays", allEntries = true)
     public ResponseEntity<?> createBarangay(
             @RequestBody Barangay barangay,
@@ -170,6 +172,7 @@ public class BarangayController {
     // UPDATE / RENAME A BARANGAY
     // ==========================================
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
     @CacheEvict(value = "barangays", allEntries = true)
     public ResponseEntity<?> updateBarangay(
             @PathVariable Long id,

@@ -1,7 +1,10 @@
 package com.roadwise.backend.model;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 
 @Entity
 @Table(name = "password_reset_tokens")
@@ -13,6 +16,7 @@ public class PasswordResetToken {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     private User user;
 
     @Column(nullable = false, unique = true)
@@ -23,7 +27,11 @@ public class PasswordResetToken {
 
     private boolean used = false;
 
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private int attempts = 0;
+
+    private int maxAttempts = 5;
+
+    private LocalDateTime createdAt = LocalDateTime.now(ZoneId.of("Asia/Manila"));
 
     public PasswordResetToken() {}
 
@@ -47,6 +55,12 @@ public class PasswordResetToken {
 
     public boolean isUsed() { return used; }
     public void setUsed(boolean used) { this.used = used; }
+
+    public int getAttempts() { return attempts; }
+    public void setAttempts(int attempts) { this.attempts = attempts; }
+
+    public int getMaxAttempts() { return maxAttempts; }
+    public void setMaxAttempts(int maxAttempts) { this.maxAttempts = maxAttempts; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

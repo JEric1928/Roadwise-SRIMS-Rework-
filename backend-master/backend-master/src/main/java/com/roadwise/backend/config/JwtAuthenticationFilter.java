@@ -46,6 +46,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         return;
                     }
 
+                    // Reject tokens issued before the latest session-version bump
+                    // (logout, password change/reset, emergency reset, handover).
+                    Long tokenSessionVersion = tokenProvider.getSessionVersionFromToken(jwt);
+                    if (tokenSessionVersion == null || !tokenSessionVersion.equals(user.getSessionVersion())) {
+                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        response.setContentType("application/json");
+                        response.getWriter().write("{\"error\":\"Session has been revoked. Please log in again.\",\"code\":\"SESSION_REVOKED\"}");
+                        return;
+                    }
+
                     String roleName = user.getRole();
                     if (!roleName.startsWith("ROLE_")) {
                         roleName = "ROLE_" + roleName;

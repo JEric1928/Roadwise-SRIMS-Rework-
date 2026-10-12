@@ -1,6 +1,8 @@
 package com.roadwise.backend.model;
 
 import jakarta.persistence.*;
+import org.hibernate.annotations.OnDelete;
+import org.hibernate.annotations.OnDeleteAction;
 import java.time.LocalDateTime;
 
 @Entity
@@ -13,6 +15,7 @@ public class RefreshToken {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @OnDelete(action = OnDeleteAction.CASCADE)
     private User user;
 
     @Column(nullable = false, unique = true)
@@ -29,13 +32,26 @@ public class RefreshToken {
 
     private String createdByIp;
 
+    // Absolute lifetime of the login session (does not extend on rotation).
+    private LocalDateTime sessionExpiresAt;
+
+    // Last successful refresh; drives the inactivity window.
+    private LocalDateTime lastUsedAt;
+
     public RefreshToken() {}
 
     public RefreshToken(User user, String tokenHash, LocalDateTime expiresAt, String createdByIp) {
+        this(user, tokenHash, expiresAt, createdByIp, null);
+    }
+
+    public RefreshToken(User user, String tokenHash, LocalDateTime expiresAt, String createdByIp,
+                        LocalDateTime sessionExpiresAt) {
         this.user = user;
         this.tokenHash = tokenHash;
         this.expiresAt = expiresAt;
         this.createdByIp = createdByIp;
+        this.sessionExpiresAt = sessionExpiresAt;
+        this.lastUsedAt = LocalDateTime.now();
     }
 
     public Long getId() { return id; }
@@ -61,4 +77,10 @@ public class RefreshToken {
 
     public String getCreatedByIp() { return createdByIp; }
     public void setCreatedByIp(String createdByIp) { this.createdByIp = createdByIp; }
+
+    public LocalDateTime getSessionExpiresAt() { return sessionExpiresAt; }
+    public void setSessionExpiresAt(LocalDateTime sessionExpiresAt) { this.sessionExpiresAt = sessionExpiresAt; }
+
+    public LocalDateTime getLastUsedAt() { return lastUsedAt; }
+    public void setLastUsedAt(LocalDateTime lastUsedAt) { this.lastUsedAt = lastUsedAt; }
 }
