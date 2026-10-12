@@ -418,6 +418,8 @@
                 <div><strong>City Road ID:</strong> <span id="summary-road-id">-</span></div>
                 <div><strong>Dimensions:</strong> <span id="summary-dimensions">-</span></div>
                 <div><strong>Damage Type:</strong> <span id="summary-damage-type" style="color: var(--color-danger); font-weight: bold;">-</span></div>
+                <div><strong>Damage Scope:</strong> <span id="summary-damage-dims">-</span></div>
+                <div><strong>Survey Notes:</strong> <span id="summary-notes">-</span></div>
                 <div><strong>GPS Position:</strong> <span id="summary-gps">-</span></div>
                 <div><strong>Photo Evidence:</strong> <span id="summary-photo-status">None Attached</span></div>
               </div>
@@ -490,7 +492,10 @@
         <div style="height: 400px; width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 16px;">
           <div id="roadwiseMap" style="height: 100%; width: 100%;"></div>
         </div>
-        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+          <button type="button" id="btn-center-pin" class="btn-secondary" style="margin-right: auto;">
+            📍 Place Pin at Map Center
+          </button>
           <button type="button" class="btn-secondary" onclick="document.getElementById('map-modal').classList.add('hidden')">Cancel</button>
           <button type="button" id="btn-save-coords" class="btn-primary">Save Coordinates</button>
         </div>
@@ -498,23 +503,113 @@
     </div>
   </div>
 
+  <!-- FIELD REPORT CONFIRMATION MODAL -->
+  <div id="confirm-modal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-content" style="max-width: 500px; text-align: center;">
+      <div class="modal-header">
+        <h2>Confirm Report Submission</h2>
+        <button type="button" class="close-modal-btn" onclick="closeConfirmModal()">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 20px;">
+        <p style="font-size: 14px; color: var(--color-text); margin-bottom: 20px;">
+          Are you sure you want to submit this road inspection report to CPDO central inventory?
+        </p>
+        <div style="display: flex; justify-content: center; gap: 12px;">
+          <button type="button" class="btn-secondary" onclick="closeConfirmModal()">Cancel</button>
+          <button type="button" class="btn-primary" onclick="executeFinalSubmission()">Yes, Submit Report</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- REPORT DETAIL VIEW MODAL -->
   <div id="bd-view-modal" class="modal-overlay hidden" role="dialog" aria-modal="true">
-    <div class="modal-content" style="max-width: 650px;">
+    <div class="modal-content" style="max-width: 700px;">
       <div class="modal-header">
         <h2>Report Detail <span id="view-modal-id-header">#</span></h2>
         <button type="button" class="close-modal-btn" onclick="closeBdModals()" aria-label="Close modal">&times;</button>
       </div>
       <div class="modal-body">
-        <div class="report-detail-grid">
+        <div class="report-detail-grid" style="margin-bottom: 16px;">
           <div><strong>Severity:</strong> <span id="view-modal-severity"></span></div>
           <div><strong>Date:</strong> <span id="view-modal-date"></span></div>
-          <div><strong>GPS:</strong> <span id="view-modal-gps"></span></div>
-          <div><strong>Road:</strong> <span id="view-modal-road-name"></span></div>
+          <div><strong>GPS Coordinates:</strong> <span id="view-modal-gps"></span></div>
+          <div><strong>City Road Name:</strong> <span id="view-modal-road-name"></span></div>
+          <div><strong>City Road ID:</strong> <span id="view-modal-road-id"></span></div>
+          <div><strong>Road Importance:</strong> <span id="view-modal-importance"></span></div>
+          <div><strong>Pavement Type:</strong> <span id="view-modal-road-type"></span></div>
+          <div><strong>Terrain:</strong> <span id="view-modal-terrain"></span></div>
+          <div><strong>Road Dimensions:</strong> <span id="view-modal-length"></span> km × <span id="view-modal-width"></span> m</div>
+          <div><strong>Culverts / Bridges:</strong> <span id="view-modal-culverts"></span> m / <span id="view-modal-bridges"></span></div>
+          <div><strong>Damage Type:</strong> <span id="view-modal-damage-type" style="color: var(--color-danger); font-weight: bold;"></span></div>
+          <div><strong>Damage Scope:</strong> <span id="view-modal-damage-length"></span> m × <span id="view-modal-damage-width"></span> m</div>
         </div>
+
+        <div style="margin-bottom: 16px;">
+          <strong>Survey Notes / Description:</strong>
+          <p id="view-modal-desc" style="color: var(--color-muted); font-size: 13px; margin-top: 4px;"></p>
+        </div>
+
         <div style="margin-top: 15px; text-align: center;">
           <img id="view-modal-img" src="" alt="Damage Photo" style="max-width: 100%; border-radius: 8px;">
         </div>
+
+        <div id="view-modal-timeline" style="margin-top: 16px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- REPORT EDIT & RESUBMIT MODAL -->
+  <div id="bd-edit-modal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div class="modal-content" style="max-width: 650px;">
+      <div class="modal-header">
+        <h2>Edit & Resubmit Report <span id="edit-modal-id-header">#</span></h2>
+        <button type="button" class="close-modal-btn" onclick="closeBdModals()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="form-edit-report" onsubmit="event.preventDefault(); submitEditedReport();">
+          <input type="hidden" id="edit-report-id">
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label>City Road Name</label>
+            <input type="text" id="edit-road-name" readonly style="background: #f8fafc;">
+          </div>
+          <div class="form-grid" style="margin-bottom: 12px;">
+            <div class="form-group">
+              <label for="edit-damage-type">Damage Type</label>
+              <input type="text" id="edit-damage-type" required>
+            </div>
+            <div class="form-group">
+              <label for="edit-damage-length">Length (m)</label>
+              <input type="number" id="edit-damage-length" step="0.01">
+            </div>
+            <div class="form-group">
+              <label for="edit-damage-width">Width (m)</label>
+              <input type="number" id="edit-damage-width" step="0.01">
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label for="edit-description">Survey Notes / Remarks</label>
+            <textarea id="edit-description" rows="3"></textarea>
+          </div>
+          <div class="form-grid" style="margin-bottom: 12px;">
+            <div class="form-group">
+              <label for="edit-latitude">Latitude</label>
+              <input type="text" id="edit-latitude">
+            </div>
+            <div class="form-group">
+              <label for="edit-longitude">Longitude</label>
+              <input type="text" id="edit-longitude">
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom: 16px;">
+            <label for="edit-image-file">Update Photo (Optional)</label>
+            <input type="file" id="edit-image-file" accept="image/*">
+          </div>
+          <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button type="button" class="btn-secondary" onclick="closeBdModals()">Cancel</button>
+            <button type="submit" class="btn-primary">Save & Resubmit Report</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

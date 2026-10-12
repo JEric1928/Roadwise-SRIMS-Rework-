@@ -798,7 +798,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         newSaveBtn.addEventListener('click', () => {
           if (!mapMarker) {
-            showToast(" Please click on the map to drop a pin first!", "warning");
+            showToast(" Please click on the map or place a pin first!", "warning");
             return;
           }
           document.getElementById('latitude').value = selectedLat;
@@ -808,6 +808,30 @@ document.addEventListener('DOMContentLoaded', () => {
           mapModal.classList.add('hidden');
           showToast("Location locked successfully!", "success");
         });
+
+        const liveCenterBtn = document.getElementById('btn-center-pin');
+        if (liveCenterBtn) {
+          const newCenterBtn = liveCenterBtn.cloneNode(true);
+          liveCenterBtn.parentNode.replaceChild(newCenterBtn, liveCenterBtn);
+
+          newCenterBtn.addEventListener('click', () => {
+            if (!map) return;
+            const center = map.getCenter();
+            if (!activePolygonCoords) {
+              showToast("Barangay boundary is still loading or unavailable. Please wait...", "warning");
+              return;
+            }
+            if (!isPointInsidePolygon(center.lat, center.lng, activePolygonCoords)) {
+              showToast(`Map center is outside Barangay ${loggedInBarangay}! Pan into the boundary first.`, "error");
+              return;
+            }
+            selectedLat = center.lat;
+            selectedLng = center.lng;
+            if (mapMarker) map.removeLayer(mapMarker);
+            mapMarker = L.marker([selectedLat, selectedLng], { icon: redIcon }).addTo(map);
+            showToast(`Pin placed at map center (${selectedLat.toFixed(5)}, ${selectedLng.toFixed(5)})`, "info");
+          });
+        }
 
         setTimeout(() => {
           map.invalidateSize();
