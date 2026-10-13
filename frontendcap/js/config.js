@@ -7,7 +7,7 @@ const DEPLOYED_API_BASE = (typeof window !== 'undefined' && window.__ROADWISE_AP
 let API_BASE_URL = DEPLOYED_API_BASE || "http://localhost:8080";
 
 if (!DEPLOYED_API_BASE && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-  API_BASE_URL = "https://backend-hmxf.onrender.com";
+  API_BASE_URL = "https://roadwise-srims-rework.onrender.com";
 }
 
 function getAuthHeaders() {
