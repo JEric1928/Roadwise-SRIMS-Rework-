@@ -7,10 +7,14 @@ import pytest
 import numpy as np
 from fastapi.testclient import TestClient
 
+import os
 import forecasting_engines as fe
-from main import app
 
-client = TestClient(app)
+os.environ["AI_SERVICE_API_KEY"] = "test-key"
+import main
+main.AI_SERVICE_API_KEY = "test-key"
+
+client = TestClient(main.app, headers={"X-API-Key": "test-key"})
 
 
 # ==============================================================================
