@@ -1,14 +1,11 @@
 package com.roadwise.backend.config;
 
-import com.roadwise.backend.model.User;
-import com.roadwise.backend.repository.UserRepository;
 import com.roadwise.backend.util.SecurityUtils;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
@@ -16,73 +13,75 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.Collections;
 
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
-    private final JwtTokenProvider tokenProvider;
-    private final UserRepository userRepository;
+    private final SessionAuthenticator sessionAuthenticator;
 
-    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider, UserRepository userRepository) {
-        this.tokenProvider = tokenProvider;
-        this.userRepository = userRepository;
+    public JwtAuthenticationFilter(SessionAuthenticator sessionAuthenticator) {
+        this.sessionAuthenticator = sessionAuthenticator;
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        try {
-            String jwt = getJwtFromRequest(request);
+        String jwt = getJwtFromRequest(request);
 
-            if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt)) {
-                JwtTokenProvider.TokenClaims claims = tokenProvider.parseClaims(jwt);
-                String username = claims.username();
+        if (StringUtils.hasText(jwt)) {
+            try {
+                SessionAuthenticator.AuthenticatedSession session = sessionAuthenticator.authenticate(jwt);
+                AbstractAuthenticationToken authentication = session.authenticatedPrincipal();
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 
-                User user = userRepository.findByUsername(username).orElse(null);
-                if (user != null) {
-                    if ("Suspended".equalsIgnoreCase(user.getStatus()) || "Deactivated".equalsIgnoreCase(user.getStatus())) {
-                        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-                        response.setContentType("application/json");
-                        response.getWriter().write("{\"error\":\"Account status ineligible: " + user.getStatus() + "\"}");
-                        return;
-                    }
+                // Publish the token's authentication time for step-up checks. The
+                // signature is already verified at this point, so later checks read this
+                // attribute rather than paying for another signature verification.
+                SecurityUtils.publishAuthTime(request, session.authTimeEpochSeconds());
 
-                    // Reject tokens issued before the latest session-version bump
-                    // (logout, password change/reset, emergency reset, handover).
-                    Long tokenSessionVersion = claims.sessionVersion();
-                    if (tokenSessionVersion == null || !tokenSessionVersion.equals(user.getSessionVersion())) {
-                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                        response.setContentType("application/json");
-                        response.getWriter().write("{\"error\":\"Session has been revoked. Please log in again.\",\"code\":\"SESSION_REVOKED\"}");
-                        return;
-                    }
-
-                    String roleName = user.getRole();
-                    if (!roleName.startsWith("ROLE_")) {
-                        roleName = "ROLE_" + roleName;
-                    }
-
-                    UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
-                            user,
-                            null,
-                            Collections.singletonList(new SimpleGrantedAuthority(roleName))
-                    );
-                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-
-                    // Publish the token's authentication time for step-up checks. The
-                    // signature is already verified at this point, so later checks read this
-                    // attribute rather than paying for another signature verification.
-                    SecurityUtils.publishAuthTime(request, claims.authTime());
-
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            } catch (SessionAuthenticator.SessionRejectedException ex) {
+                if (writeRejection(response, ex)) {
+                    return;
                 }
+                // An unusable token is not an error here: the request simply continues
+                // unauthenticated and the filter chain answers 401/403 for protected paths.
+                // Refusing outright would break the public endpoints that tolerate a stale
+                // token in the browser's storage.
+            } catch (Exception ex) {
+                logger.error("Could not set user authentication in security context", ex);
             }
-        } catch (Exception ex) {
-            logger.error("Could not set user authentication in security context", ex);
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * Renders the two rejections that end the request, matching the statuses and bodies this
+     * filter produced before the rules moved into {@link SessionAuthenticator}.
+     *
+     * @return true when the response was written and the chain must not continue
+     */
+    private boolean writeRejection(HttpServletResponse response, SessionAuthenticator.SessionRejectedException ex)
+            throws IOException {
+        switch (ex.getReason()) {
+            case ACCOUNT_INELIGIBLE -> {
+                response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                response.setContentType("application/json");
+                response.getWriter().write("{\"error\":\"" + ex.getMessage() + "\"}");
+                return true;
+            }
+            case SESSION_REVOKED -> {
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                response.setContentType("application/json");
+                response.getWriter().write(
+                        "{\"error\":\"" + ex.getMessage() + "\",\"code\":\"SESSION_REVOKED\"}");
+                return true;
+            }
+            default -> {
+                return false;
+            }
+        }
     }
 
     private String getJwtFromRequest(HttpServletRequest request) {

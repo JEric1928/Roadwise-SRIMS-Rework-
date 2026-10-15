@@ -12,6 +12,7 @@ import com.roadwise.backend.service.MfaFactorService;
 import com.roadwise.backend.service.MfaPolicyService;
 import com.roadwise.backend.service.MfaRecoveryCodeService;
 import com.roadwise.backend.service.PasskeyService;
+import com.roadwise.backend.service.SessionRevocationService;
 import com.roadwise.backend.util.PasswordPolicy;
 import com.roadwise.backend.util.SecurityUtils;
 import com.roadwise.backend.util.TokenHashes;
@@ -24,9 +25,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -74,6 +73,9 @@ public class AuthController {
 
     @Autowired
     private RateLimitService rateLimitService;
+
+    @Autowired
+    private SessionRevocationService sessionRevocationService;
 
     @Autowired
     private PasswordEncoder passwordEncoder;
@@ -686,8 +688,7 @@ public class AuthController {
                 // A rotated token was replayed: treat the family as compromised
                 // and revoke every remaining token plus all access tokens.
                 revokeAllRefreshTokens(user);
-                user.bumpSessionVersion();
-                userRepository.save(user);
+                sessionRevocationService.revoke(user, "refresh-token reuse detected");
                 activityLogService.log(
                         user, "SECURITY", "REFRESH_TOKEN_REUSE_DETECTED",
                         String.format("#USR-%04d", user.getId()),
@@ -904,8 +905,7 @@ public class AuthController {
         user.setTempPasswordExpiresAt(null);
         user.setFailedLoginAttempts(0);
         user.setLockoutUntil(null);
-        user.bumpSessionVersion();
-        userRepository.save(user);
+        sessionRevocationService.revoke(user, "password reset");
 
         resetToken.setUsed(true);
         passwordResetTokenRepository.save(resetToken);
@@ -1018,8 +1018,7 @@ public class AuthController {
             revokeAllRefreshTokens(user);
             // Bump the security stamp so the current access token (and every
             // other outstanding access token) stops working immediately.
-            user.bumpSessionVersion();
-            userRepository.save(user);
+            sessionRevocationService.revoke(user, "logout");
             activityLogService.log(
                     user, "AUTH", "AUTH_LOGOUT", String.format("#USR-%04d", user.getId()),
                     "User logged out; all refresh tokens revoked and session version bumped.", "SUCCESS", request);

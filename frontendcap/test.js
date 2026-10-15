@@ -23,6 +23,7 @@ const reportSubmissionUrl = pathToFileURL(path.join(__dirname, 'js/features/repo
 const priorityDispatchUrl = pathToFileURL(path.join(__dirname, 'js/features/priority-dispatch/index.js')).href;
 const repairTrackingUrl = pathToFileURL(path.join(__dirname, 'js/features/repair-tracking/index.js')).href;
 const mapEngineUrl = pathToFileURL(path.join(__dirname, 'js/features/map-engine/index.js')).href;
+const liveUpdateChannelUrl = pathToFileURL(path.join(__dirname, 'js/features/live-updates/channel.js')).href;
 
 // Test 1: PWA Webmanifest Validation
 test('site.webmanifest has required PWA fields', () => {
@@ -1251,3 +1252,62 @@ test('no shipped source file hardcodes a backend host', () => {
   );
 });
 
+
+// ---------------------------------------------------------------------------
+// Live-update channel selection
+//
+// These strings are duplicated in the backend's LiveUpdateChannels, and there is
+// no shared source across the two languages. The channel a client asks for must
+// match the one the server will grant: a mismatch is refused, and a refused
+// subscription looks exactly like a quiet afternoon -- the dashboard simply
+// stops updating. So the exact strings are pinned here, on the client side.
+// ---------------------------------------------------------------------------
+test('liveUpdateChannel maps each role to the channel the server grants', async () => {
+  const { liveUpdateChannel } = await import(liveUpdateChannelUrl);
+
+  assert.strictEqual(liveUpdateChannel('ADMIN', null), '/topic/updates/admin');
+  assert.strictEqual(liveUpdateChannel('CPDO Admin', null), '/topic/updates/admin');
+  assert.strictEqual(liveUpdateChannel('ENGINEER', null), '/topic/updates/engineering');
+  // The dashboards show the engineer role under the CEO label.
+  assert.strictEqual(liveUpdateChannel('CEO', null), '/topic/updates/engineering');
+  assert.strictEqual(liveUpdateChannel('BARANGAY', '7'), '/topic/updates/barangay/7');
+});
+
+test('liveUpdateChannel matches the server case-insensitively', async () => {
+  const { liveUpdateChannel } = await import(liveUpdateChannelUrl);
+
+  assert.strictEqual(liveUpdateChannel('admin', null), '/topic/updates/admin');
+  assert.strictEqual(liveUpdateChannel('barangay', '12'), '/topic/updates/barangay/12');
+});
+
+test('liveUpdateChannel refuses to guess a barangay channel', async () => {
+  const { liveUpdateChannel } = await import(liveUpdateChannelUrl);
+
+  // Every one of these would be refused by the server anyway; not asking keeps the
+  // failure visible here rather than in a console the user never opens.
+  assert.strictEqual(liveUpdateChannel('BARANGAY', null), null);
+  assert.strictEqual(liveUpdateChannel('BARANGAY', ''), null);
+  assert.strictEqual(liveUpdateChannel('BARANGAY', 'abc'), null);
+  assert.strictEqual(liveUpdateChannel('BARANGAY', '7x'), null);
+  assert.strictEqual(liveUpdateChannel('BARANGAY', '007'), null);
+  assert.strictEqual(liveUpdateChannel('BARANGAY', '-7'), null);
+  assert.strictEqual(liveUpdateChannel('BARANGAY', '7/extra'), null);
+});
+
+test('liveUpdateChannel returns nothing for an unknown or missing role', async () => {
+  const { liveUpdateChannel } = await import(liveUpdateChannelUrl);
+
+  assert.strictEqual(liveUpdateChannel(undefined, null), null);
+  assert.strictEqual(liveUpdateChannel('', null), null);
+  assert.strictEqual(liveUpdateChannel('RESIDENT', null), null);
+  assert.strictEqual(liveUpdateChannel(null, '7'), null);
+});
+
+test('the retired global topic is not requested by any role', async () => {
+  const { liveUpdateChannel } = await import(liveUpdateChannelUrl);
+
+  for (const [role, barangayId] of [['ADMIN', null], ['ENGINEER', null], ['BARANGAY', '7'], ['CPDO Admin', null]]) {
+    assert.notStrictEqual(liveUpdateChannel(role, barangayId), '/topic/updates',
+      `${role} must not ask for the retired global topic`);
+  }
+});

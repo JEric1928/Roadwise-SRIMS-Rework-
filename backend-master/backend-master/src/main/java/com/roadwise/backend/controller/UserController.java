@@ -14,6 +14,7 @@ import com.roadwise.backend.service.ActivityLogService;
 import com.roadwise.backend.service.EmailService;
 import com.roadwise.backend.service.NotificationService;
 import com.roadwise.backend.service.RateLimitService;
+import com.roadwise.backend.service.SessionRevocationService;
 import com.roadwise.backend.service.SupabaseStorageService;
 import com.roadwise.backend.util.PasswordPolicy;
 import com.roadwise.backend.util.SecurityUtils;
@@ -23,6 +24,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -74,6 +76,8 @@ public class UserController {
     @Autowired
     private RateLimitService rateLimitService;
 
+    @Autowired
+    private SessionRevocationService sessionRevocationService;
 
     /**
      * True when the caller is the target user or a system administrator.
@@ -107,7 +111,7 @@ public class UserController {
      * access-token security stamp, and consume outstanding MFA/recovery
      * challenges so a pre-change OTP cannot survive the change.
      */
-    private void revokeUserSessionsAndChallenges(User user) {
+    private void revokeUserSessionsAndChallenges(User user, String reason) {
         List<RefreshToken> activeTokens = refreshTokenRepository.findByUserAndRevokedFalse(user);
         for (RefreshToken token : activeTokens) {
             token.setRevoked(true);
@@ -126,7 +130,7 @@ public class UserController {
         }
         passwordResetTokenRepository.saveAll(pendingResets);
 
-        user.bumpSessionVersion();
+        sessionRevocationService.revoke(user, reason);
     }
 
     // ==========================================
@@ -249,6 +253,7 @@ public class UserController {
     }
 
     @PutMapping("/{id}/password")
+    @Transactional
     public ResponseEntity<?> updatePassword(
             @PathVariable Long id,
             @RequestBody Map<String, String> payload,
@@ -306,7 +311,7 @@ public class UserController {
         user.setTempPasswordExpiresAt(null);
         // Revoke every existing session, outstanding refresh token and pending
         // MFA/recovery challenge; the change is not complete until they are gone.
-        revokeUserSessionsAndChallenges(user);
+        revokeUserSessionsAndChallenges(user, "password changed");
         userRepository.save(user);
 
         activityLogService.log(
@@ -474,6 +479,7 @@ public class UserController {
     // ==========================================
     @PutMapping("/{id}/manage")
     @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
+    @Transactional
     public ResponseEntity<?> manageUserRecord(
             @PathVariable Long id,
             @RequestBody Map<String, String> updates,
@@ -508,9 +514,15 @@ public class UserController {
         String newStatus = updates.get("status");
 
         if (newStatus != null && !newStatus.isEmpty()) {
+            boolean statusChanged = oldStatus == null || !oldStatus.equalsIgnoreCase(newStatus);
             user.setStatus(newStatus);
 
-            if (oldStatus != null && !oldStatus.equals(newStatus)) {
+            if (statusChanged && ("Suspended".equalsIgnoreCase(newStatus)
+                    || "Deactivated".equalsIgnoreCase(newStatus))) {
+                revokeUserSessionsAndChallenges(user, "account status changed to " + newStatus);
+            }
+
+            if (oldStatus != null && statusChanged) {
                 notificationService.sendNotification(
                         user.getId(),
                         "Account Status Update",
@@ -568,6 +580,7 @@ public class UserController {
     // ==========================================
     @PutMapping("/{id}/emergency-reset")
     @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
+    @Transactional
     public ResponseEntity<?> emergencyPasswordReset(
             @PathVariable Long id,
             @RequestBody(required = false) Map<String, String> payload,
@@ -590,7 +603,7 @@ public class UserController {
         user.setLockoutUntil(null);
         // Force re-authentication: revoke refresh tokens, access stamps and any
         // pending MFA/recovery challenge for the account.
-        revokeUserSessionsAndChallenges(user);
+        revokeUserSessionsAndChallenges(user, "administrator password reset");
         userRepository.save(user);
 
         notificationService.sendNotification(
@@ -643,6 +656,7 @@ public class UserController {
     // ==========================================
     @PostMapping("/handover-admin")
     @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
+    @Transactional
     public ResponseEntity<?> handoverAdminOffice(
             @RequestBody Map<String, String> payload,
             HttpServletRequest request) {
@@ -729,7 +743,7 @@ public class UserController {
 
         // 5. DEACTIVATE OUTGOING PREDECESSOR (Preserve audit integrity)
         currentAdmin.setStatus("Deactivated");
-        revokeUserSessionsAndChallenges(currentAdmin);
+        revokeUserSessionsAndChallenges(currentAdmin, "administrator office handover");
         userRepository.save(currentAdmin);
 
         // 📋 6. WRITE PERMANENT SYSTEM ACTIVITY LOG
@@ -779,6 +793,7 @@ public class UserController {
     // ==========================================
     @PostMapping("/handover-ceo")
     @PreAuthorize("hasAnyRole('ENGINEER', 'City Engineer')")
+    @Transactional
     public ResponseEntity<?> handoverCeoOffice(
             @RequestBody Map<String, String> payload,
             HttpServletRequest request) {
@@ -865,7 +880,7 @@ public class UserController {
 
         // 5. DEACTIVATE OUTGOING PREDECESSOR (Preserve audit integrity)
         currentCeo.setStatus("Deactivated");
-        revokeUserSessionsAndChallenges(currentCeo);
+        revokeUserSessionsAndChallenges(currentCeo, "engineering office handover");
         userRepository.save(currentCeo);
 
         // 📋 6. WRITE SYSTEM ACTIVITY LOG
@@ -1003,6 +1018,7 @@ public class UserController {
 
     /** Step 2: confirm the OTP that was delivered to the NEW address. */
     @PostMapping("/{id}/email-change/confirm")
+    @Transactional
     public ResponseEntity<?> confirmEmailChange(
             @PathVariable Long id,
             @RequestBody Map<String, String> payload,
@@ -1052,7 +1068,7 @@ public class UserController {
         clearPendingEmailChange(user);
         // Completing the change revokes every session and any pending
         // MFA/recovery challenge (they would still address the old inbox).
-        revokeUserSessionsAndChallenges(user);
+        revokeUserSessionsAndChallenges(user, "email address changed");
         userRepository.save(user);
 
         try {

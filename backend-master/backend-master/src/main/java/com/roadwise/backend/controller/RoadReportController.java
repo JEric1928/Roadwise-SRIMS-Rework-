@@ -1,5 +1,6 @@
 package com.roadwise.backend.controller;
 
+import com.roadwise.backend.config.LiveUpdatePublisher;
 import com.roadwise.backend.dto.PageResponseDto;
 import com.roadwise.backend.dto.ReportCreateDto;
 import com.roadwise.backend.dto.ReportListDto;
@@ -20,7 +21,6 @@ import org.springframework.data.domain.*;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -73,7 +73,7 @@ public class RoadReportController {
     private SupabaseStorageService supabaseStorageService;
 
     @Autowired
-    private SimpMessagingTemplate messagingTemplate;
+    private LiveUpdatePublisher liveUpdatePublisher;
 
     @Autowired
     private ReportStatusLogService reportStatusLogService;
@@ -345,7 +345,7 @@ public class RoadReportController {
                     request
             );
 
-            sendLiveUpdate();
+            liveUpdatePublisher.publish(barangaysOf(savedReport));
             return savedReport;
 
         } catch (Exception e) {
@@ -607,7 +607,7 @@ public class RoadReportController {
                 request
         );
 
-        sendLiveUpdate();
+        liveUpdatePublisher.publish(barangaysOf(report));
         return ResponseEntity.ok(isAutoArchivedNoDamage ? "ARCHIVED_NO_IMAGE" : "SUCCESS");
     }
 
@@ -754,7 +754,7 @@ public class RoadReportController {
                 request
         );
 
-        sendLiveUpdate();
+        liveUpdatePublisher.publish(barangaysOf(existingReport));
         return ResponseEntity.ok(existingReport);
     }
 
@@ -826,10 +826,10 @@ public class RoadReportController {
                     "SUCCESS",
                     request
             );
-            sendLiveUpdate();
+            liveUpdatePublisher.publish(barangaysOf(validatedReports));
             return ResponseEntity.ok("Successfully dispatched " + dispatchedCount + " prioritized reports to the CEO!");
         } else {
-            sendLiveUpdate();
+            liveUpdatePublisher.publish(barangaysOf(validatedReports));
             return ResponseEntity.badRequest().body("No 'Validated' reports found to dispatch.");
         }
     }
@@ -893,7 +893,7 @@ public class RoadReportController {
                 request
         );
 
-        sendLiveUpdate();
+        liveUpdatePublisher.publish(barangaysOf(reportsToDefer));
         return ResponseEntity.ok().body(Map.of("message", "Successfully deferred " + reportsToDefer.size() + " selected reports."));
     }
 
@@ -960,7 +960,7 @@ public class RoadReportController {
                 request
         );
 
-        sendLiveUpdate();
+        liveUpdatePublisher.publish(barangaysOf(report));
         return ResponseEntity.ok().body(Map.of("message", "Project marked as Completed!"));
     }
 
@@ -1016,7 +1016,7 @@ public class RoadReportController {
                 request
         );
 
-        sendLiveUpdate();
+        liveUpdatePublisher.publish(barangaysOf(report));
         return ResponseEntity.ok().body(Map.of("message", "Project marked as Pending Budget. CPDO Admin notified."));
     }
 
@@ -1080,7 +1080,7 @@ public class RoadReportController {
                 request
         );
 
-        sendLiveUpdate();
+        liveUpdatePublisher.publish(barangaysOf(report));
         return ResponseEntity.ok(Map.of("message", "Deadline reminder successfully issued.", "lastReminderSent", nowPst.toString()));
     }
 
@@ -1144,7 +1144,7 @@ public class RoadReportController {
                 request
         );
 
-        sendLiveUpdate();
+        liveUpdatePublisher.publish(barangaysOf(report));
         return ResponseEntity.ok(Map.of("message", "Extension request submitted.", "extensionStatus", "PENDING"));
     }
 
@@ -1209,7 +1209,7 @@ public class RoadReportController {
                 request
         );
 
-        sendLiveUpdate();
+        liveUpdatePublisher.publish(barangaysOf(report));
         return ResponseEntity.ok(Map.of("message", "Extension request " + (isApproved ? "approved" : "rejected") + "."));
     }
 
@@ -1270,7 +1270,7 @@ public class RoadReportController {
                 request
         );
 
-        sendLiveUpdate();
+        liveUpdatePublisher.publish(barangaysOf(reportsToArchive));
         return ResponseEntity.ok().body(Map.of("message", "Successfully archived " + archivedCount + " deferred reports."));
     }
 
@@ -1319,7 +1319,7 @@ public class RoadReportController {
                 request
         );
 
-        sendLiveUpdate();
+        liveUpdatePublisher.publish(barangaysOf(reportsToArchive));
         return ResponseEntity.ok(Map.of("message", "Successfully archived " + archivedCount + " reports.", "archivedCount", archivedCount));
     }
 
@@ -1364,10 +1364,21 @@ public class RoadReportController {
         } catch (Exception ignored) {}
     }
 
-    private void sendLiveUpdate() {
-        try {
-            messagingTemplate.convertAndSend("/topic/updates", "REFRESH_DASHBOARDS");
-        } catch (Exception ignored) {}
+    /**
+     * The barangays a change touched, for {@link LiveUpdatePublisher}. Passing the affected
+     * barangays rather than a global broadcast is what keeps a report filed in one barangay
+     * from refetching every dashboard in the city.
+     */
+    private static List<Long> barangaysOf(RoadReport report) {
+        return report.getBarangay() != null ? List.of(report.getBarangay().getId()) : List.of();
+    }
+
+    private static List<Long> barangaysOf(Collection<RoadReport> reports) {
+        return reports.stream()
+                .map(RoadReport::getBarangay)
+                .filter(Objects::nonNull)
+                .map(Barangay::getId)
+                .toList();
     }
 
     @GetMapping("/image/{filename:.+}")

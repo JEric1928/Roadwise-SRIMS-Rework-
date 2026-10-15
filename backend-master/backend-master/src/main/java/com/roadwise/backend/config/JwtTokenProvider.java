@@ -158,12 +158,16 @@ public class JwtTokenProvider {
     }
 
     /**
-     * Everything the authentication filter needs, read in a single parse.
+     * Everything an authenticating caller needs, read in a single parse.
      *
-     * <p>Each parse verifies the signature, so reading the three fields through the
-     * individual getters would verify the same token three times per request.
+     * <p>Each parse verifies the signature, so reading the fields through the
+     * individual getters would verify the same token once per field.
+     *
+     * <p>{@code expiresAt} is carried rather than re-derived because a long-lived socket
+     * authenticates once and then has to decide, on later frames, whether the credential it
+     * accepted has since expired. That check needs the deadline, not another parse.
      */
-    public record TokenClaims(String username, Long sessionVersion, Long authTime) {
+    public record TokenClaims(String username, Long sessionVersion, Long authTime, Long expiresAt) {
     }
 
     /** @throws JwtException when the token is malformed, tampered with, or expired. */
@@ -176,7 +180,8 @@ public class JwtTokenProvider {
         return new TokenClaims(
                 payload.getSubject(),
                 toEpochSeconds(payload.get("sv")),
-                toEpochSeconds(payload.get(AUTH_TIME_CLAIM)));
+                toEpochSeconds(payload.get(AUTH_TIME_CLAIM)),
+                payload.getExpiration() != null ? payload.getExpiration().getTime() / 1000 : null);
     }
 
     public boolean validateToken(String token) {
