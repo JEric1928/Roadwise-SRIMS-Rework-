@@ -7,10 +7,24 @@
 import { API_BASE_URL } from '../../core/api.js';
 import { showToast } from '../../components/toast.js';
 import { STRICT_PASSWORD_REGEX } from '../../core/password-policy.js';
+import {
+  assertionToJson,
+  describeCredentialError,
+  isWebAuthnSupported,
+  prepareRequestOptions
+} from '../../core/webauthn.js';
 
 export { STRICT_PASSWORD_REGEX };
 
 let initialized = false;
+
+function setStepVisible(id, visible) {
+  const step = document.getElementById(id);
+  if (!step) return;
+
+  step.classList.toggle("hidden", !visible);
+  step.style.removeProperty("display");
+}
 
 function bindEnterKeyStepSubmit() {
   const stepConfigs = [
@@ -83,27 +97,22 @@ export function handleLogin() {
     })
     .then(data => {
     if (data.mfaRequired) {
-      sessionStorage.setItem("tempUserId", data.userId);
+      // The opaque token is the only handle to this login attempt. The previous code
+      // stashed a userId here, which the server then trusted to look up the challenge.
+      sessionStorage.setItem("mfaToken", data.mfaToken);
 
-      const step1 = document.getElementById("login-step-1");
-      const step2 = document.getElementById("login-step-2");
+      setStepVisible("login-step-1", false);
+      setStepVisible("login-step-2", true);
 
-      if (step1) step1.style.display = "none";
-      if (step2) step2.style.display = "block";
-
-      const toastMsg = data.demoOtp
-        ? `🔑 DEMO OTP: [ ${data.demoOtp} ] (Expires in 5 mins)`
-        : (data.message || "A 6-digit code has been sent to your email.");
+      applyMfaFactors(data.factors || [], data.factorSelectionRequired === true);
 
       if (typeof showToast === "function") {
-        showToast(toastMsg, "success", 10000);
+        showToast(data.message || "A 6-digit code has been sent to your email.", "success", 10000);
       }
 
       const otpField = document.getElementById("mfa-code");
       if (otpField) {
-        if (data.demoOtp) {
-          otpField.value = data.demoOtp;
-        }
+        otpField.value = "";
         otpField.focus();
       }
 
@@ -136,14 +145,150 @@ export function handleLogin() {
 }
 
 // ==========================================
+// 🚪 STEP 1b: CHOOSE A VERIFICATION METHOD
+// ==========================================
+// Presentation only. Everything here comes from the server's factor list, and the
+// server re-checks whatever gets chosen against the account's real enrolment -- so a
+// tampered DOM cannot promote a caller to a factor the account does not hold.
+
+const MFA_FACTOR_LABELS = {
+  EMAIL_OTP: "Email code",
+  TOTP: "Authenticator app",
+  RECOVERY_CODE: "Recovery code",
+  WEBAUTHN: "Passkey"
+};
+
+const MFA_FACTOR_HINTS = {
+  EMAIL_OTP: "Enter the 6-digit authentication code dispatched to your official email.",
+  TOTP: "Enter the 6-digit code from your authenticator app.",
+  RECOVERY_CODE: "Enter one of the recovery codes you saved when you enrolled.",
+  WEBAUTHN: "Follow your device's prompt to confirm with your passkey."
+};
+
+function applyMfaFactors(factors, selectionRequired) {
+  lastMfaFactors = Array.isArray(factors) ? factors : [];
+  const picker = document.getElementById("mfa-factor-picker");
+  const desc = document.getElementById("mfa-step-desc");
+  const otpField = document.getElementById("mfa-code");
+  const resendBtn = document.getElementById("mfa-resend-btn");
+
+  if (!picker) return;
+
+  const selectable = factors || [];
+  const hasChoice = selectionRequired && selectable.length > 1;
+
+  picker.innerHTML = "";
+
+  if (!hasChoice) {
+    // A single option is not a choice: keep the original one-step flow untouched.
+    picker.classList.add("hidden");
+    if (desc) desc.textContent = MFA_FACTOR_HINTS.EMAIL_OTP;
+    if (otpField) {
+      otpField.maxLength = 6;
+      otpField.value = "";
+    }
+    if (resendBtn) resendBtn.classList.add("hidden");
+    return;
+  }
+
+  selectable.forEach(factor => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-login";
+    btn.style.marginBottom = "8px";
+    btn.textContent = MFA_FACTOR_LABELS[factor.type] || factor.label || factor.type;
+    btn.addEventListener("click", () => handleMfaFactorSelect(factor.type));
+    picker.appendChild(btn);
+  });
+  picker.classList.remove("hidden");
+
+  if (desc) desc.textContent = "Choose how you would like to verify.";
+  if (otpField) otpField.value = "";
+  if (resendBtn) resendBtn.classList.add("hidden");
+}
+
+export function handleMfaFactorSelect(factorType) {
+  const mfaToken = sessionStorage.getItem("mfaToken");
+  if (!mfaToken) return;
+
+  // A new selection supersedes any passkey challenge still waiting to be used.
+  pendingPasskey = null;
+
+  const picker = document.getElementById("mfa-factor-picker");
+  const desc = document.getElementById("mfa-step-desc");
+  const otpField = document.getElementById("mfa-code");
+  const resendBtn = document.getElementById("mfa-resend-btn");
+
+  fetch(`${API_BASE_URL}/api/auth/mfa/select`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mfaToken: mfaToken, factorType: factorType })
+  })
+    .then(async response => {
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        // Surfaces the server's own refusal, including 429 once the shared attempt
+        // budget for this challenge is spent.
+        throw new Error(payload.error || "That verification method is unavailable.");
+      }
+      return payload;
+    })
+    .then(payload => {
+      if (picker) {
+        picker.classList.add("hidden");
+        picker.innerHTML = "";
+      }
+      if (factorType === "WEBAUTHN") {
+        // A passkey is answered by the authenticator, not by typing: there is
+        // no code to enter, and the ceremony starts as soon as the server has
+        // issued its challenge.
+        return startPasskeyAssertion(payload.passkey, mfaToken, { desc, otpField, resendBtn });
+      }
+      if (desc) desc.textContent = MFA_FACTOR_HINTS[factorType] || payload.message || "Enter your verification code.";
+      showCodeEntry(otpField);
+      const verifyBtn = document.getElementById("verify-btn");
+      if (verifyBtn) verifyBtn.style.display = "";
+      if (otpField) {
+        // A recovery code is longer than a 6-digit OTP, so the field follows the
+        // factor rather than the other way round.
+        otpField.maxLength = factorType === "RECOVERY_CODE" ? 14 : 6;
+        otpField.value = "";
+        otpField.focus();
+      }
+      if (resendBtn) {
+        resendBtn.classList.toggle("hidden", factorType !== "EMAIL_OTP");
+      }
+      if (typeof showToast === "function") {
+        showToast(payload.message || "Verification method selected.", "success");
+      }
+    })
+    .catch(error => {
+      if (typeof showToast === "function") {
+        showToast(error.message, "error");
+      }
+    });
+}
+
+/** Re-issuing is just re-selecting email OTP; the server re-mints onto the same challenge. */
+export function handleMfaResend() {
+  handleMfaFactorSelect("EMAIL_OTP");
+}
+
+// ==========================================
 // 🚀 STEP 2: VERIFY 6-DIGIT CODE & GRANT ACCESS
 // ==========================================
 export function handleVerifyMfa() {
+  if (pendingPasskey) {
+    // A dismissed passkey prompt leaves the issued challenge unconsumed, and
+    // the code field hidden. The verify button retries the ceremony instead of
+    // validating an empty input.
+    return runPasskeyAssertion();
+  }
   const otpField = document.getElementById("mfa-code");
   const otpInput = otpField ? otpField.value.trim() : "";
-  const tempUserId = sessionStorage.getItem("tempUserId");
+  const mfaToken = sessionStorage.getItem("mfaToken");
 
-  if (!otpInput || otpInput.length !== 6) {
+  if (!otpInput || otpInput.length < 6) {
     if (typeof showToast === "function") {
       showToast("Please enter a valid 6-digit code.", "error");
     }
@@ -162,7 +307,7 @@ export function handleVerifyMfa() {
   fetch(`${API_BASE_URL}/api/auth/verify-mfa`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId: tempUserId, otp: otpInput })
+    body: JSON.stringify({ mfaToken: mfaToken, code: otpInput })
   })
     .then(async response => {
       if (!response.ok) {
@@ -171,74 +316,7 @@ export function handleVerifyMfa() {
       }
       return response.json();
     })
-    .then(data => {
-      sessionStorage.removeItem("tempUserId");
-
-      const cleanMiddleName = (data.middleName && String(data.middleName).toLowerCase() !== "null" && String(data.middleName).toLowerCase() !== "undefined")
-        ? String(data.middleName).trim()
-        : "";
-
-      sessionStorage.setItem("userId", data.userId);
-      sessionStorage.setItem("username", data.username || "N/A");
-      sessionStorage.setItem("userRole", data.role || "");
-      sessionStorage.setItem("firstName", data.firstName || "");
-      sessionStorage.setItem("middleName", cleanMiddleName);
-      sessionStorage.setItem("lastName", data.lastName || "");
-      sessionStorage.setItem("email", data.email || "");
-      sessionStorage.setItem("phoneNumber", data.phoneNumber || "");
-      sessionStorage.setItem("birthday", data.birthday || "");
-      sessionStorage.setItem("gender", data.gender || "");
-      sessionStorage.setItem("profilePicture", data.profilePicture || "no_image.jpg");
-
-      if (data.barangayId) {
-        sessionStorage.setItem("barangayId", data.barangayId);
-      }
-      sessionStorage.setItem("barangayName", data.barangayName || "City Hall Central");
-
-      if (data.accessToken) {
-        localStorage.setItem("accessToken", data.accessToken);
-      }
-      if (data.refreshToken) {
-        localStorage.setItem("refreshToken", data.refreshToken);
-      }
-
-      const userPayload = {
-        id: data.userId,
-        username: data.username,
-        role: data.role,
-        firstName: data.firstName || "",
-        middleName: cleanMiddleName,
-        lastName: data.lastName || "",
-        barangayId: data.barangayId || null,
-        barangayName: data.barangayName || "City Hall Central"
-      };
-      localStorage.setItem("user", JSON.stringify(userPayload));
-      localStorage.setItem("currentUser", JSON.stringify(userPayload));
-
-      const rememberCheckbox = document.getElementById("remember-me");
-      const usernameInput = document.getElementById("username")?.value.trim();
-
-      if (rememberCheckbox && rememberCheckbox.checked && usernameInput) {
-        localStorage.setItem("roadwise_remembered_username", usernameInput);
-      } else {
-        localStorage.removeItem("roadwise_remembered_username");
-      }
-
-      if (typeof showToast === "function") {
-        showToast("Access Granted!", "success");
-      }
-
-      setTimeout(() => {
-        const userRole = String(data.role).toLowerCase();
-        if (userRole.includes("admin") || userRole.includes("cpdo")) {
-          window.location.replace("admin_dashboard.html");
-        } else if (userRole.includes("ceo") || userRole.includes("engineer")) {
-          window.location.replace("ceo_dashboard.html");
-        } else {
-          window.location.replace("barangay_dashboard.html");
-        }
-      }, 1000);
-    })
+    .then(completeLoginWithSession)
     .catch(error => {
       if (otpField) {
         otpField.value = "";
@@ -267,12 +345,203 @@ export function handleVerifyMfa() {
 // FORGOT PASSWORD: SHOW SCREEN
 // ==========================================
 export function showForgotPassword() {
-  document.getElementById("login-step-1").style.display = "none";
-  document.getElementById("login-step-2").style.display = "none";
-  document.getElementById("forgot-step-1").style.display = "block";
+  setStepVisible("login-step-1", false);
+  setStepVisible("login-step-2", false);
+  setStepVisible("forgot-step-2", false);
+  setStepVisible("forgot-step-1", true);
 
   const emailField = document.getElementById("reset-email");
   if (emailField) emailField.focus();
+}
+
+// ==========================================
+// PASSKEY (WEBAUTHN) ASSERTION
+// ==========================================
+
+/**
+ * The ceremony issued by /mfa/select for the passkey factor, kept so a
+ * dismissed prompt can be retried. A ceremony stays valid until it is
+ * consumed, expires, or a newer selection supersedes it -- rerunning
+ * navigator.credentials.get() therefore does not need a new challenge.
+ */
+let pendingPasskey = null;
+
+/** The factors the server offered, so the picker can be rebuilt after a spent ceremony. */
+let lastMfaFactors = [];
+
+function showCodeEntry(otpField) {
+  if (!otpField) return;
+  const group = otpField.closest ? otpField.closest(".form-group") : null;
+  if (group) group.classList.remove("hidden");
+  if (otpField.classList) otpField.classList.remove("hidden");
+}
+
+function hideCodeEntry(otpField) {
+  if (!otpField) return;
+  const group = otpField.closest ? otpField.closest(".form-group") : null;
+  if (group) group.classList.add("hidden");
+  if (otpField.classList) otpField.classList.add("hidden");
+}
+
+function startPasskeyAssertion(passkey, mfaToken, refs) {
+  const { desc, otpField, resendBtn } = refs || {};
+  if (desc) desc.textContent = MFA_FACTOR_HINTS.WEBAUTHN;
+  hideCodeEntry(otpField);
+  if (resendBtn) resendBtn.classList.add("hidden");
+
+  const verifyBtn = document.getElementById("verify-btn");
+  if (verifyBtn) verifyBtn.style.display = "";
+
+  if (!passkey || !passkey.options) {
+    showToast("The server did not issue a passkey challenge.", "error");
+    return;
+  }
+  if (!isWebAuthnSupported()) {
+    showToast("This browser cannot use passkeys. Choose another verification method.", "error");
+    return;
+  }
+
+  pendingPasskey = { ceremonyKey: passkey.ceremonyKey, options: passkey.options, mfaToken: mfaToken };
+  return runPasskeyAssertion();
+}
+
+/**
+ * Runs navigator.credentials.get() against the pending ceremony and submits the
+ * assertion. Two failure shapes need different treatment:
+ *  - the browser produced no credential (dismissed/timeout/unsupported): the
+ *    ceremony was never used, so the verify button retries it;
+ *  - the server answered a submitted assertion, however it ruled: the ceremony
+ *    is spent, so the picker is offered again for a fresh challenge.
+ */
+async function runPasskeyAssertion() {
+  const verifyBtn = document.getElementById("verify-btn");
+  if (verifyBtn) {
+    verifyBtn.innerHTML = "Waiting for passkey... 🔑";
+    verifyBtn.disabled = true;
+    verifyBtn.style.opacity = "0.7";
+  }
+
+  try {
+    const credential = await navigator.credentials.get({
+      publicKey: prepareRequestOptions(pendingPasskey.options)
+    });
+
+    const response = await fetch(`${API_BASE_URL}/api/auth/verify-mfa`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mfaToken: pendingPasskey.mfaToken,
+        ceremonyKey: pendingPasskey.ceremonyKey,
+        assertion: assertionToJson(credential)
+      })
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      const rejected = new Error(data.error || data.message || "That passkey could not be verified.");
+      rejected.ceremonySpent = true;
+      throw rejected;
+    }
+
+    pendingPasskey = null;
+    completeLoginWithSession(data);
+  } catch (error) {
+    if (error && error.ceremonySpent) {
+      showToast(error.message, "error");
+      pendingPasskey = null;
+      // The challenge cannot be reused; the picker issues a fresh one when the
+      // user chooses a factor again.
+      applyMfaFactors(lastMfaFactors, true);
+      if (verifyBtn) {
+        verifyBtn.disabled = false;
+        verifyBtn.style.opacity = "1";
+        verifyBtn.style.display = "none";
+      }
+      return;
+    }
+
+    showToast(describeCredentialError(error), "error");
+    if (verifyBtn) {
+      verifyBtn.innerHTML = "Try passkey again 🔑";
+      verifyBtn.disabled = false;
+      verifyBtn.style.opacity = "1";
+      verifyBtn.style.display = "";
+    }
+  }
+}
+
+/**
+ * Stores the verified session and routes the user, exactly once. Shared by the
+ * code path and the passkey path so a completed login can never mean two
+ * different things.
+ */
+function completeLoginWithSession(data) {
+  sessionStorage.removeItem("mfaToken");
+
+  const cleanMiddleName = (data.middleName && String(data.middleName).toLowerCase() !== "null" && String(data.middleName).toLowerCase() !== "undefined")
+    ? String(data.middleName).trim()
+    : "";
+
+  sessionStorage.setItem("userId", data.userId);
+  sessionStorage.setItem("username", data.username || "N/A");
+  sessionStorage.setItem("userRole", data.role || "");
+  sessionStorage.setItem("firstName", data.firstName || "");
+  sessionStorage.setItem("middleName", cleanMiddleName);
+  sessionStorage.setItem("lastName", data.lastName || "");
+  sessionStorage.setItem("email", data.email || "");
+  sessionStorage.setItem("phoneNumber", data.phoneNumber || "");
+  sessionStorage.setItem("birthday", data.birthday || "");
+  sessionStorage.setItem("gender", data.gender || "");
+  sessionStorage.setItem("profilePicture", data.profilePicture || "no_image.jpg");
+
+  if (data.barangayId) {
+    sessionStorage.setItem("barangayId", data.barangayId);
+  }
+  sessionStorage.setItem("barangayName", data.barangayName || "City Hall Central");
+
+  if (data.accessToken) {
+    localStorage.setItem("accessToken", data.accessToken);
+  }
+  if (data.refreshToken) {
+    localStorage.setItem("refreshToken", data.refreshToken);
+  }
+
+  const userPayload = {
+    id: data.userId,
+    username: data.username,
+    role: data.role,
+    firstName: data.firstName || "",
+    middleName: cleanMiddleName,
+    lastName: data.lastName || "",
+    barangayId: data.barangayId || null,
+    barangayName: data.barangayName || "City Hall Central"
+  };
+  localStorage.setItem("user", JSON.stringify(userPayload));
+  localStorage.setItem("currentUser", JSON.stringify(userPayload));
+
+  const rememberCheckbox = document.getElementById("remember-me");
+  const usernameInput = document.getElementById("username")?.value.trim();
+
+  if (rememberCheckbox && rememberCheckbox.checked && usernameInput) {
+    localStorage.setItem("roadwise_remembered_username", usernameInput);
+  } else {
+    localStorage.removeItem("roadwise_remembered_username");
+  }
+
+  if (typeof showToast === "function") {
+    showToast("Access Granted!", "success");
+  }
+
+  setTimeout(() => {
+    const userRole = String(data.role).toLowerCase();
+    if (userRole.includes("admin") || userRole.includes("cpdo")) {
+      window.location.replace("admin_dashboard.html");
+    } else if (userRole.includes("ceo") || userRole.includes("engineer")) {
+      window.location.replace("ceo_dashboard.html");
+    } else {
+      window.location.replace("barangay_dashboard.html");
+    }
+  }, 1000);
 }
 
 // ==========================================
@@ -310,8 +579,8 @@ export function handleForgotPasswordRequest() {
       sessionStorage.setItem("resetEmail", email);
       showToast(data.message, "success");
 
-      document.getElementById("forgot-step-1").style.display = "none";
-      document.getElementById("forgot-step-2").style.display = "block";
+      setStepVisible("forgot-step-1", false);
+      setStepVisible("forgot-step-2", true);
 
       const resetCodeInput = document.getElementById("reset-code");
       if (resetCodeInput) resetCodeInput.focus();
@@ -410,11 +679,10 @@ export function handlePasswordReset() {
 // UI HELPER: GO BACK TO LOGIN SCREEN
 // ==========================================
 export function backToLogin() {
-  document.getElementById("login-step-2").style.display = "none";
-  document.getElementById("forgot-step-1").style.display = "none";
-  document.getElementById("forgot-step-2").style.display = "none";
-
-  document.getElementById("login-step-1").style.display = "block";
+  setStepVisible("login-step-2", false);
+  setStepVisible("forgot-step-1", false);
+  setStepVisible("forgot-step-2", false);
+  setStepVisible("login-step-1", true);
 
   if (document.getElementById("mfa-code")) document.getElementById("mfa-code").value = "";
   if (document.getElementById("reset-email")) document.getElementById("reset-email").value = "";
@@ -422,7 +690,7 @@ export function backToLogin() {
   if (document.getElementById("new-password")) document.getElementById("new-password").value = "";
   if (document.getElementById("confirm-new-password")) document.getElementById("confirm-new-password").value = "";
 
-  sessionStorage.removeItem("tempUserId");
+  sessionStorage.removeItem("mfaToken");
   sessionStorage.removeItem("resetEmail");
 
   const usernameInput = document.getElementById("username");
@@ -442,6 +710,8 @@ export function initAuth() {
   window.handleForgotPasswordRequest = handleForgotPasswordRequest;
   window.handlePasswordReset = handlePasswordReset;
   window.backToLogin = backToLogin;
+  window.handleMfaFactorSelect = handleMfaFactorSelect;
+  window.handleMfaResend = handleMfaResend;
 
   bindEnterKeyStepSubmit();
   restoreRememberedUsername();

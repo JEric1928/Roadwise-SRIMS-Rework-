@@ -8,8 +8,13 @@ import com.roadwise.backend.service.ActivityLogService;
 import com.roadwise.backend.service.EmailService;
 import com.roadwise.backend.service.NotificationService;
 import com.roadwise.backend.service.RateLimitService;
+import com.roadwise.backend.service.MfaFactorService;
+import com.roadwise.backend.service.MfaPolicyService;
+import com.roadwise.backend.service.MfaRecoveryCodeService;
+import com.roadwise.backend.service.PasskeyService;
 import com.roadwise.backend.util.PasswordPolicy;
 import com.roadwise.backend.util.SecurityUtils;
+import com.roadwise.backend.util.TokenHashes;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,6 +55,18 @@ public class AuthController {
     private MfaChallengeRepository mfaChallengeRepository;
 
     @Autowired
+    private MfaPolicyService mfaPolicyService;
+
+    @Autowired
+    private MfaFactorService mfaFactorService;
+
+    @Autowired
+    private MfaRecoveryCodeService mfaRecoveryCodeService;
+
+
+    @Autowired
+    private PasskeyService passkeyService;
+    @Autowired
     private PasswordResetTokenRepository passwordResetTokenRepository;
 
     @Autowired
@@ -81,6 +98,9 @@ public class AuthController {
     private static final Duration RESET_REQUEST_COOLDOWN = Duration.ofSeconds(60);
     private static final int RESET_REQUEST_MAX_PER_WINDOW = 5;
 
+    /** Lifetime of a login challenge, and the window a recovery code must be used in. */
+    private static final int CHALLENGE_MINUTES = 5;
+
     private Long getAdminId() {
         return userRepository.findFirstByRoleInIgnoreCase(List.of("cpdo admin", "admin"))
                 .map(User::getId)
@@ -93,18 +113,9 @@ public class AuthController {
      * any outstanding refresh tokens (a one-time re-login, acceptable).
      */
     static String hashToken(String rawToken) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(rawToken.getBytes(StandardCharsets.UTF_8));
-            StringBuilder hex = new StringBuilder(hash.length * 2);
-            for (byte b : hash) {
-                hex.append(Character.forDigit((b >> 4) & 0xF, 16));
-                hex.append(Character.forDigit(b & 0xF, 16));
-            }
-            return hex.toString();
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is not available in this JVM", e);
-        }
+        // One canonical digest, shared with ceremony keys: the raw bearer value is shown
+        // once and only this is stored.
+        return TokenHashes.sha256Hex(rawToken);
     }
 
     private boolean checkRateLimit(String keyIdentifier) {
@@ -276,6 +287,8 @@ public class AuthController {
 
         // MFA resend cooldown: reject a new code while a recent challenge is
         // still fresh, so OTP email cannot be spammed.
+        // MFA resend cooldown: reject a new code while a recent challenge is still
+        // fresh, so OTP email cannot be used to spam the account owner.
         Optional<MfaChallenge> existingChallenge =
                 mfaChallengeRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user);
         if (existingChallenge.isPresent()
@@ -291,32 +304,45 @@ public class AuthController {
             mfaChallengeRepository.save(c);
         });
 
-        String rawOtp = String.format("%06d", secureRandom.nextInt(1000000));
-        String otpHash = passwordEncoder.encode(rawOtp);
+        List<String> offered = mfaPolicyService.offeredFactorTypes(user);
 
-        MfaChallenge challenge = new MfaChallenge(user, otpHash, LocalDateTime.now().plusMinutes(5));
+        // The challenge is bound to a token this server mints. The user id is
+        // deliberately no longer returned: it was the request field that let
+        // /verify-mfa be driven entirely by the caller.
+        byte[] tokenBytes = new byte[32];
+        secureRandom.nextBytes(tokenBytes);
+        String rawMfaToken = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
+
+        MfaChallenge challenge = MfaChallenge.forToken(
+                user, hashToken(rawMfaToken), LocalDateTime.now().plusMinutes(CHALLENGE_MINUTES));
         mfaChallengeRepository.save(challenge);
 
-        String subject = "RoadWise - Login Verification Code";
-        String body = "Hello " + user.getFirstName() + ",\n\n" +
-                "Your Multi-Factor Authentication (MFA) code is: " + rawOtp + "\n\n" +
-                "This code will expire in 5 minutes. Do not share this code with anyone.\n\n" +
-                "If you did not attempt to log in, please contact the CPDO Administrator immediately.";
+        // Recovery codes are a break-glass alternative rather than a first-line choice,
+        // so on their own they do not force a picker. Any second real factor does.
+        boolean selectionRequired = offered.stream()
+                .filter(type -> !MfaPolicyService.RECOVERY_CODE.equals(type))
+                .count() > 1;
 
-        try {
-            emailService.sendEmail(user.getEmail(), subject, body);
-        } catch (Exception e) {
-            System.err.println(">>> [WARN] SMTP Delivery failed: " + e.getMessage());
+        if (!selectionRequired && offered.contains(MfaFactor.TYPE_EMAIL_OTP)) {
+            // One option and it is email: settle the factor now and dispatch, which
+            // keeps the existing one-step flow for every account that has not enrolled
+            // anything else.
+            issueEmailOtp(user, challenge);
         }
 
         activityLogService.log(
                 user, "AUTH", "AUTH_MFA_REQUESTED", formattedUserId,
-                "Credentials validated. 6-digit MFA OTP generated.", "SUCCESS", request);
+                "Credentials validated. Awaiting MFA verification.", "SUCCESS", request);
 
         Map<String, Object> responseData = new HashMap<>();
         responseData.put("mfaRequired", true);
-        responseData.put("userId", user.getId());
-        responseData.put("message", "A 6-digit code has been sent to your email.");
+        responseData.put("mfaToken", rawMfaToken);
+        responseData.put("factorSelectionRequired", selectionRequired);
+        responseData.put("factors", offered.stream().map(this::describeFactor).toList());
+        responseData.put("expiresInSeconds", CHALLENGE_MINUTES * 60);
+        responseData.put("message", selectionRequired
+                ? "Choose how you would like to verify."
+                : "A 6-digit code has been sent to your email.");
 
         return ResponseEntity.ok(responseData);
     }
@@ -329,47 +355,258 @@ public class AuthController {
     public ResponseEntity<?> verifyMfa(
             @Valid @RequestBody MfaVerifyRequestDto verifyDto,
             HttpServletRequest request) {
-        Long userId = verifyDto.getUserId();
-        String submittedOtp = verifyDto.getOtp();
-
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new IllegalArgumentException("User not found."));
-
         Optional<MfaChallenge> challengeOpt =
-                mfaChallengeRepository.findTopByUserAndUsedFalseOrderByCreatedAtDesc(user);
+                mfaChallengeRepository.findByChallengeTokenHash(hashToken(verifyDto.getMfaToken()));
         if (challengeOpt.isEmpty()) {
-            return ResponseEntity.status(400).body(Map.of("error", "No active login session found. Please log in again."));
+            return ResponseEntity.status(401).body(Map.of(
+                    "error", "This verification session is no longer valid. Please log in again."));
+        }
+        MfaChallenge challenge = challengeOpt.get();
+        if (challenge.isUsed()) {
+            return ResponseEntity.status(401).body(Map.of(
+                    "error", "This verification session has already been used. Please log in again."));
         }
 
-        MfaChallenge challenge = challengeOpt.get();
+        User user = challenge.getUser();
+        String formattedUserId = String.format("#USR-%04d", user.getId());
 
         if (LocalDateTime.now().isAfter(challenge.getExpiresAt())) {
             challenge.setUsed(true);
             mfaChallengeRepository.save(challenge);
-            return ResponseEntity.status(400).body(Map.of("error", "Verification code expired. Please log in again."));
+            return ResponseEntity.status(400)
+                    .body(Map.of("error", "Verification code expired. Please log in again."));
+        }
+
+        if (!challenge.isFactorSelected()) {
+            return ResponseEntity.status(400).body(Map.of(
+                    "error", "Choose a verification method first.",
+                    "requiresFactorSelection", true));
         }
 
         if (challenge.getAttempts() >= challenge.getMaxAttempts()) {
             challenge.setUsed(true);
             mfaChallengeRepository.save(challenge);
             return ResponseEntity.status(429)
-                    .body(Map.of("error", "Maximum OTP verification attempts exceeded. Please log in again."));
+                    .body(Map.of("error", "Maximum verification attempts exceeded. Please log in again."));
         }
 
-        if (!passwordEncoder.matches(submittedOtp, challenge.getOtpCodeHash())) {
+        if (!verifyChallengeFactor(user, challenge, verifyDto)) {
             challenge.setAttempts(challenge.getAttempts() + 1);
             mfaChallengeRepository.save(challenge);
             activityLogService.log(
-                    user, "AUTH", "AUTH_MFA_FAILED", String.format("#USR-%04d", userId),
-                    "Invalid MFA code submitted.", "FAILED", request);
-            return ResponseEntity.status(401).body(Map.of("error", "Invalid verification code. Please try again."));
+                    user, "AUTH", "AUTH_MFA_FAILED", formattedUserId,
+                    "Invalid MFA code submitted for factor " + challenge.getFactorType() + ".", "FAILED", request);
+            return ResponseEntity.status(401)
+                    .body(Map.of("error", "Invalid verification code. Please try again."));
         }
 
         challenge.setUsed(true);
         mfaChallengeRepository.save(challenge);
 
-        // MFA succeeded: only now is the login fully validated, so reset the
-        // failed-password counters and per-IP/per-user rate limits.
+        return completeLogin(user, challenge.getFactorType(), request);
+    }
+
+    // ==========================================
+    // 2b. CHOOSE WHICH ENROLLED FACTOR TO USE
+    // ==========================================
+    /**
+     * Points the in-flight challenge at one of the account's enrolled factors.
+     *
+     * <p>This doubles as "resend code": re-selecting email OTP mints a fresh OTP onto
+     * the same challenge.
+     *
+     * <p>Selections are charged against the same ceiling as wrong codes. Without that,
+     * a caller holding a valid password could re-select indefinitely to reset the
+     * counter and brute-force the 6-digit space, which would be strictly worse than
+     * the behaviour it replaces.
+     */
+    @PostMapping("/mfa/select")
+    @Transactional
+    public ResponseEntity<?> selectMfaFactor(
+            @Valid @RequestBody MfaSelectRequestDto selectDto,
+            HttpServletRequest request) {
+        Optional<MfaChallenge> challengeOpt =
+                mfaChallengeRepository.findByChallengeTokenHash(hashToken(selectDto.getMfaToken()));
+        if (challengeOpt.isEmpty()) {
+            return ResponseEntity.status(401).body(Map.of(
+                    "error", "This verification session is no longer valid. Please log in again."));
+        }
+        MfaChallenge challenge = challengeOpt.get();
+        if (challenge.isUsed()) {
+            return ResponseEntity.status(401)
+                    .body(Map.of("error", "This verification session has already been used."));
+        }
+        if (LocalDateTime.now().isAfter(challenge.getExpiresAt())) {
+            challenge.setUsed(true);
+            mfaChallengeRepository.save(challenge);
+            return ResponseEntity.status(400)
+                    .body(Map.of("error", "Verification session expired. Please log in again."));
+        }
+        if (challenge.getAttempts() >= challenge.getMaxAttempts()) {
+            challenge.setUsed(true);
+            mfaChallengeRepository.save(challenge);
+            return ResponseEntity.status(429)
+                    .body(Map.of("error", "Maximum verification attempts exceeded. Please log in again."));
+        }
+
+        User user = challenge.getUser();
+        String requested = selectDto.getFactorType().trim().toUpperCase(Locale.ROOT);
+
+        // The body expresses a preference. Whether the account actually holds that
+        // factor is decided here, from enrolment, never from anything the client sent.
+        if (!mfaPolicyService.isFactorAllowed(user, requested)) {
+            return ResponseEntity.status(403).body(Map.of(
+                    "error", "That verification method is not available for this account."));
+        }
+
+        challenge.setAttempts(challenge.getAttempts() + 1);
+
+        // Which factor this challenge answers for. Without this the verification step
+        // cannot tell a TOTP code from a recovery code (only email OTP set it, via
+        // issueEmailOtp), so every non-email factor silently failed verification.
+        challenge.setFactorType(requested);
+        Map<String, Object> responseData = new HashMap<>();
+        responseData.put("factorType", requested);
+
+        if (MfaFactor.TYPE_EMAIL_OTP.equals(requested)) {
+            issueEmailOtp(user, challenge);
+            responseData.put("message", "A 6-digit code has been sent to your email.");
+        } else if (MfaFactor.TYPE_TOTP.equals(requested)) {
+            Long factorId = mfaFactorService.activeTotpFactor(user).map(MfaFactor::getId).orElse(null);
+            if (factorId == null) {
+                return ResponseEntity.status(403)
+                        .body(Map.of("error", "No authenticator app is enrolled on this account."));
+            }
+            challenge.setFactorId(factorId);
+            mfaChallengeRepository.save(challenge);
+            responseData.put("message", "Enter the 6-digit code from your authenticator app.");
+        } else if (MfaFactor.TYPE_WEBAUTHN.equals(requested)) {
+            if (!passkeyService.isConfigured()) {
+                return ResponseEntity.status(503).body(Map.of(
+                        "error", "Passkeys are not available on this server."));
+            }
+            if (!mfaFactorService.hasActivePasskey(user)) {
+                return ResponseEntity.status(403)
+                        .body(Map.of("error", "No passkey is enrolled on this account."));
+            }
+            // The assertion ceremony is bound to this challenge, not to a user id: the
+            // key returned here must be presented back with the authenticator's response,
+            // and the ceremony store enforces the binding under a row lock. The login
+            // token alone cannot be replayed against another challenge.
+            challenge.setFactorId(null);
+            mfaChallengeRepository.save(challenge);
+            try {
+                responseData.put("passkey", passkeyService.beginAuthentication(user, challenge.getId()));
+            } catch (IllegalStateException unavailable) {
+                return ResponseEntity.status(503).body(Map.of("error", unavailable.getMessage()));
+            }
+            responseData.put("message", "Use your passkey to continue.");
+        } else if (MfaPolicyService.RECOVERY_CODE.equals(requested)) {
+            // Recovery codes are checked against stored hashes, so there is no factor row.
+            challenge.setFactorId(null);
+            mfaChallengeRepository.save(challenge);
+            responseData.put("message", "Enter one of your recovery codes.");
+        } else {
+            // Reachable for a type that MfaPolicyService offers but that has no
+            // verification path yet. Failing loudly is deliberate: an offered factor must
+            // never fall through to another proof's instructions (the original bug this
+            // replaced), and verifyChallengeFactor() must never silently reject a type
+            // nobody could ever satisfy.
+            return ResponseEntity.status(501).body(Map.of(
+                    "error", "That verification method is not available yet.",
+                    "factorType", requested));
+        }
+
+        activityLogService.log(
+                user, "AUTH", "AUTH_MFA_FACTOR_SELECTED", String.format("#USR-%04d", user.getId()),
+                "MFA factor selected: " + requested, "SUCCESS", request);
+
+        return ResponseEntity.ok(responseData);
+    }
+
+    /**
+     * Checks a submitted code against the factor the challenge is bound to.
+     *
+     * <p>Both the factor and the user come from the server-side challenge row, so a
+     * request cannot redirect verification at an account or factor of its choosing.
+     */
+    private boolean verifyChallengeFactor(User user, MfaChallenge challenge, MfaVerifyRequestDto dto) {
+        String factorType = challenge.getFactorType();
+        if (MfaFactor.TYPE_EMAIL_OTP.equals(factorType)) {
+            String code = dto.getCode();
+            return challenge.getOtpCodeHash() != null
+                    && passwordEncoder.matches(code == null ? "" : code.trim(), challenge.getOtpCodeHash());
+        }
+        if (MfaFactor.TYPE_TOTP.equals(factorType)) {
+            return challenge.getFactorId() != null
+                    && mfaFactorService.verifyTotp(user, challenge.getFactorId(), dto.getCode());
+        }
+        if (MfaFactor.TYPE_WEBAUTHN.equals(factorType)) {
+            // A failed assertion must consume its ceremony (a committed FAILED_* outcome,
+            // not a rollback that would re-open it) and count as a used attempt below,
+            // exactly like a wrong code. IllegalStateException means passkeys are not
+            // configured on this server: a refusal, never a pass.
+            try {
+                return passkeyService.verifyAssertion(
+                                user, challenge, dto.getCeremonyKey(), dto.getAssertion())
+                        .success();
+            } catch (IllegalStateException unavailable) {
+                return false;
+            }
+        }
+        if (MfaPolicyService.RECOVERY_CODE.equals(factorType)) {
+            return mfaRecoveryCodeService.consume(user, dto.getCode());
+        }
+        return false;
+    }
+
+    /**
+     * Mints an email OTP onto a challenge and dispatches it.
+     *
+     * <p>Pre-existing gap preserved rather than silently widened: EmailService is
+     * fire-and-forget and swallows its own failures, so this method cannot distinguish
+     * "delivered" from "skipped because no API key is configured". Login therefore
+     * reports that a code was sent on the strength of an intent, not a receipt.
+     */
+    private void issueEmailOtp(User user, MfaChallenge challenge) {
+        String rawOtp = String.format("%06d", secureRandom.nextInt(1000000));
+        challenge.setOtpCodeHash(passwordEncoder.encode(rawOtp));
+        challenge.setFactorType(MfaFactor.TYPE_EMAIL_OTP);
+        challenge.setFactorId(null);
+        mfaChallengeRepository.save(challenge);
+
+        String subject = "RoadWise - Login Verification Code";
+        String body = "Hello " + user.getFirstName() + ",\n\n" +
+                "Your Multi-Factor Authentication (MFA) code is: " + rawOtp + "\n\n" +
+                "This code will expire in " + CHALLENGE_MINUTES + " minutes. Do not share this code with anyone.\n\n" +
+                "If you did not attempt to log in, please contact the CPDO Administrator immediately.";
+
+        try {
+            emailService.sendEmail(user.getEmail(), subject, body);
+        } catch (Exception e) {
+            System.err.println(">>> [WARN] SMTP Delivery failed: " + e.getMessage());
+        }
+    }
+
+    /** Human-readable label for a factor type offered at the picker. */
+    private MfaFactorOptionDto describeFactor(String factorType) {
+        return switch (factorType) {
+            case MfaFactor.TYPE_EMAIL_OTP -> new MfaFactorOptionDto(factorType, "Email code");
+            case MfaFactor.TYPE_TOTP -> new MfaFactorOptionDto(factorType, "Authenticator app");
+            case MfaFactor.TYPE_WEBAUTHN -> new MfaFactorOptionDto(factorType, "Passkey");
+            case MfaPolicyService.RECOVERY_CODE -> new MfaFactorOptionDto(factorType, "Recovery code");
+            default -> new MfaFactorOptionDto(factorType, factorType);
+        };
+    }
+
+    /**
+     * Issues the session once every factor requirement is satisfied.
+     *
+     * <p>Also the only place failed-password counters and rate limits are cleared.
+     * Possession of a stolen password must not reset brute-force protections; only
+     * completing MFA does.
+     */
+    private ResponseEntity<?> completeLogin(User user, String verifiedFactor, HttpServletRequest request) {
         user.setFailedLoginAttempts(0);
         user.setLockoutUntil(null);
         userRepository.save(user);
@@ -386,11 +623,15 @@ public class AuthController {
 
         RefreshToken refreshTokenEntity = new RefreshToken(
                 user, refreshTokenHash, refreshExpiresAt, request.getRemoteAddr(), sessionExpiresAt);
+        // Record when the human actually authenticated. This is what the step-up check
+        // reads, and it has to survive rotation -- so it is stored on the session rather
+        // than inferred from the token, whose issue time refresh rewrites.
+        refreshTokenEntity.setAuthenticatedAt(now);
         refreshTokenRepository.save(refreshTokenEntity);
 
         activityLogService.log(
                 user, "AUTH", "AUTH_LOGIN_SUCCESS", String.format("#USR-%04d", user.getId()),
-                "User successfully verified MFA and established active session for " + user.getRole(),
+                "User verified MFA via " + verifiedFactor + " and established active session for " + user.getRole(),
                 "SUCCESS", request);
 
         AuthResponseDto response = new AuthResponseDto();
@@ -493,7 +734,15 @@ public class AuthController {
         }
 
         token.setRevoked(true);
-        String newAccessToken = jwtTokenProvider.generateAccessToken(user);
+        // Inherit the session's original authentication time instead of stamping a new
+        // one. A rotated token that looked freshly authenticated would let a caller
+        // holding only refresh tokens satisfy the step-up check indefinitely.
+        // Epoch 0 when the session predates the column: fail-closed, never "recent".
+        long sessionAuthTime = token.getAuthenticatedAt() == null
+                ? 0L
+                : java.time.Instant.now().getEpochSecond()
+                        - Duration.between(token.getAuthenticatedAt(), LocalDateTime.now()).getSeconds();
+        String newAccessToken = jwtTokenProvider.generateAccessToken(user, sessionAuthTime);
 
         String newRawRefreshToken = UUID.randomUUID().toString() + "-" + UUID.randomUUID().toString();
         String newRefreshTokenHash = hashToken(newRawRefreshToken);
@@ -504,6 +753,8 @@ public class AuthController {
 
         RefreshToken newTokenEntity = new RefreshToken(
                 user, newRefreshTokenHash, refreshExpiresAt, request.getRemoteAddr(), sessionExpiresAt);
+        // Carry the authentication time forward with the rotation.
+        newTokenEntity.setAuthenticatedAt(token.getAuthenticatedAt());
         refreshTokenRepository.save(newTokenEntity);
 
         Map<String, String> tokens = new HashMap<>();
@@ -674,6 +925,56 @@ public class AuthController {
     // ==========================================
     // 6. VERIFY SESSION
     // ==========================================
+    // ==========================================
+    // 6. STEP-UP RE-AUTHENTICATION
+    // ==========================================
+    /**
+     * Re-proves identity for sensitive changes and returns an access token carrying a
+     * fresh authentication time.
+     *
+     * <p>Rate-limited per account, and it deliberately does not touch the brute-force
+     * lockout counters or the session version. A wrong password here is still a password
+     * guess, so this must not become an unthrottled oracle; equally, succeeding here must
+     * not disturb the caller's other sessions or reset account lockout state, because
+     * step-up elevates one client rather than re-establishing the account.
+     */
+    @PostMapping("/step-up")
+    @Transactional
+    public ResponseEntity<?> stepUp(
+            @Valid @RequestBody StepUpRequestDto stepUpDto,
+            HttpServletRequest request) {
+        User user = SecurityUtils.getCurrentUser();
+        if (user == null) {
+            return ResponseEntity.status(401).body(Map.of("error", "Authentication required."));
+        }
+
+        String rateLimitKey = "STEPUP:" + user.getId();
+        if (!checkRateLimit(rateLimitKey)) {
+            return ResponseEntity.status(429)
+                    .header("Retry-After", "60")
+                    .body(Map.of("error", "Too many attempts. Please wait before trying again."));
+        }
+
+        if (!passwordEncoder.matches(stepUpDto.getPassword(), user.getPassword())) {
+            recordFailedAttempt(rateLimitKey);
+            activityLogService.log(
+                    user, "AUTH", "AUTH_STEP_UP_FAILED", String.format("#USR-%04d", user.getId()),
+                    "Failed step-up re-authentication.", "FAILED", request);
+            return ResponseEntity.status(401).body(Map.of("error", "Incorrect password."));
+        }
+        clearRateLimit(rateLimitKey);
+
+        long authenticatedAt = java.time.Instant.now().getEpochSecond();
+        activityLogService.log(
+                user, "AUTH", "AUTH_STEP_UP_SUCCESS", String.format("#USR-%04d", user.getId()),
+                "Step-up re-authentication succeeded.", "SUCCESS", request);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("accessToken", jwtTokenProvider.generateAccessToken(user, authenticatedAt));
+        response.put("message", "Identity confirmed. Sensitive changes are now permitted.");
+        return ResponseEntity.ok(response);
+    }
+
     @PostMapping("/verify-session")
     public ResponseEntity<?> verifySession() {
         // Identity is derived exclusively from the authenticated JWT. The old

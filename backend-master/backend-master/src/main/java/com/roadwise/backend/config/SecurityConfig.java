@@ -29,6 +29,12 @@ public class SecurityConfig {
             .cors(cors -> {})
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+                // MFA factor management acts on the caller's own enrolment, so it requires a
+                // real session. This rule must sit above the /api/auth/** permitAll line
+                // below, because first match wins. The login ceremony (/login, /mfa/select,
+                // /verify-mfa) deliberately stays public: it runs before a session exists
+                // and authenticates by challenge token instead.
+                .requestMatchers("/api/auth/step-up", "/api/auth/mfa/overview", "/api/auth/mfa/factors/**", "/api/auth/mfa/recovery-codes").authenticated()
                 .requestMatchers("/api/auth/**", "/api/health/**", "/health", "/ws/**", "/ws-live/**", "/actuator/health").permitAll()
                 // CityRoadController is mapped at /api/roads — the old /api/city-roads
                 // rule never matched any endpoint. Keep both for backwards compatibility.

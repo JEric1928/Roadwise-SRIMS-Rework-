@@ -22,6 +22,19 @@ public interface MfaChallengeRepository extends JpaRepository<MfaChallenge, Long
     @Transactional
     Optional<MfaChallenge> findTopByUserAndUsedFalseOrderByCreatedAtDesc(User user);
 
+    /**
+     * Resolves the challenge belonging to a server-issued token.
+     *
+     * <p>This is the replacement for driving verification off a client-supplied user
+     * id. Note the distinction from the method above: that one answers "does this
+     * account have a recent challenge?" and is only fit for the resend cooldown.
+     * It must never be used to authorise a verification, because it cannot tell this
+     * caller's login attempt apart from anybody else's.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Transactional
+    Optional<MfaChallenge> findByChallengeTokenHash(String challengeTokenHash);
+
     /** Used to invalidate every outstanding challenge on credential changes. */
     List<MfaChallenge> findByUserAndUsedFalse(User user);
 }

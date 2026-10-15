@@ -6,6 +6,7 @@ import { initAuth } from './features/auth/index.js';
 import { initSecureImage } from './features/secure-image/index.js';
 import { initActivityLog } from './features/activity-log/index.js';
 import { initProfileAccount } from './features/profile-account/index.js';
+import { initPasskeySettings } from './features/passkeys/index.js';
 
 import './features/administration/index.js'; // self-registers admin bindings + window bridges
 import './features/reports-archive/index.js'; // self-registers reports/archive bindings + window bridges
@@ -108,4 +109,5 @@ document.addEventListener('DOMContentLoaded', () => {
   initSecureImage();
   initActivityLog();
   initProfileAccount();
+  initPasskeySettings();
 });

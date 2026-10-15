@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -16,6 +17,12 @@ import java.util.Arrays;
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
 
+    private final StepUpInterceptor stepUpInterceptor;
+
+    public WebConfig(StepUpInterceptor stepUpInterceptor) {
+        this.stepUpInterceptor = stepUpInterceptor;
+    }
+
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         Path uploadDir = Paths.get("uploads");
@@ -23,6 +30,21 @@ public class WebConfig implements WebMvcConfigurer {
 
         registry.addResourceHandler("/uploads/**")
                 .addResourceLocations("file:" + uploadPath + "/");
+    }
+
+    /**
+     * Guards the MFA management surface with a recent-authentication requirement.
+     *
+     * <p>Paths are listed explicitly and deliberately exclude {@code /api/auth/mfa/select}
+     * and {@code /api/auth/verify-mfa}: those are the pre-authentication login ceremony,
+     * which by definition runs before anyone has a session to be recent about.
+     */
+    @Override
+    public void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(stepUpInterceptor)
+                .addPathPatterns(
+                        "/api/auth/mfa/factors/**",
+                        "/api/auth/mfa/recovery-codes");
     }
 
     @Bean

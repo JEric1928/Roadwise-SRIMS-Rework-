@@ -2,6 +2,7 @@
  * Centralized API service wrapper
  */
 
+import { isStepUpChallenge, requestStepUp } from './step-up.js';
 // Deployment override: hosts may set window.__ROADWISE_API_BASE__ before the
 // bundle loads (e.g. an inline script next to js/config.js). Falls back to the
 // historical defaults when unset.
@@ -64,19 +65,23 @@ export function getErrorMessage(status, fallbackText = "Request failed") {
 }
 
 export async function apiFetch(endpoint, options = {}) {
+  // stepUpRetried is internal bookkeeping: it marks the single replay allowed
+  // after a successful step-up prompt, so a repeated 403 can never loop.
+  const { stepUpRetried = false, ...fetchOptions } = options;
   const url = endpoint.startsWith && endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
-  options.cache = options.cache || 'no-store';
+  fetchOptions.cache = fetchOptions.cache || 'no-store';
 
   const customHeaders = (typeof window !== 'undefined' && window.API_HEADERS) ? window.API_HEADERS : {};
-  const headers = { ...getAuthHeaders(), ...customHeaders, ...(options.headers || {}) };
-  const response = await fetch(url, { ...options, headers });
+  const headers = { ...getAuthHeaders(), ...customHeaders, ...(fetchOptions.headers || {}) };
+  const response = await fetch(url, { ...fetchOptions, headers });
 
   if (!response.ok) {
     let message = getErrorMessage(response.status, `API request failed with status: ${response.status}`);
+    let body = null;
     try {
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
-        const body = await response.clone().json();
+        body = await response.clone().json();
         if (body && (body.error || body.message)) {
           message = body.error || body.message;
         }
@@ -87,6 +92,11 @@ export async function apiFetch(endpoint, options = {}) {
 
     const error = new Error(message);
     error.status = response.status;
+    if (body && body.code) {
+      // Structured codes (STEP_UP_REQUIRED, MALFORMED_CREDENTIAL, ...) stay on
+      // the error so callers can branch on them without re-reading the body.
+      error.code = body.code;
+    }
 
     if (response.status === 401) {
       // Expired/revoked session: clear local credentials and let the shell
@@ -96,6 +106,21 @@ export async function apiFetch(endpoint, options = {}) {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('roadwise:session-expired'));
       }
+      throw error;
+    }
+
+    // Changing sign-in methods needs a recent password entry. The server says
+    // so with 403 + STEP_UP_REQUIRED: prompt for the password, then replay the
+    // same request once. The replay re-reads the token from storage, so it
+    // carries the freshly elevated one.
+    if (!stepUpRetried && isStepUpChallenge(response.status, body)) {
+      try {
+        await requestStepUp(API_BASE_URL);
+      } catch (stepUpCancelled) {
+        error.message = 'Please re-enter your password to change your sign-in methods.';
+        throw error;
+      }
+      return apiFetch(endpoint, { ...options, stepUpRetried: true });
     }
 
     throw error;

@@ -2,6 +2,7 @@ package com.roadwise.backend.config;
 
 import com.roadwise.backend.model.User;
 import com.roadwise.backend.repository.UserRepository;
+import com.roadwise.backend.util.SecurityUtils;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -35,7 +36,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String jwt = getJwtFromRequest(request);
 
             if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt)) {
-                String username = tokenProvider.getUsernameFromToken(jwt);
+                JwtTokenProvider.TokenClaims claims = tokenProvider.parseClaims(jwt);
+                String username = claims.username();
 
                 User user = userRepository.findByUsername(username).orElse(null);
                 if (user != null) {
@@ -48,7 +50,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
                     // Reject tokens issued before the latest session-version bump
                     // (logout, password change/reset, emergency reset, handover).
-                    Long tokenSessionVersion = tokenProvider.getSessionVersionFromToken(jwt);
+                    Long tokenSessionVersion = claims.sessionVersion();
                     if (tokenSessionVersion == null || !tokenSessionVersion.equals(user.getSessionVersion())) {
                         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                         response.setContentType("application/json");
@@ -67,6 +69,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             Collections.singletonList(new SimpleGrantedAuthority(roleName))
                     );
                     authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+                    // Publish the token's authentication time for step-up checks. The
+                    // signature is already verified at this point, so later checks read this
+                    // attribute rather than paying for another signature verification.
+                    SecurityUtils.publishAuthTime(request, claims.authTime());
 
                     SecurityContextHolder.getContext().setAuthentication(authentication);
                 }

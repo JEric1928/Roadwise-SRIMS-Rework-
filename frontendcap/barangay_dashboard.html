@@ -445,6 +445,25 @@
             <button type="button" class="btn-primary" onclick="openAnnualReportPreview()">Preview Annual Inspection Report</button>
           </div>
         </div>
+
+        <!-- Account Security: the signed-in user's own sign-in methods. Personal by
+             design -- it sits beside the role's tools and never changes them.
+             Managed by js/features/passkeys. -->
+        <div class="section-card" id="account-security-card" style="margin-top: 20px;">
+          <h2>🔐 Account Security</h2>
+          <p style="color: var(--color-muted); font-size: 13px; margin-top: 5px;">
+            Personal to your own account. These sign-in methods are yours alone and do not change system-wide settings or affect other users.
+          </p>
+          <div id="passkey-settings-card" style="margin-top: 18px;">
+            <h3 style="margin: 0 0 6px 0;">Passkeys</h3>
+            <p id="passkey-status" style="margin: 0 0 12px 0; color: var(--color-muted); font-size: 13px;">Loading your passkeys...</p>
+            <ul id="passkey-list" style="list-style: none; padding: 0; margin: 0 0 12px 0;"></ul>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+              <input type="text" id="passkey-label" maxlength="60" placeholder="Name this passkey (e.g. Office laptop)" style="flex: 1 1 220px; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 13px;">
+              <button type="button" id="btn-add-passkey" class="btn-primary">Add a passkey</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- PROFILE VIEW -->

@@ -565,12 +565,27 @@ test('auth module exposes entry points, password rule, and idempotent init', asy
     document: globalThis.document
   };
   let enterAdds = 0;
-  const fakeInput = { addEventListener: () => { enterAdds++; } };
+  const fakeInput = { addEventListener: () => { enterAdds++; }, focus() {} };
+  const fakeSteps = Object.fromEntries(
+    ['login-step-1', 'login-step-2', 'forgot-step-1', 'forgot-step-2'].map((id) => {
+      const classes = new Set(id === 'login-step-1' ? [] : ['hidden']);
+      return [id, {
+        classList: {
+          toggle(name, force) {
+            if (force) classes.add(name);
+            else classes.delete(name);
+          },
+          contains: (name) => classes.has(name)
+        },
+        style: { removeProperty() {} }
+      }];
+    })
+  );
   globalThis.sessionStorage = { getItem: () => null, setItem() {}, removeItem() {} };
   globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
   globalThis.window = { location: { hostname: 'localhost' } };
   globalThis.document = {
-    getElementById: (id) => (id === 'username' || id === 'password' ? fakeInput : null)
+    getElementById: (id) => (id === 'username' || id === 'password' ? fakeInput : fakeSteps[id] || null)
   };
   try {
     const mod = await import(authUrl);
@@ -592,6 +607,207 @@ test('auth module exposes entry points, password rule, and idempotent init', asy
     assert.strictEqual(enterAdds, 2, 'username and password bound once each');
     assert.strictEqual(globalThis.window.handleLogin, mod.handleLogin);
     assert.strictEqual(globalThis.window.backToLogin, mod.backToLogin);
+
+    mod.showForgotPassword();
+    assert.ok(fakeSteps['login-step-1'].classList.contains('hidden'));
+    assert.ok(fakeSteps['forgot-step-1'].classList.contains('hidden') === false);
+    assert.ok(fakeSteps['forgot-step-2'].classList.contains('hidden'));
+
+    mod.backToLogin();
+    assert.ok(fakeSteps['login-step-1'].classList.contains('hidden') === false);
+    assert.ok(fakeSteps['forgot-step-1'].classList.contains('hidden'));
+    assert.ok(fakeSteps['forgot-step-2'].classList.contains('hidden'));
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
+});
+
+// ==========================================
+// WEBAUTHN / STEP-UP SUPPORT (passkey feature)
+// ==========================================
+
+const webauthnUrl = pathToFileURL(path.join(__dirname, 'js/core/webauthn.js')).href;
+const stepUpUrl = pathToFileURL(path.join(__dirname, 'js/core/step-up.js')).href;
+const passkeysUrl = pathToFileURL(path.join(__dirname, 'js/features/passkeys/index.js')).href;
+
+// Test 17: base64url conversions are the wire contract with the server.
+test('webauthn base64url helpers round-trip binary wire fields', async () => {
+  const mod = await import(webauthnUrl);
+
+  assert.strictEqual(new TextDecoder().decode(mod.base64UrlToBytes('SGVsbG8')), 'Hello');
+  assert.strictEqual(mod.bytesToBase64Url(Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 7])), 'AAECAwQFBgc');
+
+  // Padding is tolerated on input and never emitted: the spec fields the server
+  // serialises (challenges, ids) are unpadded base64url.
+  const bytes = mod.base64UrlToBytes('AQIDBAUGBwgJCgsMDQ4PEA==');
+  assert.strictEqual(bytes.length, 16);
+  assert.strictEqual(mod.bytesToBase64Url(bytes), 'AQIDBAUGBwgJCgsMDQ4PEA');
+  assert.ok(!mod.bytesToBase64Url(bytes).includes('='), 'output must be unpadded');
+
+  // url-safe alphabet: 62 -> '-', 63 -> '_' (not '+' and '/')
+  assert.strictEqual(mod.bytesToBase64Url(Uint8Array.from([251, 255])), '-_8');
+
+  assert.throws(() => mod.base64UrlToBytes('not+standard'), /Invalid base64url character/);
+  assert.throws(() => mod.base64UrlToBytes(42), /Expected a base64url string/);
+});
+
+// Test 18: option preparation decodes only the binary fields, whitelists the rest.
+test('webauthn option preparation decodes binary fields and drops unknown ones', async () => {
+  const mod = await import(webauthnUrl);
+
+  const request = mod.prepareRequestOptions({
+    rpId: 'localhost',
+    challenge: 'AQIDBAUGBwgJCgsMDQ4PEA',
+    allowCredentials: [{ type: 'public-key', id: 'AQIDBAUGBwgJCgsMDQ4PEA' }],
+    userVerification: 'preferred',
+    futureFieldTheBrowserDoesNotKnow: 'ignored'
+  });
+  assert.ok(request.challenge instanceof ArrayBuffer);
+  assert.strictEqual(request.challenge.byteLength, 16);
+  assert.strictEqual(request.rpId, 'localhost');
+  assert.ok(request.allowCredentials[0].id instanceof ArrayBuffer);
+  assert.strictEqual(request.allowCredentials[0].id.byteLength, 16);
+  assert.ok(!('futureFieldTheBrowserDoesNotKnow' in request));
+
+  const creation = mod.prepareCreationOptions({
+    rp: { id: 'localhost', name: 'RoadWise' },
+    user: { id: 'AQIDBAUGBwgJCgsMDQ4PEA', name: 'jdoe', displayName: 'J Doe' },
+    challenge: 'AQIDBAUGBwgJCgsMDQ4PEA',
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+    authenticatorSelection: { userVerification: 'preferred' }
+  });
+  assert.strictEqual(creation.challenge.byteLength, 16);
+  assert.strictEqual(creation.user.id.byteLength, 16);
+  assert.strictEqual(creation.rp.name, 'RoadWise');
+  assert.deepStrictEqual(creation.pubKeyCredParams, [{ type: 'public-key', alg: -7 }]);
+
+  assert.throws(() => mod.prepareCreationOptions({ user: { id: 'AQID' } }), /challenge is required/);
+  assert.throws(() => mod.prepareCreationOptions({ challenge: 'AQID' }), /user entity/);
+  assert.throws(() => mod.prepareRequestOptions(null), /Request options are required/);
+});
+
+// Test 19: authenticator responses serialise into the exact shape the server DTO accepts.
+test('webauthn serialises authenticator responses into the server wire shape', async () => {
+  const mod = await import(webauthnUrl);
+
+  const base = {
+    id: 'AQIDBAUGBwgJCgsMDQ4PEA',
+    rawId: Uint8Array.from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]),
+    type: 'public-key',
+    getClientExtensionResults: () => ({ credProps: { rk: true } })
+  };
+
+  const assertion = mod.assertionToJson({
+    ...base,
+    response: {
+      clientDataJSON: Uint8Array.from([123, 125]),
+      authenticatorData: Uint8Array.from([1]),
+      signature: Uint8Array.from([255]),
+      userHandle: null
+    }
+  });
+  assert.strictEqual(assertion.response.clientDataJSON, 'e30');
+  assert.strictEqual(assertion.response.signature, '_w');
+  assert.strictEqual(assertion.rawId, 'AQIDBAUGBwgJCgsMDQ4PEA');
+  assert.deepStrictEqual(assertion.clientExtensionResults, { credProps: { rk: true } });
+  // A null userHandle must not reach the wire: JSON.stringify drops the
+  // undefined entry, which is what the server's mapper sees.
+  assert.strictEqual(assertion.response.userHandle, undefined);
+  assert.ok(!JSON.stringify(assertion).includes('userHandle'), 'a null userHandle must not reach the wire');
+
+  const registration = mod.registrationToJson({
+    ...base,
+    response: {
+      clientDataJSON: Uint8Array.from([123, 125]),
+      attestationObject: Uint8Array.from([0]),
+      getTransports: () => ['internal']
+    }
+  });
+  assert.strictEqual(registration.response.attestationObject, 'AA');
+  assert.deepStrictEqual(registration.response.transports, ['internal']);
+  assert.strictEqual(registration.response.signature, undefined, 'attestation carries no signature');
+
+  assert.throws(() => mod.assertionToJson({ id: 'x' }), /no assertion response/);
+
+  assert.match(mod.describeCredentialError({ name: 'NotAllowedError' }), /dismissed or timed out/);
+  assert.match(mod.describeCredentialError({ name: 'InvalidStateError' }), /already registered/);
+  assert.strictEqual(mod.describeCredentialError({ name: 'UnexpectedError', message: 'boom' }), 'boom');
+});
+
+// Test 20: only 403 + STEP_UP_REQUIRED triggers the re-authentication prompt.
+test('step-up challenge detection matches only 403 with the STEP_UP_REQUIRED code', async () => {
+  const mod = await import(stepUpUrl);
+
+  assert.strictEqual(mod.isStepUpChallenge(403, { code: 'STEP_UP_REQUIRED' }), true);
+  assert.strictEqual(mod.isStepUpChallenge('403', { code: 'STEP_UP_REQUIRED' }), true);
+  assert.strictEqual(mod.isStepUpChallenge(403, { error: 'Access denied.' }), false);
+  assert.strictEqual(mod.isStepUpChallenge(403, null), false);
+  assert.strictEqual(mod.isStepUpChallenge(401, { code: 'STEP_UP_REQUIRED' }), false);
+  assert.strictEqual(mod.isStepUpChallenge(200, { code: 'STEP_UP_REQUIRED' }), false);
+});
+
+// Test 21: apiFetch surfaces structured codes and refuses honestly when the
+// step-up prompt cannot be shown (headless: no document to render into).
+test('apiFetch carries response codes and never silently drops a step-up demand', async () => {
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { apiFetch } = await import(apiUrl);
+
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 403,
+      headers: { get: (name) => (String(name).toLowerCase() === 'content-type' ? 'application/json' : null) },
+      clone: () => ({
+        json: async () => ({ error: 'Please re-enter your password to continue.', code: 'STEP_UP_REQUIRED' })
+      })
+    });
+
+    await assert.rejects(
+      () => apiFetch('/api/auth/mfa/factors/passkeys/options', { method: 'POST' }),
+      (error) => {
+        assert.strictEqual(error.status, 403);
+        assert.strictEqual(error.code, 'STEP_UP_REQUIRED');
+        assert.match(error.message, /re-enter your password/i);
+        return true;
+      }
+    );
+
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 401,
+      headers: { get: () => 'application/json' },
+      clone: () => ({ json: async () => ({ error: 'Session expired.' }) })
+    });
+    await assert.rejects(
+      () => apiFetch('/api/auth/mfa/overview'),
+      (error) => {
+        assert.strictEqual(error.code, 'SESSION_EXPIRED');
+        return true;
+      }
+    );
+  } finally {
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+
+// Test 22: passkeys feature entry points (headless smoke test)
+test('passkeys module exposes its entry points and no-ops without a panel', async () => {
+  const originals = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = {};
+  globalThis.document = { getElementById: () => null };
+  try {
+    const mod = await import(passkeysUrl);
+    assert.deepStrictEqual(Object.keys(mod).sort(), ['initPasskeySettings', 'refreshPasskeys']);
+    assert.strictEqual(typeof mod.initPasskeySettings, 'function');
+    assert.strictEqual(typeof mod.refreshPasskeys, 'function');
+
+    // No #passkey-settings-card on this page: init must not throw.
+    mod.initPasskeySettings();
+    assert.strictEqual(globalThis.window.refreshPasskeys, mod.refreshPasskeys);
   } finally {
     for (const [key, value] of Object.entries(originals)) {
       if (value === undefined) delete globalThis[key];

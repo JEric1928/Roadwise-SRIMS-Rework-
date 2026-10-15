@@ -87,6 +87,14 @@ public class User {
     @JsonIgnore
     private LocalDateTime tempPasswordExpiresAt;
 
+    // Which factors this account accepts. Kept in sync with real enrolment by
+    // MfaPolicyService: EMAIL_OTP while email is the only usable factor, ANY_ONE
+    // once a second factor is active. V16 defaults it for pre-existing accounts,
+    // so no account gains a new requirement it has not opted into.
+    @Column(name = "mfa_policy", nullable = false, length = 32)
+    @JsonIgnore
+    private String mfaPolicy = "EMAIL_OTP";
+
     // Nullable for CPDO and CEO accounts
     @ManyToOne
     @JoinColumn(name = "barangay_id", nullable = true)
@@ -168,6 +176,11 @@ public class User {
 
     public Integer getEmailOtpAttempts() { return emailOtpAttempts == null ? 0 : emailOtpAttempts; }
     public void setEmailOtpAttempts(Integer emailOtpAttempts) { this.emailOtpAttempts = emailOtpAttempts; }
+
+    @JsonIgnore
+    public String getMfaPolicy() { return mfaPolicy == null ? "EMAIL_OTP" : mfaPolicy; }
+
+    public void setMfaPolicy(String mfaPolicy) { this.mfaPolicy = mfaPolicy; }
 
     public Boolean getPasswordChangeRequired() { return passwordChangeRequired != null && passwordChangeRequired; }
     public void setPasswordChangeRequired(Boolean passwordChangeRequired) { this.passwordChangeRequired = passwordChangeRequired; }

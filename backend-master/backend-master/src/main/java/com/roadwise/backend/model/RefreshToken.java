@@ -30,6 +30,18 @@ public class RefreshToken {
 
     private LocalDateTime createdAt = LocalDateTime.now();
 
+    /**
+     * When the human last actually authenticated for this session.
+     *
+     * <p>Set once at login and inherited by every rotation, so it always answers "when
+     * did someone prove who they are" rather than "when was this row written". Refresh
+     * must not move it: a rotated token that stamped a new time would let a caller
+     * holding only refresh tokens satisfy a freshness check forever. NULL means the
+     * session was never elevated and is treated as such.
+     */
+    @Column(name = "authenticated_at")
+    private LocalDateTime authenticatedAt;
+
     private String createdByIp;
 
     // Absolute lifetime of the login session (does not extend on rotation).
@@ -80,6 +92,9 @@ public class RefreshToken {
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
+
+    public LocalDateTime getAuthenticatedAt() { return authenticatedAt; }
+    public void setAuthenticatedAt(LocalDateTime authenticatedAt) { this.authenticatedAt = authenticatedAt; }
 
     public String getCreatedByIp() { return createdByIp; }
     public void setCreatedByIp(String createdByIp) { this.createdByIp = createdByIp; }

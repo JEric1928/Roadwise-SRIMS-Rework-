@@ -12,6 +12,7 @@ import javax.crypto.SecretKey;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
+import java.time.Instant;
 
 @Component
 public class JwtTokenProvider {
@@ -49,13 +50,34 @@ public class JwtTokenProvider {
         return Keys.hmacShaKeyFor(keyBytes);
     }
 
+    /**
+     * Claim carrying the moment the user last actually proved their identity (epoch
+     * seconds). Named after the OpenID Connect claim of the same meaning rather than
+     * invented, so there is no ambiguity about what it denotes.
+     */
+    public static final String AUTH_TIME_CLAIM = "auth_time";
+
+    /** Issues an access token whose authentication is considered to be right now. */
     public String generateAccessToken(User user) {
+        return generateAccessToken(user, Instant.now().getEpochSecond());
+    }
+
+    /**
+     * Issues an access token carrying an explicit authentication time.
+     *
+     * <p>The explicit form exists for refresh. A rotated token must inherit the original
+     * authentication moment rather than stamping a new one -- otherwise a caller holding
+     * only refresh tokens could mint a "fresh" session indefinitely and the freshness
+     * check would protect nothing.
+     */
+    public String generateAccessToken(User user, long authTimeEpochSeconds) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("id", user.getId());
         claims.put("role", user.getRole());
         // Security stamp: the filter rejects the token when it no longer matches
         // the account's current session version (logout/password change).
         claims.put("sv", user.getSessionVersion());
+        claims.put(AUTH_TIME_CLAIM, authTimeEpochSeconds);
         if (user.getBarangay() != null) {
             claims.put("barangayId", user.getBarangay().getId());
         }
@@ -101,6 +123,60 @@ public class JwtTokenProvider {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    /**
+     * @return the authentication time carried by the token, or {@code null} when absent.
+     *
+     * <p>Absence is answered with null rather than "now": tokens minted before this claim
+     * existed must never satisfy a freshness check, matching how a missing session-version
+     * stamp is already treated as revoked.
+     */
+    public Long getAuthTimeFromToken(String token) {
+        Object raw = Jwts.parser()
+                .verifyWith(getSigningKey())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload()
+                .get(AUTH_TIME_CLAIM);
+        return toEpochSeconds(raw);
+    }
+
+    /** Coerces the numeric claim forms a JWT library may hand back. */
+    private static Long toEpochSeconds(Object raw) {
+        if (raw == null) {
+            return null;
+        }
+        if (raw instanceof Number number) {
+            return number.longValue();
+        }
+        try {
+            return Long.valueOf(raw.toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Everything the authentication filter needs, read in a single parse.
+     *
+     * <p>Each parse verifies the signature, so reading the three fields through the
+     * individual getters would verify the same token three times per request.
+     */
+    public record TokenClaims(String username, Long sessionVersion, Long authTime) {
+    }
+
+    /** @throws JwtException when the token is malformed, tampered with, or expired. */
+    public TokenClaims parseClaims(String token) {
+        Claims payload = Jwts.parser()
+                .verifyWith(getSigningKey())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+        return new TokenClaims(
+                payload.getSubject(),
+                toEpochSeconds(payload.get("sv")),
+                toEpochSeconds(payload.get(AUTH_TIME_CLAIM)));
     }
 
     public boolean validateToken(String token) {

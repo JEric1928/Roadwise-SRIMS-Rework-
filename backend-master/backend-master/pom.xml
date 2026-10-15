@@ -95,6 +95,16 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- Passkeys / WebAuthn. First-party Spring Security module, version managed by
+		     the spring-security-bom that Boot 4.1.0 imports. Brings webauthn4j-core in
+		     transitively (Spring's own verification engine, not a third-party choice).
+		     Note: Boot 4.1.0 runs on Jackson 3, so the module to register is
+		     WebauthnJacksonModule (tools.jackson), not WebauthnJackson2Module. -->
+		<dependency>
+			<groupId>org.springframework.security</groupId>
+			<artifactId>spring-security-webauthn</artifactId>
+		</dependency>
+
 		<!-- Flyway Database Migrations -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
