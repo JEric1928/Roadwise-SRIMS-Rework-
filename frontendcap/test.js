@@ -815,3 +815,401 @@ test('passkeys module exposes its entry points and no-ops without a panel', asyn
     }
   }
 });
+
+// ============================================================================
+// DOM CONTRACT
+//
+// The feature modules address the DOM by string id and guard every lookup, so a
+// deleted element fails silently instead of throwing. Commit 6e02540 deleted
+// large parts of the dashboard markup with exactly that result. These tests pin
+// the contract for the workflows that are known-good today and stop the
+// baseline from growing.
+// ============================================================================
+
+const { audit, diffAgainstBaseline, loadBaseline, findingKey } = require('./tools/dom-contract.js');
+
+/** Collects the ids a module looks up, using the same extractor as the audit. */
+function moduleElementIds(modulePath) {
+  const { extractJsElementRefs } = require('./tools/dom-contract.js');
+  const source = fs.readFileSync(path.join(__dirname, modulePath), 'utf8');
+  return [...new Set(extractJsElementRefs(source).map((ref) => ref.id))];
+}
+
+function pageElementIds(pagePath) {
+  const { extractIds } = require('./tools/dom-contract.js');
+  const html = fs.readFileSync(path.join(__dirname, pagePath), 'utf8');
+  return new Set(extractIds(html).ids.map((entry) => entry.id));
+}
+
+test('repair tracking modal exposes every element the module drives', () => {
+  const pageIds = pageElementIds('admin_dashboard.html');
+  const required = moduleElementIds('js/features/repair-tracking/index.js');
+  assert.ok(required.length > 0, 'expected repair-tracking module to reference element ids');
+
+  const missing = required.filter((id) => !pageIds.has(id));
+  assert.deepStrictEqual(
+    missing,
+    [],
+    `admin_dashboard.html is missing #${missing.join(', #')} — openTrackingModal() silently no-ops without them`
+  );
+});
+
+test('tracking modal is reachable from the tracking table button', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'admin_dashboard.html'), 'utf8');
+  assert.match(html, /id="tracking-modal"/, 'tracking modal markup must exist');
+  assert.match(html, /onclick="closeTrackingModal\(\)"/, 'tracking modal needs a close control');
+  const { extractJsElementRefs } = require('./tools/dom-contract.js');
+  const source = fs.readFileSync(path.join(__dirname, 'js/features/repair-tracking/index.js'), 'utf8');
+  assert.ok(
+    extractJsElementRefs(source).some((ref) => ref.id === 'tracking-modal'),
+    'the tracking module must still open #tracking-modal'
+  );
+});
+
+test('the bundle does not regress the DOM contract baseline', () => {
+  const { findings } = audit();
+  const { introduced } = diffAgainstBaseline(findings);
+  const summary = introduced
+    .slice(0, 25)
+    .map((f) => `${f.check} ${f.page || f.module}${f.line ? `:${f.line}` : ''} — ${f.message}`)
+    .join('\n  ');
+  assert.strictEqual(
+    introduced.length,
+    0,
+    `new DOM contract violation(s):\n  ${summary}\n\n` +
+      'Fix the page/module, or — only if the breakage is deliberate and tracked — ' +
+      'run `node tools/dom-contract.js --update-baseline` and say so in the commit message.'
+  );
+});
+
+test('the baseline is a ratchet: every key still corresponds to a real finding', () => {
+  const baseline = loadBaseline();
+  if (baseline.size === 0) return;
+  const { findings } = audit();
+  const live = new Set(findings.map(findingKey));
+  const stale = [...baseline].filter((key) => !live.has(key));
+  assert.deepStrictEqual(
+    stale,
+    [],
+    `${stale.length} baseline key(s) no longer match any finding — the baseline must shrink when findings are fixed ` +
+      '(run `node tools/dom-contract.js --update-baseline`)'
+  );
+});
+
+test('no dashboard page ships duplicate element ids', () => {
+  for (const page of ['admin_dashboard.html', 'barangay_dashboard.html', 'ceo_dashboard.html', 'login.html']) {
+    const { extractIds } = require('./tools/dom-contract.js');
+    const { duplicates } = extractIds(fs.readFileSync(path.join(__dirname, page), 'utf8'));
+    assert.deepStrictEqual(
+      duplicates.map((d) => d.id),
+      [],
+      `${page} has duplicate id(s); getElementById returns only the first`
+    );
+  }
+});
+
+// ============================================================================
+// TOKEN REFRESH
+//
+// The refresh token was stored at login and then never redeemed, so every
+// session died 15 minutes in (the access-token lifetime) even though the server
+// had issued a 7-day, rotating refresh token to prevent exactly that. These
+// tests pin the redemption path, its single-flight guarantee, and the fact that
+// auth endpoints never trigger a rotation.
+// ============================================================================
+
+/** Minimal localStorage double so apiFetch's token reads are observable. */
+/**
+ * Minimal localStorage double so apiFetch's token reads are observable.
+ * Declared async and awaited in the body: `run` must be torn down only after
+ * it settles, otherwise the stub is removed mid-flight.
+ */
+async function withStorage(initial, run) {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const store = new Map(Object.entries(initial));
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: {
+      getItem: (key) => (store.has(key) ? store.get(key) : null),
+      setItem: (key, value) => store.set(key, String(value)),
+      removeItem: (key) => store.delete(key),
+      clear: () => store.clear()
+    },
+    configurable: true,
+    writable: true
+  });
+  try {
+    return await run(store);
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original);
+    else delete globalThis.localStorage;
+  }
+}
+
+function jsonResponse(status, body) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: { get: (name) => (String(name).toLowerCase() === 'content-type' ? 'application/json' : null) },
+    clone: () => ({ json: async () => body }),
+    json: async () => body
+  };
+}
+
+test('auth endpoints are never eligible for automatic refresh', async () => {
+  const { isRefreshableEndpoint } = await import(apiUrl);
+
+  for (const endpoint of [
+    '/api/auth/login',
+    '/api/auth/refresh',
+    '/api/auth/logout',
+    '/api/auth/verify-mfa',
+    '/api/auth/mfa/overview',
+    '/api/auth/forgot-password/request',
+    'http://localhost:8080/api/auth/logout'
+  ]) {
+    assert.strictEqual(isRefreshableEndpoint(endpoint), false, `${endpoint} must not refresh`);
+  }
+
+  for (const endpoint of ['/api/reports', '/api/reports/12/timeline', '/api/activity-logs']) {
+    assert.strictEqual(isRefreshableEndpoint(endpoint), true, `${endpoint} should be refreshable`);
+  }
+});
+
+test('refreshAccessToken returns null without a stored refresh token (no network call)', async () => {
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { refreshAccessToken } = await import(apiUrl);
+    let calls = 0;
+    globalThis.fetch = async () => { calls++; return jsonResponse(200, {}); };
+
+    await withStorage({}, async () => {
+      assert.strictEqual(await refreshAccessToken(), null);
+    });
+    assert.strictEqual(calls, 0, 'must not hit the network when nothing can be redeemed');
+  } finally {
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+
+test('a 401 refreshes once, replays the request, and rotates stored tokens', async () => {
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { apiFetch } = await import(apiUrl);
+    const calls = [];
+
+    globalThis.fetch = async (url, options = {}) => {
+      calls.push({ url: String(url), auth: (options.headers || {}).Authorization });
+      if (String(url).includes('/api/auth/refresh')) {
+        return jsonResponse(200, { accessToken: 'fresh-access', refreshToken: 'rotated-refresh' });
+      }
+      const attempt = calls.filter((c) => c.url.includes('/api/reports')).length;
+      return attempt === 1 ? jsonResponse(401, { error: 'Expired.' }) : jsonResponse(200, [{ id: 1 }]);
+    };
+
+    await withStorage({ accessToken: 'stale-access', refreshToken: 'stored-refresh' }, async (store) => {
+      const result = await apiFetch('/api/reports');
+      assert.deepStrictEqual(result, [{ id: 1 }]);
+      assert.strictEqual(store.get('accessToken'), 'fresh-access', 'the rotated access token must be stored');
+      assert.strictEqual(store.get('refreshToken'), 'rotated-refresh', 'the rotated refresh token must be stored');
+    });
+
+    const reportCalls = calls.filter((c) => c.url.includes('/api/reports'));
+    assert.strictEqual(reportCalls.length, 2, 'exactly one replay');
+    assert.strictEqual(reportCalls[1].auth, 'Bearer fresh-access', 'the replay must carry the new token');
+    assert.strictEqual(calls.filter((c) => c.url.includes('/api/auth/refresh')).length, 1);
+  } finally {
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+
+test('a failed refresh clears the session and reports SESSION_EXPIRED exactly once', async () => {
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { apiFetch } = await import(apiUrl);
+    let reportCalls = 0;
+
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/api/auth/refresh')) return jsonResponse(401, { error: 'Revoked.' });
+      reportCalls++;
+      return jsonResponse(401, { error: 'Expired.' });
+    };
+
+    await withStorage({ accessToken: 'stale', refreshToken: 'revoked' }, async (store) => {
+      await assert.rejects(
+        () => apiFetch('/api/reports'),
+        (error) => {
+          assert.strictEqual(error.code, 'SESSION_EXPIRED');
+          return true;
+        }
+      );
+      assert.strictEqual(store.has('accessToken'), false, 'credentials must be cleared');
+      assert.strictEqual(store.has('refreshToken'), false);
+    });
+    assert.strictEqual(reportCalls, 1, 'a dead refresh token must not be retried in a loop');
+  } finally {
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+
+test('concurrent 401s share a single refresh rotation', async () => {
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { apiFetch } = await import(apiUrl);
+    let refreshCalls = 0;
+    let releaseRefresh;
+    const refreshGate = new Promise((resolve) => { releaseRefresh = resolve; });
+
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/api/auth/refresh')) {
+        refreshCalls++;
+        // Hold the refresh open until both callers are waiting on it, so the
+        // test proves they share one in-flight rotation rather than racing.
+        await refreshGate;
+        return jsonResponse(200, { accessToken: 'fresh', refreshToken: 'rotated' });
+      }
+      return jsonResponse(401, { error: 'Expired.' });
+    };
+
+    await withStorage({ accessToken: 'stale', refreshToken: 'stored' }, async () => {
+      const inFlight = [
+        apiFetch('/api/reports').catch(() => null),
+        apiFetch('/api/reports/2').catch(() => null)
+      ];
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.strictEqual(refreshCalls, 1, 'both callers must be parked on the same refresh');
+      releaseRefresh();
+      await Promise.all(inFlight);
+    });
+
+    assert.strictEqual(refreshCalls, 1, 'a replayed refresh token would revoke every session server-side');
+  } finally {
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+
+test('a refresh that fails on one caller does not strand the others', async () => {
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { apiFetch } = await import(apiUrl);
+    globalThis.fetch = async (url) => {
+      if (String(url).includes('/api/auth/refresh')) return jsonResponse(401, { error: 'Revoked.' });
+      return jsonResponse(401, { error: 'Expired.' });
+    };
+
+    await withStorage({ accessToken: 'stale', refreshToken: 'revoked' }, async () => {
+      const results = await Promise.all([
+        apiFetch('/api/reports').then(() => 'resolved', (e) => e.code),
+        apiFetch('/api/reports/2').then(() => 'resolved', (e) => e.code)
+      ]);
+      assert.deepStrictEqual(results, ['SESSION_EXPIRED', 'SESSION_EXPIRED']);
+    });
+  } finally {
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+
+// ============================================================================
+// BACKEND BASE URL
+//
+// The base URL used to be hardcoded twice with two different hosts: js/config.js
+// pointed forecasting at one Render deployment and js/core/api.js pointed every
+// data call at another. js/api-base.js is now the only place a host is written
+// down, and these tests pin its resolution order.
+// ============================================================================
+
+const vm = require('node:vm');
+
+/** Runs the classic js/api-base.js script against a fake window. */
+function loadApiBase(overrides = {}) {
+  const source = fs.readFileSync(path.join(__dirname, 'js/api-base.js'), 'utf8');
+  const warnings = [];
+  const sandbox = {
+    console: { warn: (message) => warnings.push(message), error() {}, log() {} },
+    ...overrides
+  };
+  if (overrides.location) sandbox.location = overrides.location;
+  if (overrides.__ROADWISE_API_BASE__) sandbox.__ROADWISE_API_BASE__ = overrides.__ROADWISE_API_BASE__;
+  vm.createContext(sandbox);
+  vm.runInContext(source, sandbox);
+  return { api: sandbox.RoadWiseApiBase, warnings };
+}
+
+test('the runtime override wins over every other source', () => {
+  const { api } = loadApiBase({
+    __ROADWISE_API_BASE__: 'https://runtime.example.gov.ph',
+    location: { hostname: 'roadwise.example.gov.ph' }
+  });
+  assert.strictEqual(api.resolve(), 'https://runtime.example.gov.ph');
+});
+
+test('a configured base keeps no trailing slash', () => {
+  const { api } = loadApiBase({ __ROADWISE_API_BASE__: 'https://runtime.example.gov.ph/' });
+  assert.strictEqual(api.resolve(), 'https://runtime.example.gov.ph');
+});
+
+test('loopback and non-browser contexts resolve to the local backend', () => {
+  for (const hostname of ['localhost', '127.0.0.1', '::1', '']) {
+    const { api, warnings } = loadApiBase({ location: { hostname } });
+    assert.strictEqual(api.resolve(), 'http://localhost:8080', `hostname ${hostname || '(none)'}`);
+    assert.deepStrictEqual(warnings, [], 'local development must not warn');
+  }
+});
+
+test('an unconfigured deployed build warns loudly instead of guessing silently', () => {
+  const { api, warnings } = loadApiBase({ location: { hostname: 'roadwise.example.gov.ph' } });
+  assert.strictEqual(api.resolve(), api.LEGACY_API_BASE);
+  assert.strictEqual(warnings.length, 1, 'the deployment bug must be announced exactly once');
+  assert.match(warnings[0], /ROADWISE_API_BASE_URL was not set/);
+});
+
+test('the api module falls back to loopback rather than a hardcoded host', async () => {
+  const { API_BASE_URL } = await import(apiUrl);
+  assert.strictEqual(API_BASE_URL, 'http://localhost:8080');
+});
+
+test('every page that loads js/config.js loads js/api-base.js first', () => {
+  for (const page of ['admin_dashboard.html', 'barangay_dashboard.html', 'ceo_dashboard.html', 'login.html']) {
+    const html = fs.readFileSync(path.join(__dirname, page), 'utf8');
+    const apiBase = html.indexOf('<script src="js/api-base.js"></script>');
+    const config = html.indexOf('<script src="js/config.js"></script>');
+    assert.notStrictEqual(config, -1, `${page} should load js/config.js`);
+    assert.notStrictEqual(apiBase, -1, `${page} must load js/api-base.js or its API calls fall back to localhost`);
+    assert.ok(apiBase < config, `${page} must load js/api-base.js before js/config.js`);
+  }
+});
+
+test('only one file in the shipped source hardcodes a backend host', () => {
+  const sources = [
+    'js/core/api.js',
+    'js/config.js',
+    'js/forecasting_ui.js',
+    'js/app.js',
+    'admin_dashboard.html',
+    'barangay_dashboard.html',
+    'ceo_dashboard.html',
+    'login.html'
+  ];
+  const offenders = sources.filter((file) => {
+    const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
+    return /https?:\/\/[a-z0-9-]+\.onrender\.com/i.test(source);
+  });
+  assert.deepStrictEqual(
+    offenders,
+    [],
+    `hardcoded deployment host(s) found in ${offenders.join(', ')} — they belong in js/api-base.js ` +
+      '(or, better, in the ROADWISE_API_BASE_URL build variable)'
+  );
+
+  const apiBase = fs.readFileSync(path.join(__dirname, 'js/api-base.js'), 'utf8');
+  assert.strictEqual(
+    (apiBase.match(/\.onrender\.com/gi) || []).length,
+    1,
+    'js/api-base.js must hold exactly one legacy fallback host'
+  );
+});
+

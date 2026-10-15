@@ -19,6 +19,20 @@ module.exports = merge(common, {
         { from: 'barangay_dashboard.html', to: 'barangay_dashboard.html' },
         { from: 'ceo_dashboard.html', to: 'ceo_dashboard.html' },
         { from: '404.html', to: '404.html' },
+        // js/api-base.js carries the single backend-URL constant. Its
+        // placeholder is replaced with the ROADWISE_API_BASE_URL environment
+        // value at build time; when the variable is unset the placeholder is
+        // left in place and the script falls back (see the file's header).
+        {
+          from: 'js/api-base.js',
+          to: 'js/api-base.js',
+          transform(content) {
+            const configured = (process.env.ROADWISE_API_BASE_URL || '').trim();
+            // CopyPlugin hands the transform a Buffer in current versions.
+            if (!configured) return content;
+            return content.toString().replace('__ROADWISE_BUILD_API_BASE__', configured);
+          },
+        },
         { from: 'js/config.js', to: 'js/config.js' },
         { from: 'js/forecasting_ui.js', to: 'js/forecasting_ui.js' },
         { from: 'sjdm_barangays.geojson', to: 'sjdm_barangays.geojson' },

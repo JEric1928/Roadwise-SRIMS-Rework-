@@ -1,1 +1,29 @@
-(empty)
+# RoadWise — repository hygiene
+#
+# Citizen-submitted evidence photos are operational data, not source. They are
+# uploaded at runtime (Supabase Storage is the active store; the local directory
+# is only used by the legacy /api/reports/image/{filename} endpoint), so they must
+# never be committed. 77 of them were tracked until this file existed, putting
+# resident-supplied imagery into the repository history.
+backend-master/backend-master/uploads/*
+!backend-master/backend-master/uploads/.gitkeep
+
+# Editor and IDE state
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Build and dependency output
+node_modules/
+dist/
+target/
+build/
+*.class
+*.log
+
+# Local tooling
+mvnw.zip
+.DS_Store
+Thumbs.db
+desktop.ini

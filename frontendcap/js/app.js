@@ -1,4 +1,4 @@
-import { API_BASE_URL, clearAuthSession } from './core/api.js';
+import { API_BASE_URL, clearAuthSession, refreshAccessToken } from './core/api.js';
 import { initNotifications } from './features/notifications/index.js';
 import { initImageLightbox } from './features/image-lightbox/index.js';
 import { initLiveClock } from './features/live-clock/index.js';
@@ -51,16 +51,25 @@ import './features/map-engine/index.js'; // Leaflet map instances, spotlight iso
 
   // 3. SERVER-SIDE AUDIT: If on a dashboard, verify identity with Spring Boot
   if (isLoggedIn && currentPath.includes("dashboard")) {
-    const sessionToken = localStorage.getItem('accessToken');
-    fetch(`${API_BASE_URL}/api/auth/verify-session`, {
+    const verifySession = (token) => fetch(`${API_BASE_URL}/api/auth/verify-session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(sessionToken ? { Authorization: 'Bearer ' + sessionToken } : {})
+        ...(token ? { Authorization: 'Bearer ' + token } : {})
       },
       body: JSON.stringify({})
-    })
-      .then(res => {
+    });
+
+    verifySession(localStorage.getItem('accessToken'))
+      .then(async (res) => {
+        // A 401 here is usually just the 15-minute access token expiring while
+        // the tab sat idle. Redeem the refresh token once and re-verify before
+        // treating the session as over — otherwise every page load after the
+        // access-token lifetime kicks the user back to login.
+        if (res.status === 401) {
+          const renewed = await refreshAccessToken();
+          if (renewed) return verifySession(renewed);
+        }
         if (!res.ok) throw new Error("Session invalid on server");
         return res.json();
       })

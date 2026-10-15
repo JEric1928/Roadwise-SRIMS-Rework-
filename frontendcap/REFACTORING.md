@@ -659,18 +659,30 @@ it can move safely:
 - Main DOMContentLoaded listener remainder: Leaflet safety check/add-report
   map, barangay management render/modals, and the admin city road inventory
   print-dropdown opener.
-- Barangay report submission and edit/resubmit. `submitRoadReport` is
-  unbridged and `confirm-modal` markup is absent, so the inline submit button
-  (`barangay_dashboard.html:427`) and the confirm step no-op today. The
-  submission scout recommends moving submission together with the add-report
-  map engine and letting that module absorb `map`/`selectedLat`/`selectedLng`
-  and the temporary `window.redIcon` bridge.
+- Barangay report submission and edit/resubmit. **Superseded:** the
+  `window.submitRoadReport` bridge and the `#confirm-modal` markup both exist
+  today (`js/features/report-submission/index.js`, `barangay_dashboard.html`),
+  so the claim below no longer holds. What remains unverified is the browser
+  pass, not the wiring. The submission scout still recommends moving submission
+  together with the add-report map engine and letting that module absorb
+  `map`/`selectedLat`/`selectedLng` and the temporary `window.redIcon` bridge.
 - Tracking modal engine (open/populate, extension review, rework/close,
-  per-report map). The tracking-modal markup was deleted from
-  `admin_dashboard.html` in `6e02540`, so the engine early-returns today;
-  restoring or pinning that DOM is a prerequisite for extraction.
+  per-report map). **Repaired:** `#tracking-modal` was restored to
+  `admin_dashboard.html` (all 63 element ids the module drives are present and
+  pinned by tests in `test.js`), so the engine no longer early-returns.
+  Extraction can proceed once the browser baseline confirms the restored modal.
 - Admin/CEO/barangay global maps (shared `map`/`selectedLat`/`selectedLng`
   state at the top of `app.js`, plus the temporary `window.redIcon` bridge).
+
+Related documents:
+
+- `BROWSER_BASELINE.md` — the executable script for the browser baseline these
+  notes keep deferring to, across all three roles.
+- `DOM_CONTRACT_FINDINGS.md` — the 277 element ids the feature modules address
+  that no longer exist in any page after `6e02540`, grouped by feature area.
+  271 of them are recoverable from `6e02540^`.
+- `npm run audit:dom` — the ratchet that stops the list from growing; `test.js`
+  fails the build on any new violation.
 
 Next steps, in order:
 

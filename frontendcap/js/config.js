@@ -1,14 +1,11 @@
 // js/config.js
-// Deployment override: a host may define window.__ROADWISE_API_BASE__ before
-// this script loads (inline <script> or environment-specific file). Otherwise
-// fall back to the historical defaults.
-const DEPLOYED_API_BASE = (typeof window !== 'undefined' && window.__ROADWISE_API_BASE__) || null;
-
-let API_BASE_URL = DEPLOYED_API_BASE || "http://localhost:8080";
-
-if (!DEPLOYED_API_BASE && window.location.hostname !== "localhost" && window.location.hostname !== "127.0.0.1") {
-  API_BASE_URL = "https://roadwise-srims-rework.onrender.com";
-}
+// The backend base URL now comes from js/api-base.js, which every page loads
+// before this script. That module is the single source of truth: the URL used
+// to be hardcoded here *and* in js/core/api.js with two different hosts, which
+// is what sent forecasting traffic to a retired deployment.
+const API_BASE_URL = (typeof window !== 'undefined' && window.RoadWiseApiBase)
+  ? window.RoadWiseApiBase.resolve()
+  : 'http://localhost:8080';
 
 function getAuthHeaders() {
   const token = localStorage.getItem('accessToken');
