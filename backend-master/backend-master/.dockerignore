@@ -1,0 +1,32 @@
+# Build context hygiene for the backend image.
+#
+# The image is assembled from src/ and pom.xml alone; everything below is either
+# rebuilt inside the build stage or is runtime data that must never ship in an
+# image layer.
+
+# Build output — the build stage runs `mvn clean package` itself
+target/
+build/
+*.class
+
+# Citizen-submitted evidence photos: runtime data, and until recently committed
+# to git. They belong in object storage or a mounted volume, not an image layer.
+uploads/
+
+# IDE and editor state
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+
+# Local tooling and logs
+mvnw.zip
+*.log
+*.tmp
+
+# VCS metadata (also excluded by the docker CLI's default context rules, kept
+# explicit so the intent survives a change of tooling)
+.git/
+.gitignore

@@ -1128,15 +1128,20 @@ const vm = require('node:vm');
 function loadApiBase(overrides = {}) {
   const source = fs.readFileSync(path.join(__dirname, 'js/api-base.js'), 'utf8');
   const warnings = [];
+  const errors = [];
   const sandbox = {
-    console: { warn: (message) => warnings.push(message), error() {}, log() {} },
+    console: {
+      warn: (message) => warnings.push(message),
+      error: (message) => errors.push(message),
+      log() {}
+    },
     ...overrides
   };
   if (overrides.location) sandbox.location = overrides.location;
   if (overrides.__ROADWISE_API_BASE__) sandbox.__ROADWISE_API_BASE__ = overrides.__ROADWISE_API_BASE__;
   vm.createContext(sandbox);
   vm.runInContext(source, sandbox);
-  return { api: sandbox.RoadWiseApiBase, warnings };
+  return { api: sandbox.RoadWiseApiBase, warnings, errors };
 }
 
 test('the runtime override wins over every other source', () => {
@@ -1160,11 +1165,50 @@ test('loopback and non-browser contexts resolve to the local backend', () => {
   }
 });
 
-test('an unconfigured deployed build warns loudly instead of guessing silently', () => {
-  const { api, warnings } = loadApiBase({ location: { hostname: 'roadwise.example.gov.ph' } });
-  assert.strictEqual(api.resolve(), api.LEGACY_API_BASE);
-  assert.strictEqual(warnings.length, 1, 'the deployment bug must be announced exactly once');
-  assert.match(warnings[0], /ROADWISE_API_BASE_URL was not set/);
+test('an unconfigured deployment refuses to guess a backend host', () => {
+  const { api, errors } = loadApiBase({ location: { hostname: 'roadwise.example.gov.ph' } });
+  assert.strictEqual(
+    api.resolve(),
+    '',
+    'an unconfigured deploy must fall back to same-origin (and 404), never to a guessed host'
+  );
+  assert.strictEqual(api.LEGACY_API_BASE, undefined, 'no legacy host may be baked in');
+  assert.strictEqual(errors.length, 1, 'the deployment bug must be announced exactly once');
+  assert.match(errors[0], /No backend base URL is configured/);
+});
+
+test('a production build refuses to run without ROADWISE_API_BASE_URL', () => {
+  const configPath = path.join(__dirname, 'webpack.config.prod.js');
+  const saved = {
+    base: process.env.ROADWISE_API_BASE_URL,
+    allow: process.env.ROADWISE_ALLOW_UNCONFIGURED_API_BASE
+  };
+  const fresh = () => {
+    delete require.cache[require.resolve(configPath)];
+    return require(configPath);
+  };
+  try {
+    delete process.env.ROADWISE_API_BASE_URL;
+    delete process.env.ROADWISE_ALLOW_UNCONFIGURED_API_BASE;
+    assert.throws(
+      fresh,
+      /ROADWISE_API_BASE_URL is not set/,
+      'an unconfigured production build must fail rather than ship'
+    );
+
+    process.env.ROADWISE_API_BASE_URL = 'https://api.example.gov.ph';
+    assert.ok(fresh(), 'a configured build must succeed');
+
+    delete process.env.ROADWISE_API_BASE_URL;
+    process.env.ROADWISE_ALLOW_UNCONFIGURED_API_BASE = '1';
+    assert.ok(fresh(), 'the documented escape hatch must still work');
+  } finally {
+    if (saved.base === undefined) delete process.env.ROADWISE_API_BASE_URL;
+    else process.env.ROADWISE_API_BASE_URL = saved.base;
+    if (saved.allow === undefined) delete process.env.ROADWISE_ALLOW_UNCONFIGURED_API_BASE;
+    else process.env.ROADWISE_ALLOW_UNCONFIGURED_API_BASE = saved.allow;
+    delete require.cache[require.resolve(configPath)];
+  }
 });
 
 test('the api module falls back to loopback rather than a hardcoded host', async () => {
@@ -1183,12 +1227,13 @@ test('every page that loads js/config.js loads js/api-base.js first', () => {
   }
 });
 
-test('only one file in the shipped source hardcodes a backend host', () => {
+test('no shipped source file hardcodes a backend host', () => {
   const sources = [
     'js/core/api.js',
     'js/config.js',
     'js/forecasting_ui.js',
     'js/app.js',
+    'js/api-base.js',
     'admin_dashboard.html',
     'barangay_dashboard.html',
     'ceo_dashboard.html',
@@ -1196,20 +1241,13 @@ test('only one file in the shipped source hardcodes a backend host', () => {
   ];
   const offenders = sources.filter((file) => {
     const source = fs.readFileSync(path.join(__dirname, file), 'utf8');
-    return /https?:\/\/[a-z0-9-]+\.onrender\.com/i.test(source);
+    return /https?:\/\/[a-z0-9-]+\.(onrender\.com|herokuapp\.com|fly\.dev)/i.test(source);
   });
   assert.deepStrictEqual(
     offenders,
     [],
-    `hardcoded deployment host(s) found in ${offenders.join(', ')} — they belong in js/api-base.js ` +
-      '(or, better, in the ROADWISE_API_BASE_URL build variable)'
-  );
-
-  const apiBase = fs.readFileSync(path.join(__dirname, 'js/api-base.js'), 'utf8');
-  assert.strictEqual(
-    (apiBase.match(/\.onrender\.com/gi) || []).length,
-    1,
-    'js/api-base.js must hold exactly one legacy fallback host'
+    `hardcoded deployment host(s) found in ${offenders.join(', ')} — the backend origin belongs in the ` +
+      'ROADWISE_API_BASE_URL build variable, never in source'
   );
 });
 

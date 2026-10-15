@@ -74,16 +74,6 @@ public class UserController {
     @Autowired
     private RateLimitService rateLimitService;
 
-    // ==========================================
-    // 🚀 HELPER: DYNAMICALLY FIND ADMIN ID
-    // ==========================================
-    private Long getAdminId() {
-        return userRepository.findAll().stream()
-                .filter(user -> user.getRole() != null && (user.getRole().equalsIgnoreCase("CPDO Admin") || user.getRole().equalsIgnoreCase("Admin")))
-                .map(User::getId)
-                .findFirst()
-                .orElse(1L);
-    }
 
     /**
      * True when the caller is the target user or a system administrator.
@@ -446,9 +436,11 @@ public class UserController {
             emailService.sendEmail(savedUser.getEmail(), subject, emailBody);
         }
 
-        String adminIdStr = payload.get("adminId");
-        Long adminId = (adminIdStr != null && !adminIdStr.isEmpty()) ? Long.valueOf(adminIdStr) : getAdminId();
-        User adminActor = userRepository.findById(adminId).orElse(null);
+        // AUDIT: the actor is the authenticated principal. A client-supplied
+        // adminId used to be honoured here, which let an authorised admin have a
+        // provisioning action attributed to a different account. Same rule as
+        // manageUserRecord and emergencyPasswordReset.
+        User adminActor = SecurityUtils.getCurrentUser();
 
         String brgyName = savedUser.getBarangay() != null ? savedUser.getBarangay().getBarangayName() : "City Central";
         activityLogService.log(
@@ -551,14 +543,11 @@ public class UserController {
 
         userRepository.save(user);
 
-        String adminIdStr = updates.get("adminId");
-        Long adminId = getAdminId();
-        if (adminIdStr != null && !adminIdStr.isEmpty()) {
-            try {
-                adminId = Long.valueOf(adminIdStr);
-            } catch (NumberFormatException ignored) {}
-        }
-        User adminActor = userRepository.findById(adminId).orElse(null);
+        // AUDIT: actor resolved from the authenticated principal. The
+        // client-supplied adminId in the request body is ignored so audit
+        // attribution cannot be forged — this path used to accept it, which is
+        // what emergencyPasswordReset already guards against.
+        User adminActor = SecurityUtils.getCurrentUser();
 
         String statusNotice = (newStatus != null && !newStatus.equalsIgnoreCase(oldStatus)) ? " Status changed to '" + newStatus + "'." : "";
         activityLogService.log(
@@ -629,9 +618,9 @@ public class UserController {
         // ⏱️ AUDIT: actor resolved from the authenticated principal; the client-supplied
         // adminId in the payload is ignored so audit attribution cannot be forged.
         User adminActor = SecurityUtils.getCurrentUser();
-        if (adminActor == null) {
-            adminActor = userRepository.findById(getAdminId()).orElse(null);
-        }
+        // No fallback to an arbitrary administrator: if the principal is somehow
+        // absent the entry is recorded as System Automation rather than
+        // attributed to whichever admin the query happened to return first.
 
         activityLogService.log(
                 adminActor,

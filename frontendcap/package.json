@@ -14,7 +14,7 @@
     "test": "node test.js",
     "audit:dom": "node tools/dom-contract.js",
     "audit:dom:all": "node tools/dom-contract.js --all",
-    "verify": "npm test && npm run audit:dom && npm run build",
+    "verify": "npm test && npm run audit:dom && node tools/build-unconfigured.js",
     "start": "webpack serve --open --config webpack.config.dev.js",
     "build": "webpack --config webpack.config.prod.js"
   },

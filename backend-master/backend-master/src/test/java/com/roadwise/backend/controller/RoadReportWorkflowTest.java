@@ -432,4 +432,73 @@ class RoadReportWorkflowTest {
                         .header("Authorization", "Bearer " + barangayToken))
                 .andExpect(status().isOk());
     }
+
+    /**
+     * The report list caps a Barangay Official to their own barangay, so the
+     * dashboard totals must be capped the same way — otherwise the endpoint is a
+     * way to read city-wide volumes the caller cannot list. Administrators keep
+     * the unscoped view.
+     */
+    @Test
+    void testDashboardStats_AreScopedByRole() throws Exception {
+        Barangay otherBarangay = new Barangay();
+        otherBarangay.setBarangayName("Other Barangay");
+        otherBarangay = barangayRepository.save(otherBarangay);
+
+        RoadReport mine = new RoadReport();
+        mine.setCityRoadName("Mine");
+        mine.setSeverity("High");
+        mine.setStatus("Pending Validation");
+        mine.setBarangay(testBarangay);
+        reportRepository.save(mine);
+
+        RoadReport theirs = new RoadReport();
+        theirs.setCityRoadName("Theirs");
+        theirs.setSeverity("Low");
+        theirs.setStatus("Pending Validation");
+        theirs.setBarangay(otherBarangay);
+        reportRepository.save(theirs);
+
+        // A Barangay Official sees only their own barangay's totals.
+        String barangayBody = mockMvc.perform(get("/api/reports/dashboard-stats")
+                        .header("Authorization", "Bearer " + barangayToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertTrue(barangayBody.contains("\"totalReports\":1"),
+                "official must not see city-wide totals: " + barangayBody);
+        assertTrue(barangayBody.contains("\"scope\":\"barangay\""), barangayBody);
+        assertFalse(barangayBody.contains("\"Low\""),
+                "another barangay's severities must not be counted: " + barangayBody);
+
+        // An administrator sees everything.
+        String adminBody = mockMvc.perform(get("/api/reports/dashboard-stats")
+                        .header("Authorization", "Bearer " + adminToken))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        assertTrue(adminBody.contains("\"totalReports\":2"), adminBody);
+        assertTrue(adminBody.contains("\"scope\":\"city-wide\""), adminBody);
+
+        // The two scopes must never share a cache entry.
+        assertNotEquals(barangayBody, adminBody);
+    }
+
+    @Test
+    void testDashboardStats_UnassignedOfficialIsDenied() throws Exception {
+        User unassigned = new User();
+        unassigned.setUsername("unassignedbrgy");
+        unassigned.setPassword("Password123!");
+        unassigned.setEmail("unassigned@example.com");
+        unassigned.setRole("BARANGAY");
+        unassigned.setFirstName("Unassigned");
+        unassigned.setLastName("Official");
+        unassigned.setStatus("Active");
+        userRepository.save(unassigned);
+        String token = jwtTokenProvider.generateAccessToken(unassigned);
+
+        mockMvc.perform(get("/api/reports/dashboard-stats")
+                        .header("Authorization", "Bearer " + token))
+                .andExpect(status().isForbidden());
+    }
 }

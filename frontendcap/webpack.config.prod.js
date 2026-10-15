@@ -8,6 +8,47 @@ const CopyPlugin = require('copy-webpack-plugin');
 // existing <script src="js/app.js"> tags in the templates resolve to it.
 // Pages are copied verbatim (no bundle injection), which preserves the
 // original script order and avoids double-loading the bundle.
+// ---------------------------------------------------------------------------
+// Deployment configuration guard.
+//
+// This build output is what ships, so the backend it will talk to must be known
+// at build time. A production bundle with no configured API base used to fall
+// back to a hardcoded Render host, which meant a misconfigured deploy could
+// serve a healthy-looking UI backed by a retired environment's data. Fail the
+// build instead — it is a one-line fix in the deploy settings, and it is the
+// only point at which the mistake is cheap.
+//
+// Set ROADWISE_API_BASE_URL to the backend origin, e.g.
+//   ROADWISE_API_BASE_URL=https://api.roadwise.example.gov.ph
+//
+// ROADWISE_ALLOW_UNCONFIGURED_API_BASE=1 is an explicit escape hatch for
+// throwaway builds (docs screenshots, offline demos). It is deliberately
+// awkward to type and is logged loudly on every build that uses it.
+// ---------------------------------------------------------------------------
+const configuredApiBase = (process.env.ROADWISE_API_BASE_URL || '').trim();
+const allowUnconfigured = process.env.ROADWISE_ALLOW_UNCONFIGURED_API_BASE === '1';
+
+if (!configuredApiBase && !allowUnconfigured) {
+  throw new Error(
+    'ROADWISE_API_BASE_URL is not set.\n' +
+      'The production bundle refuses to be built without a backend origin: shipping an ' +
+      'unconfigured frontend is how a deployment ends up talking to the wrong environment.\n\n' +
+      '  Vercel      : Project → Settings → Environment Variables → ROADWISE_API_BASE_URL, then redeploy\n' +
+      '  CI / shell  : ROADWISE_API_BASE_URL=https://your-backend npm run build\n\n' +
+      'For a throwaway build that is never deployed, set ' +
+      'ROADWISE_ALLOW_UNCONFIGURED_API_BASE=1 to continue with same-origin requests ' +
+      '(which will fail at runtime, by design).'
+  );
+}
+
+if (allowUnconfigured && !configuredApiBase) {
+  console.warn(
+    '[webpack] ROADWISE_ALLOW_UNCONFIGURED_API_BASE=1 — building without a backend ' +
+      'origin. This bundle cannot be deployed; every API call will hit its own origin ' +
+      'and fail.'
+  );
+}
+
 module.exports = merge(common, {
   mode: 'production',
   plugins: [

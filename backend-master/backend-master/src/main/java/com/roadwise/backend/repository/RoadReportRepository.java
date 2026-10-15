@@ -70,9 +70,24 @@ public interface RoadReportRepository extends JpaRepository<RoadReport, Long>, J
     // Database-side aggregations for dashboard statistics
     @Query("SELECT r.status, COUNT(r) FROM RoadReport r GROUP BY r.status")
     List<Object[]> countReportsGroupByStatus();
-
     @Query("SELECT r.severity, COUNT(r) FROM RoadReport r GROUP BY r.severity")
     List<Object[]> countReportsGroupBySeverity();
+
+    // ---------------------------------------------------------------
+    // Barangay-scoped aggregations.
+    //
+    // GET /api/reports/dashboard-stats is reachable by every authenticated
+    // role, while the report list scopes Barangay Officials to their own
+    // barangay. These mirror the list's scoping so the totals cannot be used
+    // to read city-wide volumes the caller is not entitled to.
+    // ---------------------------------------------------------------
+    @Query("SELECT r.status, COUNT(r) FROM RoadReport r WHERE r.barangay.id = :barangayId GROUP BY r.status")
+    List<Object[]> countReportsGroupByStatusForBarangay(@Param("barangayId") Long barangayId);
+
+    @Query("SELECT r.severity, COUNT(r) FROM RoadReport r WHERE r.barangay.id = :barangayId GROUP BY r.severity")
+    List<Object[]> countReportsGroupBySeverityForBarangay(@Param("barangayId") Long barangayId);
+
+    long countByBarangay_Id(Long barangayId);
 
     boolean existsByIdAndUser_Id(Long id, Long userId);
 

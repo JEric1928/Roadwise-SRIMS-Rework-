@@ -14,10 +14,16 @@
 //   1. window.__ROADWISE_API_BASE__  - runtime override (inline script or a
 //      host-specific config file dropped next to this one).
 //   2. Build-time ROADWISE_API_BASE_URL - substituted into BUILD_API_BASE by
-//      the CopyPlugin transform in webpack.config.prod.js.
+//      the CopyPlugin transform in webpack.config.prod.js. A production build
+//      refuses to be produced without it (guard in webpack.config.prod.js).
 //   3. http://localhost:8080 on loopback (and in a non-browser context).
-//   4. LEGACY_API_BASE - the host this repository hardcoded before the URL was
-//      configurable. Kept only so an unconfigured deployment keeps working.
+//   4. Same origin (empty base) plus a console error.
+//
+// There is deliberately no baked-in production host. An earlier revision fell
+// back to the legacy Render backend, so a misconfigured deploy could quietly
+// talk to a retired environment, serve stale data and still look healthy.
+// Failing visibly beats that: with an empty base the requests go to this
+// origin, 404, and the console says exactly why.
 //
 // This is an ES5 classic script on purpose: the dashboard pages load it with a
 // plain <script src> before the webpack bundle, and it must run in browsers that
@@ -32,11 +38,6 @@
 
   var LOCAL_API_BASE = 'http://localhost:8080';
 
-  // TEMPORARY. Remove this constant once ROADWISE_API_BASE_URL is set in the
-  // build environment (for Vercel: Project → Settings → Environment Variables,
-  // then redeploy). Until then an unconfigured production build keeps talking to
-  // the same host it always did.
-  var LEGACY_API_BASE = 'https://backend-hmxf.onrender.com';
 
   var warned = false;
 
@@ -60,21 +61,24 @@
 
     if (!warned) {
       warned = true;
-      // Deliberately loud: an unconfigured deployment is a deployment bug, and
-      // the old silent default is what let two hosts drift apart unnoticed.
-      console.warn(
-        '[RoadWise] ROADWISE_API_BASE_URL was not set at build time and no ' +
-        'window.__ROADWISE_API_BASE__ override is present. Falling back to ' +
-        'the legacy backend ' + LEGACY_API_BASE + '. Set the environment ' +
-        'variable and rebuild to make this explicit.'
+      // Deliberately loud. An unconfigured deployment is a deployment bug: the
+      // production build already refuses to run without ROADWISE_API_BASE_URL,
+      // so reaching this branch means the page was assembled by hand, an
+      // override was removed, or the helper script is missing.
+      console.error(
+        '[RoadWise] No backend base URL is configured: ROADWISE_API_BASE_URL was ' +
+        'not set at build time and no window.__ROADWISE_API_BASE__ override is ' +
+        'present. Requests will be sent to this origin and fail. Set the build ' +
+        'variable (see frontendcap/BROWSER_BASELINE.md §6) and rebuild.'
       );
     }
-    return LEGACY_API_BASE;
+    // Same origin, not a guessed host: a visible 404 is a better failure than a
+    // silent conversation with a retired environment.
+    return '';
   }
 
   global.RoadWiseApiBase = {
     resolve: resolve,
-    LOCAL_API_BASE: LOCAL_API_BASE,
-    LEGACY_API_BASE: LEGACY_API_BASE
+    LOCAL_API_BASE: LOCAL_API_BASE
   };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -20,14 +20,21 @@ template.
 | `SPRING_PROFILES_ACTIVE=dev` (or `prod` + all secrets) | Backend startup log; a missing `JWT_SECRET` under `prod` must abort startup |
 | Seeded accounts for all three roles | Barangay official, CPDO admin, CEO |
 | A road list and at least one barangay | Admin → Barangay & Road Management |
-| Build is current | `npm run verify` (tests + DOM audit + production build) |
+| Build is current | `npm run verify` (unit tests + DOM contract + a build check) |
+| Backend origin known to the build | `ROADWISE_API_BASE_URL` set (see §6). A plain `npm run build` refuses to run without it |
 
 Run the frontend:
 
 ```bash
-npm start            # dev server on :8081 (static: ./), talks to :8080
-# or serve dist/ from `npm run build` to test the shipped bundle
+ROADWISE_API_BASE_URL=https://your-backend npm run build   # then serve dist/
+# or, for iterative work:
+npm start        # webpack dev server; pass --port <n> if the backend already holds :8080
 ```
+
+Prefer the built `dist/` output for the baseline run: it is what actually
+deploys, and it is the only path where the API-base injection (§6) is exercised.
+`npm start` serves the source tree instead, so the pages load `js/app.js` as
+authored rather than the bundle — useful for iterating, not for verifying.
 
 Open DevTools → Console and Network before logging in, and keep both visible for
 the whole run. **A silent no-op is the failure mode here, not a crash** — the
@@ -112,17 +119,18 @@ This is the section that was fully broken. `#tracking-modal` was deleted in
 | 5.2 | Reload a dashboard after > 15 min idle | The session-verify bouncer issues one `/api/auth/refresh` and stays put instead of bouncing to `login.html` |
 | 5.3 | Sign out | Returns to `login.html`; `localStorage` has no `accessToken`/`refreshToken`; reopening a dashboard URL redirects to login |
 | 5.4 | Log in in a second tab, sign out in the first | The second tab receives the cross-tab logout and redirects |
-| 5.5 | Network tab, whole run | Exactly one backend host. If you see requests to two different `*.onrender.com` hosts, the build was made without `ROADWISE_API_BASE_URL` — see §6 |
-| 5.6 | Console, whole run | No `[RoadWise] ROADWISE_API_BASE_URL was not set` warning |
+| 5.5 | Network tab, whole run | Requests go to exactly one host — the one you configured in §6. A second host, or requests hitting the page's own origin, means the build was made unconfigured |
+| 5.6 | Console, whole run | No `[RoadWise] No backend base URL is configured` error |
 | 5.7 | Trigger an AI severity assessment on a low-confidence photo | Response carries `reviewRequired: true`; the UI shows it as needing human review rather than asserting a severity |
 
 ## 6. Deployment configuration checks
 
 | # | Check | Expected |
 |---|---|---|
-| 6.1 | Set `ROADWISE_API_BASE_URL` and rebuild | `grep -c __ROADWISE_BUILD_API_BASE__ dist/js/api-base.js` → `0`; the variable's value appears instead |
-| 6.2 | Load `dist/admin_dashboard.html` | `window.RoadWiseApiBase.resolve()` in the console returns the configured host |
-| 6.3 | Load a page and check the script order | `js/api-base.js` is requested **before** `js/config.js`; a 404 on `js/api-base.js` means every call falls back to `localhost:8080` and fails loudly (by design) |
+| 6.1 | Run `npm run build` with no `ROADWISE_API_BASE_URL` | The build **fails** with an actionable message; no artefact is produced. This is the guard that stops an unconfigured bundle from shipping |
+| 6.2 | Set `ROADWISE_API_BASE_URL` and rebuild | Build succeeds; `grep -c __ROADWISE_BUILD_API_BASE__ dist/js/api-base.js` → `0`, and the configured value appears instead |
+| 6.3 | Load `dist/admin_dashboard.html` | `window.RoadWiseApiBase.resolve()` in the console returns the configured host |
+| 6.4 | Load a page and check the script order | `js/api-base.js` is requested **before** `js/config.js`. A 404 on it means every call falls back to loopback (dev) or same-origin (deployed) and fails visibly — by design, never to a guessed host |
 
 ---
 

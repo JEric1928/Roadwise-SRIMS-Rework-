@@ -1,9 +1,61 @@
-FROM eclipse-temurin:17-jdk-jammy
+# ---------------------------------------------------------------------------
+# Build stage
+#
+# Compiles and tests with the full JDK. The test suite runs here on purpose: a
+# revision that cannot pass its own tests must not produce an image.
+# ---------------------------------------------------------------------------
+FROM eclipse-temurin:17-jdk-jammy AS build
+
+WORKDIR /build
+
+# pom.xml changes far less often than source, so resolving dependencies in its
+# own layer keeps most rebuilds off the network.
+#
+# Pre-fetching is best-effort on purpose: `dependency:go-offline` is known to
+# fail on some plugin resolutions, and a failure there should not sink an
+# otherwise-buildable revision. Whatever it misses is fetched by the package
+# step below.
+COPY .mvn/ .mvn/
+COPY mvnw pom.xml ./
+RUN chmod +x mvnw \
+    && (./mvnw -B dependency:go-offline \
+        || echo "dependency pre-fetch skipped; the package step will resolve them")
+
+COPY src/ src/
+RUN ./mvnw -B clean package
+
+# ---------------------------------------------------------------------------
+# Runtime stage
+#
+# JRE only, non-root, no source tree, no Maven, no test artefacts. The previous
+# single-stage image ran the application as root and shipped the whole build
+# context (JDK + Maven + full source), which is both unnecessary attack surface
+# and a much larger image.
+# ---------------------------------------------------------------------------
+FROM eclipse-temurin:17-jre-jammy
+
+# Unprivileged system account. No login shell; the app never needs one.
+RUN groupadd --system --gid 10001 roadwise \
+    && useradd --system --uid 10001 --gid roadwise --no-create-home --shell /usr/sbin/nologin roadwise
+
 WORKDIR /app
-COPY . .
-RUN chmod +x mvnw
-# Run the test suite as part of the image build so a broken revision cannot
-# be published. Tests use an in-memory H2 database and mocked external services.
-RUN ./mvnw clean package
+
+COPY --from=build --chown=roadwise:roadwise /build/target/backend-0.0.1-SNAPSHOT.jar /app/app.jar
+
+# RoadReportController/WebConfig serve /uploads/** relative to the working
+# directory. Uploads are runtime data — never baked into the image — so the
+# directory must exist and be writable by the application user. Mount a volume
+# here, or persist evidence in object storage (Supabase is the active store).
+RUN mkdir -p /app/uploads && chown -R roadwise:roadwise /app
+
+USER roadwise
+
 EXPOSE 8080
-CMD ["java", "-jar", "target/backend-0.0.1-SNAPSHOT.jar"]
+
+# The JVM is container-aware (UseContainerSupport is the default) and sizes the
+# heap from the cgroup limit. MaxRAMPercentage leaves headroom for metaspace,
+# threads and direct buffers, which is what tends to OOM a container first when
+# the heap is allowed to grow to 100% of the limit.
+ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+ExitOnOutOfMemoryError"
+
+CMD ["java", "-jar", "/app/app.jar"]

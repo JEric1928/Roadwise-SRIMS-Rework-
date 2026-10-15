@@ -14,7 +14,6 @@ import jakarta.persistence.criteria.Predicate;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.data.domain.*;
@@ -45,6 +44,9 @@ public class RoadReportController {
 
     @Autowired
     private RoadReportRepository repository;
+
+    @Autowired
+    private DashboardStatsService dashboardStatsService;
 
     @Autowired
     private BarangayRepository barangayRepository;
@@ -428,30 +430,32 @@ public class RoadReportController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * Dashboard totals, scoped to the caller's entitlement.
+     *
+     * <p>The report list caps a Barangay Official to their own barangay; these
+     * totals must match, or the endpoint becomes a way to read city-wide
+     * volumes the caller cannot list. Administrators and the city engineering
+     * office keep the unscoped view.</p>
+     *
+     * <p>Scoping and caching both live in {@link DashboardStatsService}: the
+     * cache key has to include the scope, and a {@code @Cacheable} on this
+     * method would be keyed on nothing at all — it would hand whichever scope
+     * happened to be computed first to every later caller.</p>
+     */
     @GetMapping("/dashboard-stats")
-    @Cacheable("dashboardStats")
     public ResponseEntity<?> getDashboardStats() {
-        Map<String, Object> stats = new HashMap<>();
+        User currentUser = getAuthenticatedUser();
 
-        Map<String, Long> statusCounts = new HashMap<>();
-        for (Object[] row : repository.countReportsGroupByStatus()) {
-            if (row[0] != null) {
-                statusCounts.put(row[0].toString(), (Long) row[1]);
+        Long scopeBarangayId = null;
+        if (isBarangayRole(currentUser)) {
+            if (currentUser.getBarangay() == null) {
+                throw new AccessDeniedException("Access denied: your account is not assigned to a barangay.");
             }
+            scopeBarangayId = currentUser.getBarangay().getId();
         }
 
-        Map<String, Long> severityCounts = new HashMap<>();
-        for (Object[] row : repository.countReportsGroupBySeverity()) {
-            if (row[0] != null) {
-                severityCounts.put(row[0].toString(), (Long) row[1]);
-            }
-        }
-
-        stats.put("statusCounts", statusCounts);
-        stats.put("severityCounts", severityCounts);
-        stats.put("totalReports", repository.count());
-
-        return ResponseEntity.ok(stats);
+        return ResponseEntity.ok(dashboardStatsService.getStats(scopeBarangayId));
     }
 
     @GetMapping("/{id}")
