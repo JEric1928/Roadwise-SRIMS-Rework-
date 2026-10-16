@@ -691,10 +691,9 @@ window.loadDynamicInventoryYears = function() {
     endpoint = `/api/reports/barangay/${barangayId}`;
   }
 
-  fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: { ...getAuthHeaders(), "ngrok-skip-browser-warning": "true" }
-  })
-    .then(res => res.json())
+  // apiFetch unwraps Spring's paged envelope and handles token refresh. The raw fetch
+  // this replaced received {content:[…]}, which the Array.isArray guard below dropped.
+  apiFetch(endpoint, { headers: { "ngrok-skip-browser-warning": "true" } })
     .then(reports => {
       if (!Array.isArray(reports)) return;
 
@@ -798,13 +797,9 @@ window.openAnnualReportPreview = async function() {
     endpoint = `/api/reports/barangay/${barangayId}`;
   }
 
-  fetch(`${API_BASE_URL}${endpoint}`, {
-    headers: { ...getAuthHeaders(), "ngrok-skip-browser-warning": "true" }
-  })
-    .then(res => {
-      if (!res.ok) throw new Error("Failed to fetch reports.");
-      return res.json();
-    })
+  // Routed through apiFetch for the same reason as loadDynamicInventoryYears: it unwraps
+  // the paged envelope, so `reports` is the array this chain was already expecting.
+  apiFetch(endpoint, { headers: { "ngrok-skip-browser-warning": "true" } })
     .then(reports => {
       if (!Array.isArray(reports) || reports.length === 0) {
         if (typeof showToast === 'function') showToast("No reports found to generate preview.", "info");

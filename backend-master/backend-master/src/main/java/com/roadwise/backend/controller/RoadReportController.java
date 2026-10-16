@@ -356,7 +356,17 @@ public class RoadReportController {
     // ==========================================
     // GET REPORTS WITH PAGINATION & FILTERING
     // ==========================================
+    /**
+     * Report reads run inside a read-only transaction.
+     *
+     * <p>{@code spring.jpa.open-in-view=false} (application.properties), so the entities a
+     * repository call returns are already detached by the time this method maps them.
+     * {@link ReportListDto#fromEntity} reads the lazy {@code barangay} association, which
+     * without a transaction boundary raises {@code LazyInitializationException} — a 500 for
+     * every report that has a barangay, which is every report filed through the form.</p>
+     */
     @GetMapping
+    @Transactional(readOnly = true)
     public ResponseEntity<?> getAllReports(
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "50") int size,
@@ -459,6 +469,11 @@ public class RoadReportController {
     }
 
     @GetMapping("/{id}")
+    // The entity itself is the response body, so Jackson resolves barangay/user after this
+    // method — and therefore its transaction — has returned. The boundary keeps the access
+    // check below inside a session; the fetch graph on RoadReportRepository.findById is what
+    // makes the associations present for the serializer.
+    @Transactional(readOnly = true)
     public ResponseEntity<RoadReport> getReportById(@PathVariable Long id) {
         User currentUser = getAuthenticatedUser();
         RoadReport report = repository.findById(id)
@@ -470,6 +485,9 @@ public class RoadReportController {
     }
 
     @GetMapping("/barangay/{barangayId}")
+    // Same reasoning as GET /{id}: raw entities are serialized after the transaction ends,
+    // so their associations have to arrive with the query rather than on first access.
+    @Transactional(readOnly = true)
     public List<RoadReport> getReportsByBarangay(@PathVariable Long barangayId) {
         User currentUser = getAuthenticatedUser();
         if (isBarangayRole(currentUser)) {

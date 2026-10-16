@@ -2,10 +2,12 @@ package com.roadwise.backend.repository;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import com.roadwise.backend.model.RoadReport;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
@@ -15,8 +17,22 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface RoadReportRepository extends JpaRepository<RoadReport, Long>, JpaSpecificationExecutor<RoadReport> {
 
-    List<RoadReport> findByBarangay_Id(Long barangayId);
+    /**
+     * Report detail loads the lazy {@code barangay} and {@code user} associations up front.
+     *
+     * <p>{@code GET /api/reports/{id}} answers with the entity itself and
+     * {@code open-in-view} is off, so Jackson resolves those associations after the
+     * controller's transaction has closed: a plain {@code findById} answers 500 instead.
+     * {@code user.barangay} is named because the serializer walks it transitively, and an
+     * entity graph demotes every association it does not name back to lazy.</p>
+     */
+    @Override
+    @EntityGraph(attributePaths = {"barangay", "user", "user.barangay"})
+    Optional<RoadReport> findById(Long id);
 
+    List<RoadReport> findByBarangay_Id(Long barangayId);
+    // GET /api/reports/barangay/{id} serializes raw entities too; see findById above.
+    @EntityGraph(attributePaths = {"barangay", "user", "user.barangay"})
     List<RoadReport> findByBarangay_IdOrderByIdDesc(Long barangayId);
 
     List<RoadReport> findByStatusIgnoreCase(String status);

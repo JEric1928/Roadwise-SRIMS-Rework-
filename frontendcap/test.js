@@ -1115,6 +1115,108 @@ test('a refresh that fails on one caller does not strand the others', async () =
 });
 
 // ============================================================================
+// PAGED REPORT ENVELOPE
+//
+// GET /api/reports answers with Spring's PageResponseDto
+// ({content:[…], page, size, totalElements, totalPages, last}). Every report
+// screen indexed it as a bare array, so the admin inbox, CEO dashboard, global
+// maps, priority list and repair tracking either threw a TypeError or silently
+// rendered nothing. js/core/api.js unwraps it once, for every caller.
+// ============================================================================
+
+test('apiFetch unwraps the paged report envelope into its content array', async () => {
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { apiFetch } = await import(apiUrl);
+    globalThis.fetch = async () => jsonResponse(200, {
+      content: [{ id: 1, status: 'Pending' }, { id: 2, status: 'Validated' }],
+      page: 0,
+      size: 50,
+      totalElements: 2,
+      totalPages: 1,
+      last: true
+    });
+
+    await withStorage({ accessToken: 'token' }, async () => {
+      const reports = await apiFetch('/api/reports');
+
+      assert.deepStrictEqual(reports, [
+        { id: 1, status: 'Pending' },
+        { id: 2, status: 'Validated' }
+      ], 'callers must receive the array, never the envelope');
+      assert.strictEqual(typeof reports.filter, 'function', 'filter() throwing here is the bug being pinned');
+      assert.strictEqual(reports.pagination.totalElements, 2, 'the totals must survive the unwrap');
+      assert.strictEqual(reports.pagination.totalPages, 1);
+      assert.strictEqual(reports.pagination.last, true);
+    });
+  } finally {
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+
+test('the paging metadata stays invisible to the array it rides on', async () => {
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { apiFetch } = await import(apiUrl);
+    globalThis.fetch = async () => jsonResponse(200, {
+      content: [{ id: 1 }], page: 0, size: 50, totalElements: 1, totalPages: 1, last: true
+    });
+
+    await withStorage({ accessToken: 'token' }, async () => {
+      const reports = await apiFetch('/api/reports');
+
+      assert.deepStrictEqual(Object.keys(reports), ['0'], 'spreading and deep equality must not see it');
+      assert.strictEqual(JSON.stringify(reports), '[{"id":1}]');
+    });
+  } finally {
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+
+test('an empty page unwraps to an empty array', async () => {
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { apiFetch } = await import(apiUrl);
+    globalThis.fetch = async () => jsonResponse(200, {
+      content: [], page: 0, size: 50, totalElements: 0, totalPages: 0, last: true
+    });
+
+    await withStorage({ accessToken: 'token' }, async () => {
+      assert.deepStrictEqual(await apiFetch('/api/reports'), [],
+        'an empty page is a real empty list, not a missing response');
+    });
+  } finally {
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+
+test('responses that merely look paged are passed through untouched', async () => {
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { apiFetch } = await import(apiUrl);
+
+    const bodies = [
+      [{ id: 1 }],
+      { content: [{ id: 1 }] },
+      { content: [{ id: 1 }], totalPages: 1 },
+      { detail: 'not a list at all' }
+    ];
+
+    await withStorage({ accessToken: 'token' }, async () => {
+      for (const body of bodies) {
+        globalThis.fetch = async () => jsonResponse(200, body);
+        assert.deepStrictEqual(await apiFetch('/api/reports'), body);
+      }
+    });
+  } finally {
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+// ============================================================================
 // BACKEND BASE URL
 //
 // The base URL used to be hardcoded twice with two different hosts: js/config.js

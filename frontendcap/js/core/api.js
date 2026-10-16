@@ -164,6 +164,46 @@ export function getErrorMessage(status, fallbackText = "Request failed") {
   }
 }
 
+/**
+ * Unwraps Spring's PageResponseDto envelope into its `content` array.
+ *
+ * GET /api/reports is the only paged endpoint and answers
+ * `{content:[…], page, size, totalElements, totalPages, last}`. Every report
+ * screen treats that response as a bare array: the ones without a guard threw a
+ * TypeError, and the ones guarding with Array.isArray rendered "no records"
+ * instead — the admin inbox, CEO dashboard, global maps, priority list and
+ * repair tracking all silently showed nothing. Unwrapping once here fixes all
+ * of them, including whichever screen is written next.
+ *
+ * The paging metadata is not discarded: it rides on the returned array as a
+ * non-enumerable `pagination` property, so a caller that wants to page can read
+ * `result.pagination.totalPages` while spreading, JSON serialization and
+ * deepStrictEqual stay blind to it.
+ */
+export function unwrapPagedResponse(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+
+  const isPagedEnvelope = Array.isArray(body.content)
+    && typeof body.page === 'number'
+    && typeof body.totalPages === 'number';
+  if (!isPagedEnvelope) return body;
+
+  const items = body.content;
+  Object.defineProperty(items, 'pagination', {
+    value: {
+      page: body.page,
+      size: body.size,
+      totalElements: body.totalElements,
+      totalPages: body.totalPages,
+      last: body.last
+    },
+    enumerable: false,
+    writable: false,
+    configurable: true
+  });
+  return items;
+}
+
 export async function apiFetch(endpoint, options = {}) {
   // stepUpRetried and refreshRetried are internal bookkeeping: each marks the
   // single replay allowed after a step-up prompt or a token refresh, so a
@@ -240,7 +280,7 @@ export async function apiFetch(endpoint, options = {}) {
 
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
-    return response.json();
+    return unwrapPagedResponse(await response.json());
   }
   return response;
 }

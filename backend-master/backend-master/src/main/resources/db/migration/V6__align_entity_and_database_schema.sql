@@ -61,6 +61,11 @@ BEGIN
     END IF;
 END $$;
 
+-- Pre-migration notifications were not always addressed to a user (this column was
+-- renamed from user_id), and a notification with no recipient can never be read by
+-- anyone. Clearing them is what lets the constraint be enforced on a legacy database
+-- instead of failing the whole migration on rows that are already unreachable.
+DELETE FROM notifications WHERE recipient_id IS NULL;
 ALTER TABLE notifications ALTER COLUMN recipient_id SET NOT NULL;
 
 -- The entity does not map the legacy report_id FK (notifications carry a free-form
