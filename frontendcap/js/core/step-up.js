@@ -15,6 +15,10 @@
  * imports this module.
  */
 
+
+// Not api.js: this module is imported *by* api.js, so importing it back would be a
+// cycle. auth-storage.js imports nothing, which is why the token helpers live there.
+import { readAuthToken, writeAuthItem } from './auth-storage.js';
 const MODAL_ID = "roadwise-stepup-modal";
 
 // Only one prompt at a time: two parallel 403s must not stack two modals, and
@@ -145,7 +149,7 @@ function openPrompt(apiBaseUrl, resolve, reject) {
     errorLine.style.display = "none";
 
     try {
-      const token = typeof localStorage !== "undefined" ? localStorage.getItem("accessToken") : null;
+      const token = readAuthToken("accessToken");
       const response = await fetch(`${apiBaseUrl}/api/auth/step-up`, {
         method: "POST",
         headers: {
@@ -176,7 +180,7 @@ function openPrompt(apiBaseUrl, resolve, reject) {
       // The elevated token replaces the session token in place: every later
       // apiFetch call reads it fresh, including the replay that triggered us.
       try {
-        localStorage.setItem("accessToken", body.accessToken);
+        writeAuthItem("accessToken", body.accessToken);
       } catch (storageError) {
         // Storage unavailable (private mode): the replay will still carry the
         // old token and fail the same way, which is the honest outcome.

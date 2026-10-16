@@ -8,7 +8,12 @@ const API_BASE_URL = (typeof window !== 'undefined' && window.RoadWiseApiBase)
   : 'http://localhost:8080';
 
 function getAuthHeaders() {
-  const token = localStorage.getItem('accessToken');
+  // Delegates to the bundle's reader (js/core/auth-storage.js) so a session stored in
+  // sessionStorage is found too. This file ships as a classic script and cannot import
+  // it; the header is only built when a request is made, long after the bundle ran.
+  const token = (typeof window !== 'undefined' && typeof window.readAuthToken === 'function')
+    ? window.readAuthToken('accessToken')
+    : null;
   const headers = {
     'Content-Type': 'application/json'
   };

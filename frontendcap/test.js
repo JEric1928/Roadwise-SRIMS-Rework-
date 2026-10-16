@@ -964,14 +964,18 @@ test('auth endpoints are never eligible for automatic refresh', async () => {
     '/api/auth/refresh',
     '/api/auth/logout',
     '/api/auth/verify-mfa',
-    '/api/auth/mfa/overview',
+    '/api/auth/logout-all',
     '/api/auth/forgot-password/request',
     'http://localhost:8080/api/auth/logout'
   ]) {
     assert.strictEqual(isRefreshableEndpoint(endpoint), false, `${endpoint} must not refresh`);
   }
 
-  for (const endpoint of ['/api/reports', '/api/reports/12/timeline', '/api/activity-logs']) {
+  // The MFA *management* screens (overview, factors, recovery codes) need a live
+  // session, so they must be able to rotate an expired access token like any other
+  // authenticated call. Matching the `mfa/` prefix in the exclusion list meant a 401
+  // there dropped the user to login instead of refreshing.
+  for (const endpoint of ['/api/reports', '/api/reports/12/timeline', '/api/activity-logs', '/api/auth/mfa/overview', '/api/auth/mfa/factors', '/api/auth/mfa/recovery-codes']) {
     assert.strictEqual(isRefreshableEndpoint(endpoint), true, `${endpoint} should be refreshable`);
   }
 });
@@ -1412,4 +1416,296 @@ test('the retired global topic is not requested by any role', async () => {
     assert.notStrictEqual(liveUpdateChannel(role, barangayId), '/topic/updates',
       `${role} must not ask for the retired global topic`);
   }
+});
+
+
+// ============================================================================
+// SESSION SCOPE, "REMEMBER ME", AND CROSS-TAB REFRESH
+//
+// Tokens were written to localStorage unconditionally while identity lived in
+// sessionStorage, so the two halves of a session disagreed: "remember me" only saved a
+// username, an unticked login still parked a 7-day refresh token on disk, and a
+// remembered session looked signed out in a new tab. These tests pin the scope rules,
+// the boot restore, and the cross-tab rotation recovery that stops a second tab from
+// presenting an already-spent refresh token — which the server treats as theft and
+// answers by revoking every session the user has.
+// ============================================================================
+
+const authStorageUrl = pathToFileURL(path.join(__dirname, 'js/core/auth-storage.js')).href;
+
+/** A Map-backed storage double, plus the Map itself so tests can inspect writes. */
+function storageDouble(initial) {
+  const store = new Map(Object.entries(initial));
+  return {
+    store,
+    api: {
+      getItem: (key) => (store.has(key) ? store.get(key) : null),
+      setItem: (key, value) => store.set(key, String(value)),
+      removeItem: (key) => store.delete(key),
+      clear: () => store.clear()
+    }
+  };
+}
+
+/**
+ * Installs both storage doubles. withStorage() doubles only localStorage, which was
+ * enough while every credential lived there; scoping a session needs both.
+ */
+async function withAuthStores(initial, run) {
+  const descriptors = {
+    localStorage: Object.getOwnPropertyDescriptor(globalThis, 'localStorage'),
+    sessionStorage: Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage')
+  };
+  const local = storageDouble(initial.local || {});
+  const session = storageDouble(initial.session || {});
+
+  Object.defineProperty(globalThis, 'localStorage', { value: local.api, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'sessionStorage', { value: session.api, configurable: true, writable: true });
+
+  try {
+    return await run({ local: local.store, session: session.store });
+  } finally {
+    for (const name of ['localStorage', 'sessionStorage']) {
+      if (descriptors[name]) Object.defineProperty(globalThis, name, descriptors[name]);
+      else delete globalThis[name];
+    }
+  }
+}
+
+test('"remember me" decides the scope: ticked is durable, unticked is tab-only', async () => {
+  const { beginSession, readAuthToken, writeAuthTokens, writeIdentity } =
+    await import(authStorageUrl);
+
+  await withAuthStores({}, async ({ local, session }) => {
+    session.set('unrelatedTabState', 'keep me');
+
+    beginSession(true);
+    writeAuthTokens({ accessToken: 'access-1', refreshToken: 'refresh-1' });
+    writeIdentity({ userId: '7', userRole: 'Admin' });
+
+    assert.strictEqual(local.get('accessToken'), 'access-1');
+    assert.strictEqual(local.get('refreshToken'), 'refresh-1');
+    assert.strictEqual(local.get('userId'), '7');
+    assert.strictEqual(local.get('userRole'), 'Admin');
+    assert.strictEqual(session.get('refreshToken'), undefined,
+      'a remembered session must not also be duplicated into the tab scope');
+    assert.strictEqual(readAuthToken('refreshToken'), 'refresh-1');
+  });
+
+  await withAuthStores({}, async ({ local, session }) => {
+    session.set('unrelatedTabState', 'keep me');
+
+    beginSession(false);
+    writeAuthTokens({ accessToken: 'access-2', refreshToken: 'refresh-2' });
+    writeIdentity({ userId: '9', userRole: 'CEO' });
+
+    assert.strictEqual(session.get('refreshToken'), 'refresh-2');
+    assert.strictEqual(session.get('userId'), '9');
+    assert.strictEqual(local.get('refreshToken'), undefined,
+      'an unticked "remember me" must not leave a refresh token on disk');
+    assert.strictEqual(local.get('userId'), undefined);
+    assert.strictEqual(session.get('unrelatedTabState'), 'keep me',
+      'starting a session must not wipe unrelated tab state');
+  });
+});
+
+test('a remembered session is restored into a new tab; a tab-only one is not', async () => {
+  const { restoreRememberedSession } = await import(authStorageUrl);
+
+  await withAuthStores({
+    local: {
+      roadwise_session_scope: 'local',
+      accessToken: 'durable-access',
+      refreshToken: 'durable-refresh',
+      userId: '7',
+      userRole: 'Admin',
+      firstName: 'Ana'
+    }
+  }, async ({ session }) => {
+    assert.strictEqual(restoreRememberedSession(), true);
+    assert.strictEqual(session.get('userId'), '7');
+    assert.strictEqual(session.get('userRole'), 'Admin');
+    assert.strictEqual(session.get('firstName'), 'Ana');
+  });
+
+  await withAuthStores({
+    local: {
+      roadwise_session_scope: 'session',
+      accessToken: 'tab-access',
+      refreshToken: 'tab-refresh',
+      userId: '7',
+      userRole: 'Admin'
+    }
+  }, async ({ session }) => {
+    assert.strictEqual(restoreRememberedSession(), false,
+      'a session the user chose not to remember must not reappear in a new tab');
+    assert.strictEqual(session.get('userId'), undefined);
+  });
+
+  await withAuthStores({ local: { roadwise_session_scope: 'local' } }, async ({ session }) => {
+    assert.strictEqual(restoreRememberedSession(), false,
+      'with no token stored there is no session to restore');
+    assert.strictEqual(session.get('userId'), undefined);
+  });
+});
+
+test('a session predating the scope marker is recovered from its profile blob', async () => {
+  const { restoreRememberedSession } = await import(authStorageUrl);
+
+  // Signed in before this change: tokens in localStorage, identity only in the tab
+  // that performed the login. The profile blob is the only durable copy of who they
+  // are, and it was written to localStorage by the login path of the day.
+  await withAuthStores({
+    local: {
+      refreshToken: 'legacy-refresh',
+      currentUser: JSON.stringify({ id: 42, role: 'CEO', firstName: 'Luis', lastName: 'Reyes' })
+    }
+  }, async ({ session }) => {
+    assert.strictEqual(restoreRememberedSession(), true);
+    assert.strictEqual(session.get('userId'), '42');
+    assert.strictEqual(session.get('userRole'), 'CEO');
+    assert.strictEqual(session.get('firstName'), 'Luis');
+    assert.strictEqual(session.get('lastName'), 'Reyes');
+  });
+});
+
+test('logout clears both scopes and keeps only the remembered username', async () => {
+  const { clearAuthSession } = await import(authStorageUrl);
+
+  await withAuthStores({
+    local: {
+      roadwise_session_scope: 'local',
+      accessToken: 'access',
+      refreshToken: 'refresh',
+      userId: '7',
+      userRole: 'Admin',
+      user: '{"id":7}',
+      currentUser: '{"id":7}',
+      roadwise_remembered_username: 'ana'
+    },
+    session: { userId: '7', userRole: 'Admin', mfaToken: 'pending', firstName: 'Ana' }
+  }, async ({ local, session }) => {
+    clearAuthSession();
+
+    for (const key of ['accessToken', 'refreshToken', 'userId', 'userRole', 'user', 'currentUser', 'roadwise_session_scope']) {
+      assert.strictEqual(local.get(key), undefined, `${key} must not survive logout in localStorage`);
+    }
+    assert.strictEqual(session.size, 0, 'the tab scope must be empty after logout');
+    assert.strictEqual(local.get('roadwise_remembered_username'), 'ana',
+      'the remembered username is the one thing logout keeps, and it is not a credential');
+  });
+});
+
+test('a tab-scoped session still authenticates requests', async () => {
+  const { getAuthOnlyHeaders, getAuthHeaders } = await import(apiUrl);
+
+  await withAuthStores({
+    local: { roadwise_session_scope: 'session' },
+    session: { accessToken: 'tab-only-access' }
+  }, async () => {
+    assert.strictEqual(getAuthOnlyHeaders().Authorization, 'Bearer tab-only-access');
+    assert.strictEqual(getAuthHeaders().Authorization, 'Bearer tab-only-access');
+  });
+});
+
+test('a tab queued behind another tab\'s rotation adopts those tokens instead of replaying', async () => {
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { refreshAccessToken } = await import(apiUrl);
+    let store = null;
+    const lockNames = [];
+
+    Object.defineProperty(globalThis, 'navigator', {
+      value: {
+        locks: {
+          request: (name, task) => {
+            lockNames.push(name);
+            // What the tab holding the lock did while this one queued: it spent the
+            // refresh token we were about to spend.
+            store.set('accessToken', 'won-elsewhere');
+            store.set('refreshToken', 'rotated-elsewhere');
+            return Promise.resolve().then(task);
+          }
+        }
+      },
+      configurable: true,
+      writable: true
+    });
+
+    let calls = 0;
+    globalThis.fetch = async () => {
+      calls++;
+      return jsonResponse(200, { accessToken: 'should-not-be-used', refreshToken: 'unused' });
+    };
+
+    await withAuthStores({
+      local: { roadwise_session_scope: 'local', accessToken: 'stale', refreshToken: 'stored-refresh' }
+    }, async ({ local }) => {
+      store = local;
+      assert.strictEqual(await refreshAccessToken(), 'won-elsewhere');
+    });
+
+    assert.deepStrictEqual(lockNames, ['roadwise.refresh-token'],
+      'the rotation must be serialised across tabs');
+    assert.strictEqual(calls, 0,
+      'the queued tab must not present a refresh token the winner already spent');
+  } finally {
+    if (navigatorDescriptor) Object.defineProperty(globalThis, 'navigator', navigatorDescriptor);
+    else delete globalThis.navigator;
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+
+test('a refresh rejected as reuse is recovered when another tab rotated first', async () => {
+  const originals = { fetch: globalThis.fetch };
+  try {
+    const { refreshAccessToken } = await import(apiUrl);
+
+    await withAuthStores({
+      local: { roadwise_session_scope: 'local', accessToken: 'stale', refreshToken: 'stored-refresh' }
+    }, async ({ local }) => {
+      let calls = 0;
+      globalThis.fetch = async () => {
+        calls++;
+        // The server refuses the token as already-spent. Without the storage check this
+        // is indistinguishable from a stolen token, which is why the client used to
+        // treat it as the end of the session.
+        local.set('accessToken', 'won-by-other-tab');
+        local.set('refreshToken', 'rotated-refresh');
+        return jsonResponse(401, { error: 'Refresh token reuse detected.' });
+      };
+
+      assert.strictEqual(await refreshAccessToken(), 'won-by-other-tab');
+      assert.strictEqual(calls, 1, 'the spent token must not be presented twice');
+      assert.strictEqual(local.get('accessToken'), 'won-by-other-tab',
+        'the winning tab\'s token must be left alone');
+    });
+  } finally {
+    if (originals.fetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originals.fetch;
+  }
+});
+
+test('identity edits are mirrored into durable storage only when remembered', async () => {
+  const { beginSession, writeIdentity } = await import(authStorageUrl);
+
+  await withAuthStores({}, async ({ local, session }) => {
+    beginSession(true);
+    writeIdentity({ firstName: 'Ana' });
+
+    assert.strictEqual(session.get('firstName'), 'Ana', 'the tab copy is what the UI reads');
+    assert.strictEqual(local.get('firstName'), 'Ana',
+      'a remembered session must not lose a profile edit on the next tab');
+  });
+
+  await withAuthStores({}, async ({ local, session }) => {
+    beginSession(false);
+    writeIdentity({ firstName: 'Ana' });
+
+    assert.strictEqual(session.get('firstName'), 'Ana');
+    assert.strictEqual(local.get('firstName'), undefined,
+      'a tab-only session must not persist identity to disk');
+  });
 });

@@ -9,6 +9,7 @@
  * Entry point: idempotent initProfileAccount().
  */
 import { API_BASE_URL, getAuthHeaders, getAuthOnlyHeaders, clearAuthSession } from '../../core/api.js';
+import { writeIdentity } from '../../core/auth-storage.js';
 import { showToast } from '../../components/toast.js';
 import { STRICT_PASSWORD_REGEX } from '../../core/password-policy.js';
 
@@ -117,7 +118,7 @@ export function openProfilePicViewer() {
       showToast("Image file is missing or corrupted on the server.", "error");
 
       // Wipe the bad ghost data so it defaults back to the colored circle
-      sessionStorage.setItem('profilePicture', 'no_image.jpg');
+      writeIdentity({ profilePicture: 'no_image.jpg' });
       updateAvatarDisplay('no_image.jpg');
     });
 }
@@ -522,11 +523,15 @@ function bindEditProfileModal() {
             showToast("Email changes require verification and were not applied.", "warning");
           }
 
-          // Update browser memory
-          sessionStorage.setItem('phoneNumber', updatedData.phoneNumber);
-          sessionStorage.setItem('email', serverEmail);
-          sessionStorage.setItem('birthday', updatedData.birthday);
-          sessionStorage.setItem('gender', updatedData.gender);
+          // Update browser memory. writeIdentity writes the tab copy that every feature
+          // module reads, and mirrors it into durable storage when the session was
+          // remembered — otherwise a new tab would restore the pre-edit values.
+          writeIdentity({
+            phoneNumber: updatedData.phoneNumber,
+            email: serverEmail,
+            birthday: updatedData.birthday,
+            gender: updatedData.gender
+          });
 
           // Force update profile tab display
           const pPhone = document.getElementById('profile-phone');
@@ -603,7 +608,7 @@ function bindProfilePicture() {
         .then(data => {
           showToast("Profile picture updated successfully!", "success");
           // Save the new filename to browser memory and instantly update the UI
-          sessionStorage.setItem('profilePicture', data.profilePicture);
+          writeIdentity({ profilePicture: data.profilePicture });
           updateAvatarDisplay(data.profilePicture);
         })
         .catch(error => {

@@ -4,6 +4,16 @@
 
 import { isStepUpChallenge, requestStepUp } from './step-up.js';
 
+import {
+  clearAuthSession,
+  readAuthToken,
+  writeAuthTokens
+} from './auth-storage.js';
+
+// Re-exported because app.js and the window bridge import it from here; storage
+// ownership itself lives in auth-storage.js.
+export { clearAuthSession, readAuthToken };
+
 /**
  * Backend base URL. js/api-base.js is the single source of truth — it is loaded
  * as a classic script before this bundle and honours, in order, a runtime
@@ -37,7 +47,7 @@ function resolveApiBaseUrl() {
 export let API_BASE_URL = resolveApiBaseUrl();
 
 export function getAuthHeaders() {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  const token = readAuthToken('accessToken');
   const headers = {
     'Content-Type': 'application/json'
   };
@@ -53,55 +63,21 @@ export function getAuthHeaders() {
  * deliberately omits Content-Type.
  */
 export function getAuthOnlyHeaders() {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  const token = readAuthToken('accessToken');
   return token ? { Authorization: 'Bearer ' + token } : {};
-}
-
-/**
- * Clears every place a session token or identity can be persisted. Logout must
- * not leave access/refresh tokens behind in localStorage.
- */
-export function clearAuthSession() {
-  try {
-    if (typeof sessionStorage !== 'undefined') sessionStorage.clear();
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem('user');
-      localStorage.removeItem('currentUser');
-      localStorage.removeItem('accessToken');
-      localStorage.removeItem('refreshToken');
-    }
-  } catch (e) {
-    // Storage may be unavailable (private mode); nothing else to do.
-  }
-}
-/* ------------------------------------------------------------------ *
- * Session tokens
- * ------------------------------------------------------------------ */
-
-function readStoredToken(key) {
-  try {
-    return typeof localStorage !== 'undefined' ? localStorage.getItem(key) : null;
-  } catch (e) {
-    return null;
-  }
-}
-
-function writeStoredTokens(tokens) {
-  try {
-    if (tokens.accessToken) localStorage.setItem('accessToken', tokens.accessToken);
-    if (tokens.refreshToken) localStorage.setItem('refreshToken', tokens.refreshToken);
-  } catch (e) {
-    // Storage may be unavailable (private mode). The request still succeeds;
-    // the next call will simply re-use whatever token is still readable.
-  }
 }
 
 /**
  * Endpoints that must never trigger an automatic refresh: they either establish
  * the session, are the refresh itself, or are the revocation call. Attempting a
  * refresh around them would recurse or resurrect a session that is being ended.
+ *
+ * /api/auth/mfa/** is deliberately absent. Those are the MFA *management* screens
+ * (overview, factors, recovery codes), which need a live session and must rotate an
+ * expired access token like any other authenticated call. Matching the `mfa/` prefix
+ * here made a 401 on those screens drop the user to login instead.
  */
-const NO_REFRESH_ENDPOINTS = /^\/api\/auth\/(login|refresh|logout|verify-mfa|mfa\/|forgot-password|reset-password|step-up)/;
+const NO_REFRESH_ENDPOINTS = /^\/api\/auth\/(login|refresh|logout|verify-mfa|forgot-password|reset-password|step-up)/;
 
 export function isRefreshableEndpoint(endpoint) {
   if (typeof endpoint !== 'string') return false;
@@ -111,39 +87,86 @@ export function isRefreshableEndpoint(endpoint) {
 
 /**
  * Single-flight refresh. Concurrent 401s share one rotation instead of racing:
- * the backend treats a replayed (already rotated) refresh token as a
- * compromise signal and revokes every session for the user, so duplicate
- * refreshes would log the user out of everything.
+ * the backend treats a replayed (already rotated) refresh token as a compromise
+ * signal and revokes every session for the user, so duplicate refreshes would log
+ * the user out of everything.
+ *
+ * Single-flight alone is per-tab: `refreshInFlight` cannot see a second tab, and two
+ * tabs redeeming the same token is exactly the replay the server revokes for. So the
+ * rotation is serialised across tabs with the Web Locks API where it is available, and
+ * a rotation this tab did not win is adopted from storage instead of retried. Adoption
+ * is what covers the cases the lock cannot: browsers without it, and a winner running
+ * in another process.
  *
  * Resolves with the new access token, or null when the session cannot be
  * recovered. Never throws — callers decide what a null means.
  */
 let refreshInFlight = null;
 
+const REFRESH_LOCK_NAME = 'roadwise.refresh-token';
+
+function withRefreshLock(task) {
+  const locks = typeof navigator !== 'undefined' ? navigator.locks : null;
+  if (!locks || typeof locks.request !== 'function') {
+    // No Web Locks (older browser, or a non-secure context): keep the per-tab
+    // promise and let adoption recover from a cross-tab race.
+    return Promise.resolve().then(task);
+  }
+  return locks.request(REFRESH_LOCK_NAME, task);
+}
+
+/**
+ * Returns the access token another tab stored for a rotation this tab did not win, or
+ * null while the stored refresh token is still the one about to be presented.
+ */
+function adoptTokensRotatedElsewhere(presentedToken) {
+  const currentRefreshToken = readAuthToken('refreshToken');
+  if (currentRefreshToken && currentRefreshToken !== presentedToken) {
+    return readAuthToken('accessToken');
+  }
+  return null;
+}
+
+async function rotateRefreshToken() {
+  // Captured before queueing on the lock: this is the token the tab intends to spend,
+  // and comparing it afterwards is how a cross-tab rotation is detected.
+  const presentedToken = readAuthToken('refreshToken');
+  if (!presentedToken) return null;
+
+  return withRefreshLock(async () => {
+    const adopted = adoptTokensRotatedElsewhere(presentedToken);
+    if (adopted) return adopted;
+
+    const response = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken: presentedToken }),
+      cache: 'no-store'
+    });
+
+    if (!response.ok) {
+      // A rejection is also what a concurrent rotation looks like from here, so check
+      // storage before treating the session as over.
+      return adoptTokensRotatedElsewhere(presentedToken);
+    }
+
+    let data = null;
+    try {
+      data = await response.json();
+    } catch (e) {
+      return null;
+    }
+    if (!data || !data.accessToken) return null;
+
+    writeAuthTokens(data);
+    return data.accessToken;
+  });
+}
+
 export function refreshAccessToken() {
   if (refreshInFlight) return refreshInFlight;
 
-  const refreshToken = readStoredToken('refreshToken');
-  if (!refreshToken) return Promise.resolve(null);
-
-  refreshInFlight = fetch(`${API_BASE_URL}/api/auth/refresh`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
-    cache: 'no-store'
-  })
-    .then(async (response) => {
-      if (!response.ok) return null;
-      let data = null;
-      try {
-        data = await response.json();
-      } catch (e) {
-        return null;
-      }
-      if (!data || !data.accessToken) return null;
-      writeStoredTokens(data);
-      return data.accessToken;
-    })
+  refreshInFlight = rotateRefreshToken()
     .catch(() => null)
     .then((token) => {
       refreshInFlight = null;
@@ -291,10 +314,13 @@ if (typeof window !== 'undefined') {
   window.getAuthHeaders = getAuthHeaders;
   window.getAuthOnlyHeaders = getAuthOnlyHeaders;
   window.clearAuthSession = clearAuthSession;
+  // js/config.js is copied to dist as a classic script and cannot import, so it calls
+  // this bridge for the token instead of reading storage itself.
+  window.readAuthToken = readAuthToken;
 
   // Cross-tab logout: when another tab clears the token, mirror it here.
   window.addEventListener('storage', (event) => {
-    if (event.key === 'accessToken' && !event.newValue && !localStorage.getItem('accessToken')) {
+    if (event.key === 'accessToken' && !event.newValue && !readAuthToken('accessToken')) {
       window.dispatchEvent(new CustomEvent('roadwise:session-expired'));
     }
   });

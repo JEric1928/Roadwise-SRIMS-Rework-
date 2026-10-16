@@ -214,8 +214,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const logoutConfirmModal = document.getElementById('logout-confirm-modal');
   const btnConfirmLogout = document.getElementById('btn-confirm-logout');
 
-  // Performs a best-effort server-side revocation (refresh tokens + session
-  // version), then always clears local credentials and returns to login.
+  // Revokes the session server-side, then clears local credentials and returns to
+  // login. The revocation is awaited (bounded): an unawaited POST is cancelled by the
+  // navigation, which left the server-side session — and its 7-day refresh token —
+  // alive after the user had signed out. Local credentials are cleared either way, so
+  // a slow or failed call cannot leave this tab holding a usable token.
   window.performLogout = function() {
     const finishLogout = () => {
       if (typeof window.clearAuthSession === 'function') {
@@ -230,12 +233,15 @@ document.addEventListener('DOMContentLoaded', () => {
       window.location.replace('login.html');
     };
 
-    if (typeof window.apiFetch === 'function') {
-      // Fire the revocation request WITHOUT waiting for it: local credentials
-      // are cleared immediately, even if the network call is slow or fails.
-      window.apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
-    }
-    finishLogout();
+    const revoke = typeof window.apiFetch === 'function'
+      ? window.apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
+      : Promise.resolve();
+
+    // Bounded so a hanging network cannot strand the user on a signed-out page.
+    Promise.race([
+      revoke,
+      new Promise((resolve) => setTimeout(resolve, 2000))
+    ]).then(finishLogout);
   };
 
   if (logoutBtn && logoutConfirmModal) {

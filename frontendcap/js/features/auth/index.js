@@ -5,6 +5,12 @@
  * active steps, remember-me storage, and API workflows.
  */
 import { API_BASE_URL } from '../../core/api.js';
+import {
+  beginSession,
+  writeAuthTokens,
+  writeIdentity,
+  writeProfile
+} from '../../core/auth-storage.js';
 import { showToast } from '../../components/toast.js';
 import { STRICT_PASSWORD_REGEX } from '../../core/password-policy.js';
 import {
@@ -482,31 +488,35 @@ function completeLoginWithSession(data) {
     ? String(data.middleName).trim()
     : "";
 
-  sessionStorage.setItem("userId", data.userId);
-  sessionStorage.setItem("username", data.username || "N/A");
-  sessionStorage.setItem("userRole", data.role || "");
-  sessionStorage.setItem("firstName", data.firstName || "");
-  sessionStorage.setItem("middleName", cleanMiddleName);
-  sessionStorage.setItem("lastName", data.lastName || "");
-  sessionStorage.setItem("email", data.email || "");
-  sessionStorage.setItem("phoneNumber", data.phoneNumber || "");
-  sessionStorage.setItem("birthday", data.birthday || "");
-  sessionStorage.setItem("gender", data.gender || "");
-  sessionStorage.setItem("profilePicture", data.profilePicture || "no_image.jpg");
+  // "Remember me" decides where the session is written: localStorage when ticked,
+  // sessionStorage when not. It is read before storing anything because every write
+  // below targets the scope it selects — previously the checkbox only saved the
+  // username, so an unticked login still left a 7-day refresh token on disk.
+  const rememberCheckbox = document.getElementById("remember-me");
+  const usernameInput = document.getElementById("username")?.value.trim();
+  const rememberMe = !!(rememberCheckbox && rememberCheckbox.checked);
 
-  if (data.barangayId) {
-    sessionStorage.setItem("barangayId", data.barangayId);
-  }
-  sessionStorage.setItem("barangayName", data.barangayName || "City Hall Central");
+  beginSession(rememberMe);
 
-  if (data.accessToken) {
-    localStorage.setItem("accessToken", data.accessToken);
-  }
-  if (data.refreshToken) {
-    localStorage.setItem("refreshToken", data.refreshToken);
-  }
+  writeIdentity({
+    userId: data.userId,
+    username: data.username || "N/A",
+    userRole: data.role || "",
+    firstName: data.firstName || "",
+    middleName: cleanMiddleName,
+    lastName: data.lastName || "",
+    email: data.email || "",
+    phoneNumber: data.phoneNumber || "",
+    birthday: data.birthday || "",
+    gender: data.gender || "",
+    profilePicture: data.profilePicture || "no_image.jpg",
+    barangayId: data.barangayId,
+    barangayName: data.barangayName || "City Hall Central"
+  });
 
-  const userPayload = {
+  writeAuthTokens({ accessToken: data.accessToken, refreshToken: data.refreshToken });
+
+  writeProfile({
     id: data.userId,
     username: data.username,
     role: data.role,
@@ -515,14 +525,10 @@ function completeLoginWithSession(data) {
     lastName: data.lastName || "",
     barangayId: data.barangayId || null,
     barangayName: data.barangayName || "City Hall Central"
-  };
-  localStorage.setItem("user", JSON.stringify(userPayload));
-  localStorage.setItem("currentUser", JSON.stringify(userPayload));
+  });
 
-  const rememberCheckbox = document.getElementById("remember-me");
-  const usernameInput = document.getElementById("username")?.value.trim();
 
-  if (rememberCheckbox && rememberCheckbox.checked && usernameInput) {
+  if (rememberMe && usernameInput) {
     localStorage.setItem("roadwise_remembered_username", usernameInput);
   } else {
     localStorage.removeItem("roadwise_remembered_username");

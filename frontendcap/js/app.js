@@ -1,4 +1,7 @@
-import { API_BASE_URL, clearAuthSession, refreshAccessToken } from './core/api.js';
+// Must stay first: restores a remembered session into sessionStorage before the
+// feature modules below read identity at module scope. See the module's header.
+import './core/session-bootstrap.js';
+import { API_BASE_URL, clearAuthSession, readAuthToken, refreshAccessToken } from './core/api.js';
 import { initNotifications } from './features/notifications/index.js';
 import { initImageLightbox } from './features/image-lightbox/index.js';
 import { initLiveClock } from './features/live-clock/index.js';
@@ -60,7 +63,7 @@ import './features/map-engine/index.js'; // Leaflet map instances, spotlight iso
       body: JSON.stringify({})
     });
 
-    verifySession(localStorage.getItem('accessToken'))
+    verifySession(readAuthToken('accessToken'))
       .then(async (res) => {
         // A 401 here is usually just the 15-minute access token expiring while
         // the tab sat idle. Redeem the refresh token once and re-verify before

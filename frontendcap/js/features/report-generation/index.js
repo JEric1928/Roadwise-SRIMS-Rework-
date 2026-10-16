@@ -7,6 +7,7 @@
  * with the tracking engine that remains in app.js.
  */
 import { apiFetch, API_BASE_URL, getAuthHeaders } from '../../core/api.js';
+import { readAuthItem } from '../../core/auth-storage.js';
 import { showToast } from '../../components/toast.js';
 import { formatOfficialName } from '../../core/utils.js';
 
@@ -76,7 +77,7 @@ window.openTrackingReportPreview = async function() {
     if (sFirst || sLast) {
       adminName = formatOfficialName(sFirst, sMiddle, sLast);
     } else {
-      const localUser = JSON.parse(localStorage.getItem('user') || localStorage.getItem('currentUser') || '{}');
+      const localUser = JSON.parse(readAuthItem('user') || readAuthItem('currentUser') || '{}');
       if (localUser.firstName || localUser.lastName) {
         adminName = formatOfficialName(localUser.firstName, localUser.middleName, localUser.lastName);
       }
