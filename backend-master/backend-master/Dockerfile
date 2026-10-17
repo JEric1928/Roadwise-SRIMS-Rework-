@@ -4,30 +4,40 @@
 # Compiles and tests with the full JDK. The test suite runs here on purpose: a
 # revision that cannot pass its own tests must not produce an image.
 # ---------------------------------------------------------------------------
-FROM eclipse-temurin:17-jdk-jammy AS build
+# Maven ships in this image instead of being bootstrapped by ./mvnw.
+#
+# The wrapper has to download a Maven distribution before it can build anything,
+# and that download is the most fragile step in the whole Dockerfile: it failed
+# here with "wget: Failed to fetch .../apache-maven-3.9.16-bin.tar.gz" and took
+# the build down with it. Two things make it brittle. The JDK image has no
+# unzip, so the wrapper silently switches its URL to .tar.gz; and it prefers
+# wget over curl, whose one-shot connect gives up instead of falling through to
+# IPv4/next address the way curl does. Nothing is left to go wrong when Maven is
+# already installed. ./mvnw stays in the repo for host-side use.
+FROM maven:3.9.16-eclipse-temurin-17 AS build
 
 WORKDIR /build
 
+# pom.xml only: the wrapper and .mvn/ stay out of the image, so an mvnw edit
+# (that file is regenerated wholesale) cannot bust the dependency layer below.
+#
 # pom.xml changes far less often than source, so resolving dependencies in its
 # own layer keeps most rebuilds off the network.
-#
-# Pre-fetching is best-effort on purpose: `dependency:go-offline` is known to
-# fail on some plugin resolutions, and a failure there should not sink an
-# otherwise-buildable revision. Whatever it misses is fetched by the package
-# step below.
-COPY .mvn/ .mvn/
-COPY mvnw pom.xml ./
+COPY pom.xml ./
 # The Maven repository is a cache mount rather than part of the layer. Two reasons: a
 # rebuild reuses the toolchain, plugins and providers instead of asking Maven Central
 # again (a transient 429 there once failed an otherwise-green revision), and nothing
 # downloaded ends up in the image. Both Maven steps share the same cache.
+#
+# Pre-fetching is best-effort on purpose: `dependency:go-offline` is known to fail
+# on some plugin resolutions, and a failure there should not sink an otherwise
+# buildable revision. Whatever it misses is fetched by the package step below.
 RUN --mount=type=cache,id=roadwise-m2,target=/root/.m2 \
-    chmod +x mvnw \
-    && (./mvnw -B dependency:go-offline \
-        || echo "dependency pre-fetch skipped; the package step will resolve them")
+    mvn -B -ntp dependency:go-offline \
+        || echo "dependency pre-fetch skipped (exit $?); the package step will resolve them"
 
 COPY src/ src/
-RUN --mount=type=cache,id=roadwise-m2,target=/root/.m2 ./mvnw -B clean package
+RUN --mount=type=cache,id=roadwise-m2,target=/root/.m2 mvn -B -ntp clean package
 
 # ---------------------------------------------------------------------------
 # Runtime stage

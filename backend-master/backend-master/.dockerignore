@@ -22,6 +22,11 @@ uploads/
 .settings/
 
 # Local tooling and logs
+# The Maven wrapper is for host builds only — the image takes Maven from its base
+# image, so none of these are read during a build.
+mvnw
+mvnw.cmd
+.mvn/
 mvnw.zip
 *.log
 *.tmp
