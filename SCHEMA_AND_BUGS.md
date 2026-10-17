@@ -91,12 +91,19 @@ verification, remote-socket revocation), `DOM_CONTRACT_FINDINGS.md`
   - V6 also destructively drops `barangays.name`, `notifications.report_id`,
     `report_status_logs.changed_by_user_id`, `activity_logs.details/created_at/user_id`
     (V6:11, 68, 101-103, 156) — data loss on a legacy DB. ✔
-- `repair-on-migrate=true` additionally auto-realigned checksums, which can mask
-  edited/misapplied migrations instead of failing loudly. ◦
+- ~~`repair-on-migrate=true` additionally auto-realigned checksums, which can mask
+  edited/misapplied migrations instead of failing loudly.~~ **It never did anything:**
+  Boot exposes no `spring.flyway.repair-on-migrate` key (`FlywayProperties` has no
+  repair switch, and Flyway exposes `repair` only as an operation), so the property was
+  ignored and the checksum mismatches it was supposed to clear kept failing startup
+  validation. Removed. The real switch is `roadwise.flyway.repair-on-startup`
+  (`FLYWAY_REPAIR_ON_STARTUP=true`, implemented in `FlywayRepairConfig`), off unless a
+  single release explicitly asks for it; `flyway repair` and a direct
+  `UPDATE flyway_schema_history SET checksum = …` remain the operator alternatives. ✔
 - Fix: for the existing production DB, baseline at the correct version
-  (`baseline-version` = the last applied migration) instead of 0; remove
-  `repair-on-migrate=true` from production; make V6/V12 idempotent (guarded
-  `DO $$ … END $$;`, backfills before `SET NOT NULL`).
+  (`baseline-version` = the last applied migration) instead of 0; make V12 idempotent
+  (guarded `DO $$ … END $$;`, backfills before `SET NOT NULL`). V6 became replay-safe in
+  9076a16/e792ff0. ◦
 
 ---
 
