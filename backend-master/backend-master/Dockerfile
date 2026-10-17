@@ -4,19 +4,41 @@
 # Compiles and tests with the full JDK. The test suite runs here on purpose: a
 # revision that cannot pass its own tests must not produce an image.
 # ---------------------------------------------------------------------------
-# Maven ships in this image instead of being bootstrapped by ./mvnw.
+# Maven is preinstalled here instead of being bootstrapped by ./mvnw.
 #
-# The wrapper has to download a Maven distribution before it can build anything,
-# and that download is the most fragile step in the whole Dockerfile: it failed
-# here with "wget: Failed to fetch .../apache-maven-3.9.16-bin.tar.gz" and took
-# the build down with it. Two things make it brittle. The JDK image has no
-# unzip, so the wrapper silently switches its URL to .tar.gz; and it prefers
-# wget over curl, whose one-shot connect gives up instead of falling through to
-# IPv4/next address the way curl does. Nothing is left to go wrong when Maven is
-# already installed. ./mvnw stays in the repo for host-side use.
+# The wrapper's first act is to download a Maven distribution of its own, so
+# anything that goes wrong at the repository happens before a single source file
+# is compiled. That is also what "wget: Failed to fetch
+# .../apache-maven-3.9.16-bin.tar.gz" was: wget treats every non-2xx as a failed
+# fetch and --quiet hid the status, so a repository rate-limiting this builder
+# surfaces as an unexplained download failure instead of the 429 it really is.
+# Nothing is downloaded when Maven is already on the image, so the whole failure
+# mode disappears. ./mvnw stays in the repo for host-side use.
 FROM maven:3.9.16-eclipse-temurin-17 AS build
 
 WORKDIR /build
+
+# Maven Central rate-limits by client IP, and a hosted builder does not own its
+# address — everything on the platform egresses through one, so "429 Too Many
+# Requests" is a normal outcome here, not an incident, and no amount of retrying
+# fixes it. Resolve through a mirror that does not share that limit. Point this
+# at an internal proxy instead if you have one, e.g.
+#   docker build --build-arg MAVEN_MIRROR_URL=https://nexus.internal/repository/maven-public/ .
+ARG MAVEN_MIRROR_URL=https://maven-central.storage-download.googleapis.com/maven2/
+# Generated rather than committed so the build arg above is the single place the
+# repository is named. mirrorOf=central leaves every other repository alone.
+RUN printf '%s\n' \
+        '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">' \
+        '  <mirrors>' \
+        '    <mirror>' \
+        '      <id>build-mirror</id>' \
+        '      <name>Maven Central mirror</name>' \
+        '      <url>'"${MAVEN_MIRROR_URL}"'</url>' \
+        '      <mirrorOf>central</mirrorOf>' \
+        '    </mirror>' \
+        '  </mirrors>' \
+        '</settings>' \
+    > /build/settings.xml
 
 # pom.xml only: the wrapper and .mvn/ stay out of the image, so an mvnw edit
 # (that file is regenerated wholesale) cannot bust the dependency layer below.
@@ -33,11 +55,27 @@ COPY pom.xml ./
 # on some plugin resolutions, and a failure there should not sink an otherwise
 # buildable revision. Whatever it misses is fetched by the package step below.
 RUN --mount=type=cache,id=roadwise-m2,target=/root/.m2 \
-    mvn -B -ntp dependency:go-offline \
+    mvn -B -ntp -s /build/settings.xml dependency:go-offline \
         || echo "dependency pre-fetch skipped (exit $?); the package step will resolve them"
 
 COPY src/ src/
-RUN --mount=type=cache,id=roadwise-m2,target=/root/.m2 mvn -B -ntp clean package
+# Retried, but only for transport failures. A missing artifact, a compile error
+# or a red test fails on the first attempt and is reported as-is; a dropped
+# connection or a 5xx/429 gets two more tries with a widening backoff.
+#
+# Each attempt first clears Maven's *.lastUpdated markers: a 429 leaves one
+# behind, and from then on Maven refuses to re-ask the repository for that
+# artifact, so a retry would fail instantly with the stale cached error.
+RUN --mount=type=cache,id=roadwise-m2,target=/root/.m2 bash -c 'set -o pipefail; for attempt in 1 2 3; do \
+        find /root/.m2/repository -name "*.lastUpdated" -delete 2>/dev/null || : ; \
+        if mvn -B -ntp -s /build/settings.xml clean package 2>&1 | tee /build/mvn.log; then \
+            rm -f /build/mvn.log ; exit 0 ; \
+        fi ; \
+        grep -qE "429|Could not transfer|Connection reset|Read timed out|status code: 5" /build/mvn.log || exit 1 ; \
+        [ "$attempt" -lt 3 ] || exit 1 ; \
+        echo "repository rate-limited or unreachable (attempt $attempt/3), retrying in $((attempt * 20))s" >&2 ; \
+        sleep $((attempt * 20)) ; \
+    done'
 
 # ---------------------------------------------------------------------------
 # Runtime stage
