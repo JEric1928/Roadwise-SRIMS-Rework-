@@ -35,6 +35,7 @@
         <li data-target="view-tracking"><button type="button"><span class="icon">🚧</span> Repair Tracking</button></li>
         <li data-target="view-map"><button type="button"><span class="icon">🗺️</span> Map View</button></li>
         <li data-target="view-user-management"><button type="button"><span class="icon">👥</span> User Management</button></li>
+        <li data-target="view-access-control"><button type="button"><span class="icon">🔐</span> Access Control</button></li>
         <li data-target="view-barangay"><button type="button"><span class="icon">🏢</span> Brgy & Road Management</button></li>
         <li data-target="view-archive"><button type="button"><span class="icon">🗄️</span> Archive & Reports</button></li>
         <li data-target="view-activity-log" class="nav-item"><button type="button"><span class="icon">⏱️</span> Activity Log</button></li>
@@ -659,6 +660,79 @@
             <tbody id="tracking-table-body">
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- ACCESS CONTROL VIEW: peer-action approvals + break-glass -->
+      <div id="view-access-control" class="content-section hidden">
+        <div class="bd-controls">
+          <div>
+            <h2 style="margin: 0; font-size: 20px;">Access Control</h2>
+            <p style="color: var(--color-muted); font-size: 13px;">Approvals for actions on peer accounts, and time-boxed emergency access.</p>
+          </div>
+          <button type="button" id="access-control-refresh" class="btn-primary">Refresh</button>
+        </div>
+
+        <div style="margin-bottom: 28px;">
+          <h3 style="font-size: 16px; margin: 0 0 10px;">Approval requests</h3>
+          <p style="color: var(--color-muted); font-size: 13px; margin: 0 0 12px;">
+            The administrator who needs the action opens a request; a different administrator approves or refuses it.
+            Once approved, repeating the action applies it exactly once.
+          </p>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Requested</th>
+                  <th>Action</th>
+                  <th>Target</th>
+                  <th>Requested By</th>
+                  <th>Reason</th>
+                  <th>Status</th>
+                  <th>Decision</th>
+                </tr>
+              </thead>
+              <tbody id="access-approvals-tbody">
+                <tr><td colspan="7" style="text-align:center;padding:20px;color:#64748b;">Loading requests...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="section-card">
+          <h3 style="font-size: 16px; margin: 0 0 10px;">Break-glass access</h3>
+          <p style="color: var(--color-muted); font-size: 13px; margin: 0 0 12px;">
+            For when no second administrator can be reached. It lasts at most an hour, unlocks rank only,
+            notifies every other administrator immediately, and is reviewed afterwards.
+          </p>
+          <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 18px;">
+            <label style="flex: 1 1 320px; font-size: 13px;">
+              Reason
+              <input type="text" id="break-glass-reason" maxlength="500" class="bd-search-bar" style="width: 100%; margin-top: 6px;" placeholder="Why is peer access needed right now?">
+            </label>
+            <label style="font-size: 13px;">
+              Minutes
+              <input type="number" id="break-glass-minutes" min="5" max="60" value="30" class="bd-search-bar" style="width: 110px; margin-top: 6px;">
+            </label>
+            <button type="button" id="break-glass-activate" class="btn-primary">Activate</button>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Granted To</th>
+                  <th>Granted</th>
+                  <th>Expires</th>
+                  <th>State</th>
+                  <th>Reason</th>
+                  <th>Review</th>
+                </tr>
+              </thead>
+              <tbody id="break-glass-tbody">
+                <tr><td colspan="6" style="text-align:center;padding:20px;color:#64748b;">Loading grants...</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 

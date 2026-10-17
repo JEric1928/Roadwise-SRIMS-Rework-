@@ -11,6 +11,7 @@ import { apiFetch, API_BASE_URL, getAuthHeaders } from '../../core/api.js';
 import { escapeHtml } from '../../core/utils.js';
 import { showToast } from '../../components/toast.js';
 
+import { approvalHeaders, clearApproval, requestPrivilegedAction } from '../access-control/index.js';
 // ==========================================
 // 👥 USER MANAGEMENT DATA FETCHER
 // ==========================================
@@ -447,7 +448,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const response = await apiFetch(`/api/users/${userId}/manage`, {
           method: 'PUT',
-          headers: getAuthHeaders(),
+          headers: { ...getAuthHeaders(), ...approvalHeaders('user:manage', userId) },
           body: JSON.stringify(payload)
         });
 
@@ -455,6 +456,8 @@ document.addEventListener("DOMContentLoaded", () => {
           throw new Error(response.error);
         }
 
+        // The action went through, so any ticket it consumed is spent.
+        clearApproval('user:manage', userId);
         if (typeof showToast === 'function') showToast("Official's record successfully updated!", "success");
 
         const modal = document.getElementById('manage-user-modal');
@@ -467,6 +470,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
       } catch (err) {
         console.error("Error updating user:", err);
+        if (err.status === 403) {
+          // A peer or superior target: offer the maker-checker path instead of a generic
+          // failure. The ticket is remembered and applied when the action is repeated.
+          await requestPrivilegedAction('user:manage', userId);
+          return;
+        }
         const errorMsg = err.message || "Failed to update record.";
         if (typeof showToast === 'function') showToast(errorMsg, "error");
       } finally {
@@ -491,10 +500,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
       apiFetch(`/api/users/${userId}/emergency-reset`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
+        headers: { ...getAuthHeaders(), ...approvalHeaders('user:reset-password', userId) },
         body: JSON.stringify({ adminId: sessionStorage.getItem("userId") || "" })
       })
         .then((data) => {
+          clearApproval('user:reset-password', userId);
           if (resetConfirmModal) {
             resetConfirmModal.classList.add('hidden');
             resetConfirmModal.style.display = 'none';
@@ -507,6 +517,14 @@ document.addEventListener("DOMContentLoaded", () => {
           }
         })
         .catch(err => {
+          if (err.status === 403) {
+            if (resetConfirmModal) {
+              resetConfirmModal.classList.add('hidden');
+              resetConfirmModal.style.display = 'none';
+            }
+            requestPrivilegedAction('user:reset-password', userId);
+            return;
+          }
           console.error("Error resetting password:", err);
           if (resetConfirmModal) {
             resetConfirmModal.classList.add('hidden');

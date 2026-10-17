@@ -49,6 +49,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if (typeof window.loadBarangayDropdownForAdmin === 'function') window.loadBarangayDropdownForAdmin();
       if (typeof window.loadUserManagementTable === 'function') window.loadUserManagementTable();
     },
+    'view-access-control': () => {
+      if (typeof window.loadAccessControl === 'function') window.loadAccessControl();
+    },
     'view-reports': () => {
       if (typeof window.loadAdminReports === 'function') window.loadAdminReports();
     },

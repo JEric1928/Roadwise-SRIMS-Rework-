@@ -385,6 +385,159 @@ Before any topic carries report details or other sensitive data:
   sockets on every API instance, not only the instance that handled the request.
 
 
+## Authorization policy (P0 — implemented)
+
+The role model was flat: every administrative rule was `hasAnyRole('ADMIN', 'CPDO Admin')`,
+checked against the free-text `users.role` column. That allowed any administrator to call
+`PUT /api/users/{id}/emergency-reset` on another administrator, read the temporary password
+from the response, and log in as them. A "master admin" role would not have helped — the
+seizure path is the same regardless of rank, because rank did not exist.
+
+**Policy as data** (`V21__add_authorization_policy.sql`): `authz_role` (with a `rank`),
+`authz_role_alias` (joins the existing free-text role to a role key, so no user data had to
+change), `authz_permission`, `authz_role_permission`. The seeded permissions reproduce
+exactly the checks they replace; nothing new is granted. Ranks: BARANGAY 10, ENGINEER 20,
+ADMIN and CPDO_ADMIN 50.
+
+**One decision point** (`AuthorizationService`, bean `authz`): `has(permission)` and
+`canActOn(targetUserId, permission)`. The latter additionally requires the caller to outrank
+the target *strictly*, so two administrators at the same rank can no longer reset, disable,
+or demote each other. Unknown roles resolve to no permissions (fail closed); the caller is
+always the authenticated principal.
+
+**Endpoints migrated**: `GET /api/users` (`user:read`), `POST /api/users/register`
+(`user:provision`), `PUT /api/users/{id}/manage` (`user:manage`),
+`PUT /api/users/{id}/emergency-reset` (`user:reset-password`),
+`POST /api/users/handover-admin` (`user:grant-role`),
+`POST /api/settings/toggle-maintenance` (`settings:maintenance`). Every other endpoint keeps
+its previous rule.
+
+**Fail-closed routes** (`SecurityConfig`): the chain now ends in `anyRequest().denyAll()`
+instead of `authenticated()`. A new controller is unreachable until its prefix is listed,
+and `EndpointAuthorizationCoverageTest` fails the build when one is added without a rule.
+`/uploads/**` and `/actuator/**` keep their previous authenticated requirement; only
+`/actuator/health` is public, alongside the existing public reads (`GET /api/barangays`,
+`GET /api/roads/**`, `GET /api/city-roads/**`) and the login ceremony.
+
+**Verified here**: `javac --release 17` against the real dependency set for both changed
+sources and tests; an out-of-JUnit run of the coverage check over the compiled controllers
+(78 endpoint/verb combinations, all covered). **Not verified here**: the Maven suite could
+not run in this environment — `./mvnw test` remains the gate, and the Flyway replay test now
+also covers V21.
+
+**Deliberately left for later**: the step-up policy map (the current `StepUpInterceptor` still
+guards only the MFA enrolment paths), retention/partitioning of the audit tables, and the
+admin screens for the approval and break-glass queues.
+
+## Privileged action approvals (P1 — implemented)
+
+P0 stopped one administrator from acting on a peer. That is correct, but it is not the
+whole business: one of two peer administrators occasionally has to act on the other
+(handover, a locked-out colleague, a departure). Reopening the rank check would restore the
+seizure path, so the gap is closed with a counterparty instead — maker-checker.
+
+**Flow.** The maker posts
+`POST /api/admin/approvals` with `{permission, targetUserId, reason}`. A *different*
+administrator holding `user:approve` agrees with `POST /api/admin/approvals/{id}/approve`
+(or refuses with `/deny`). The maker then repeats the original action once with
+`X-Approval-Id: <id>`; the approval is verified and consumed as part of that request.
+
+**Bound to the action.** A ticket names one permission, one target account and the account
+that asked for it, is usable once, and expires 24 hours after it was opened
+(`privileged_action_request`, V22). Redemption is a conditional
+`UPDATE … WHERE status = 'APPROVED'`, so a retried or double-clicked request cannot execute
+the action twice; the same guard makes two approvers racing on one ticket produce exactly
+one decision.
+
+**Rules, all enforced server-side** (`ApprovalService`):
+- a request cannot name your own account — self-service needs no ticket;
+- the maker must already hold the permission being requested;
+- the approver may not be the maker, must hold `user:approve`, and must rank at or above the
+  maker (peers may approve peers — two administrators agreeing is the control; two
+  colluding administrators are outside what an application can prevent);
+- an expired ticket can be neither decided nor redeemed;
+- `/deny` closes a request without executing anything.
+
+**Endpoints.** `GET /api/admin/approvals` (pending + your own) and the three `POST`s above.
+Both action endpoints that can now be unlocked —
+`PUT /api/users/{id}/manage` and `PUT /api/users/{id}/emergency-reset` — keep their rank
+check inside `@authz.canActOn(..., #approvalId)`: rank is tried first and the ticket is only
+consulted when rank refuses, so ordinary work never touches the approval path.
+
+**Audit.** Request, approve and deny are written to `activity_logs` with the actor from the
+authenticated principal (`PRIVILEGED_ACTION_REQUESTED` / `_APPROVED` / `_DENIED`). Making
+that table append-only is P2.
+
+**Verified here**: `javac --release 17` (main and test, rc 0) and the coverage check over the
+compiled controllers — 82 endpoint/verb combinations, all covered, including the four new
+approval routes. **Not verified here**: the Maven suite. `ApprovalServiceTest` covers
+self-approval, junior approval, expiry, single-use redemption and ticket/target/permission
+mismatches; `AuthorizationServiceTest` covers rank-then-ticket ordering.
+
+## Append-only audit and break-glass (P2 + P1b — implemented)
+
+### The audit trail can no longer be rewritten
+
+`activity_logs` accepted `UPDATE` and `DELETE` from the same account the application connects
+as, so the trail was only as trustworthy as the code writing it. `V23` adds a `BEFORE UPDATE
+OR DELETE` trigger that raises `42501` for every role, including the table owner — a `REVOKE`
+alone would not stop the owner. The escape hatch is a deliberate session setting
+(`SET roadwise.audit_maintenance = 'on'`), which an operator has to choose and which appears
+in the session, so a retention job is possible and an ordinary `UPDATE` is not.
+
+### Authorization decisions are recorded, not just business events
+
+`authz_decision_log` (V23) holds one row per privileged decision: every `canActOn` outcome —
+allow or deny — and every denied permission check, with actor, permission, target, decision,
+reason (`NO_PERMISSION`, `PEER_OR_SUPERIOR`, `RANK`, `SELF`, `APPROVED`, `BREAK_GLASS`,
+`UNKNOWN_RANK`, `UNKNOWN_TARGET`), HTTP method, path and correlation id (`X-Request-Id` when
+the client sends one). Allowed routine reads are deliberately not recorded: a write behind
+every `GET /api/users` would cost more than the evidence is worth. Insert failures are logged
+and swallowed — an audit write must never be the reason a legitimate request fails.
+
+### Break-glass, for the case approvals cannot cover
+
+Maker-checker assumes a second administrator exists. When the only remaining administrator is
+locked out, the alternatives are an outage or somebody editing the database by hand. `V24`
+adds a self-issued grant that is constrained rather than merely trusted:
+
+- 5 to 60 minutes (default 30), one live grant per account, written reason of at least 10
+  characters;
+- it substitutes for **rank only** — the holder must already hold the permission they want to
+  use, so it can never become a way to gain capability;
+- every other administrator is notified at activation (`findByRoles(["admin","cpdo admin"])`),
+  and the row stays behind with a review field another administrator fills in;
+- activation, revocation and review are all written to `activity_logs`.
+
+Endpoints: `POST /api/admin/break-glass` (activate), `GET` (recent grants),
+`POST /{id}/revoke` (holder or any administrator), `POST /{id}/review` (any administrator).
+
+### Refusals now explain themselves
+
+A denied `@PreAuthorize` used to return an empty 403, so the administrative UI showed its
+status-message fallback. `SecurityConfig` now installs an `AccessDeniedHandler` that returns
+`{"error": "...request approval first.", "code": "ACCESS_DENIED"}`. The frontend needed no
+change for this: `apiFetch` (`js/core/api.js:230`) already prefers `body.error` over its
+status table and surfaces it in the existing toast.
+
+### Frontend review
+
+| Surface | Status |
+|---|---|
+| `administration/index.js:448` `PUT /api/users/{id}/manage` | Sends `X-Approval-Id` when a ticket is remembered for that action and target. On a 403 it opens an approval request instead of showing a generic failure; the existing `apiFetch` catch still handles every other error. |
+| `administration/index.js:492` `PUT /api/users/{id}/emergency-reset` | Same, with `user:reset-password`; the confirmation modal closes before the request prompt so the 403 is not hidden behind it. |
+| `reports-archive/index.js:656` `POST /api/settings/toggle-maintenance` | Unchanged: admins still hold `settings:maintenance`. |
+| `activity-log/index.js:280,395` `POST /api/activity-logs/log-action` | **Kept, and must stay.** It is not an arbitrary audit write: the actor comes from the principal and the category is restricted to `EXPORT`/`PRINT`/`UI_ACTION`, so the client can only record what only the client can observe. |
+| Approval queue / break-glass screens | **Built.** `js/features/access-control/index.js` + `#view-access-control` in `admin_dashboard.html`, reached from the sidebar ("Access Control") and loaded by `navigation/index.js` like every other view. |
+
+### Verification
+
+`javac --release 17` main and test rc 0; route coverage 86 endpoint/verb combinations, all
+covered (the four approval and four break-glass routes included). Maven remains un-runnable in
+this environment, so `./mvnw test` is still the gate — `BreakGlassServiceTest` covers the
+duration bounds, the reason, the permission check and the single-live-grant rule;
+`AuthorizationServiceTest` covers break-glass-then-ticket ordering.
+
 ## Verification performed
 
 | Check | Result |

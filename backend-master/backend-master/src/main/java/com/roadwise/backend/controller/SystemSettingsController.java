@@ -25,7 +25,7 @@ public class SystemSettingsController {
 
     // Toggle Maintenance Mode (Restricted to Administrator roles)
     @PostMapping("/toggle-maintenance")
-    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
+    @PreAuthorize("@authz.has('settings:maintenance')")
     public ResponseEntity<SystemSettings> toggleMaintenance(@RequestParam boolean status) {
         SystemSettings settings = getSettings();
         settings.setMaintenanceMode(status);

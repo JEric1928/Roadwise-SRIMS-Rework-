@@ -31,6 +31,7 @@ import './features/cpdo-survey/index.js'; // CPDO technical survey capture + win
 import './features/priority-masterlist/index.js'; // ranked masterlist rendering (tier badges)
 import './features/repair-tracking/index.js'; // repair tracking, modals, QA & extension review
 import './features/map-engine/index.js'; // Leaflet map instances, spotlight isolation & global maps
+import './features/access-control/index.js'; // approval queue + break-glass (window bridges)
 
 
 // ==========================================

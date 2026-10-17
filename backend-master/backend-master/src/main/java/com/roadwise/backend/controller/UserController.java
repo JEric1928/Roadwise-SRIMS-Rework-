@@ -331,7 +331,7 @@ public class UserController {
     // 0. GET ALL SYSTEM USERS
     // ==========================================
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
+    @PreAuthorize("@authz.has('user:read')")
     public ResponseEntity<List<UserResponseDto>> getAllUsers() {
         List<UserResponseDto> users = userRepository.findAll().stream()
                 .map(UserResponseDto::from)
@@ -355,7 +355,7 @@ public class UserController {
     // 5. PROVISION NEW BARANGAY OFFICIAL ACCOUNT
     // ==========================================
     @PostMapping("/register")
-    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
+    @PreAuthorize("@authz.has('user:provision')")
     public ResponseEntity<?> registerOfficial(
             @RequestBody Map<String, String> payload,
             HttpServletRequest request) {
@@ -478,10 +478,11 @@ public class UserController {
     // 7. ADMIN: UPDATE OFFICIAL RECORD & STATUS
     // ==========================================
     @PutMapping("/{id}/manage")
-    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
+    @PreAuthorize("@authz.canActOn(#id, 'user:manage', #approvalId)")
     @Transactional
     public ResponseEntity<?> manageUserRecord(
             @PathVariable Long id,
+            @RequestHeader(value = "X-Approval-Id", required = false) Long approvalId,
             @RequestBody Map<String, String> updates,
             HttpServletRequest request) {
 
@@ -579,10 +580,11 @@ public class UserController {
     // 8. ADMIN: EMERGENCY PASSWORD RESET
     // ==========================================
     @PutMapping("/{id}/emergency-reset")
-    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
+    @PreAuthorize("@authz.canActOn(#id, 'user:reset-password', #approvalId)")
     @Transactional
     public ResponseEntity<?> emergencyPasswordReset(
             @PathVariable Long id,
+            @RequestHeader(value = "X-Approval-Id", required = false) Long approvalId,
             @RequestBody(required = false) Map<String, String> payload,
             HttpServletRequest request) {
 
@@ -655,7 +657,7 @@ public class UserController {
     // 9. CPDO ADMIN: FORMAL OFFICE TURNOVER / SUCCESSION
     // ==========================================
     @PostMapping("/handover-admin")
-    @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
+    @PreAuthorize("@authz.has('user:grant-role')")
     @Transactional
     public ResponseEntity<?> handoverAdminOffice(
             @RequestBody Map<String, String> payload,
