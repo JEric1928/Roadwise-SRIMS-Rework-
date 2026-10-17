@@ -5,6 +5,9 @@ import com.roadwise.backend.repository.RoadReportRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -21,9 +24,17 @@ public class DuplicateDetectionService {
     private static final double DUPLICATE_RADIUS_METERS = 50.0;
 
     private final RoadReportRepository repository;
+    private final TransactionTemplate spatialProbeTx;
 
-    public DuplicateDetectionService(RoadReportRepository repository) {
+    public DuplicateDetectionService(RoadReportRepository repository,
+                                     PlatformTransactionManager transactionManager) {
         this.repository = repository;
+        // The spatial probe must not poison the caller's transaction. A failed query marks
+        // the *current* transaction rollback-only, so catching DataAccessException and
+        // falling back is not enough: the caller still dies with UnexpectedRollbackException
+        // at commit. Isolating the probe in its own transaction confines the damage.
+        this.spatialProbeTx = new TransactionTemplate(transactionManager);
+        this.spatialProbeTx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
     }
 
     /**
@@ -108,9 +119,11 @@ public class DuplicateDetectionService {
                                             double lat, double lng,
                                             Long barangayId, String cityRoadName) {
         try {
-            return repository.findNearbyCandidates(
+            // REQUIRES_NEW: the probe's failure must not mark the caller's transaction
+            // rollback-only, or the fallback below is defeated at commit time.
+            return spatialProbeTx.execute(status -> repository.findNearbyCandidates(
                     lng, lat, DUPLICATE_RADIUS_METERS,
-                    minDate, maxDate, barangayId, cityRoadName);
+                    minDate, maxDate, barangayId, cityRoadName));
         } catch (DataAccessException ex) {
             log.warn("PostGIS candidate search unavailable ({}); using bounding-box fallback.",
                     ex.getMessage());

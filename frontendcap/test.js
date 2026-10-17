@@ -1709,3 +1709,305 @@ test('identity edits are mirrored into durable storage only when remembered', as
       'a tab-only session must not persist identity to disk');
   });
 });
+
+
+// ===========================================================================
+// Refactor modules: priority helpers, image pipeline, field-report decoupling
+// ===========================================================================
+
+const priorityUtilsUrl = pathToFileURL(path.join(__dirname, 'js/utils/priority.js')).href;
+const imagePipelineUrl = pathToFileURL(path.join(__dirname, 'js/services/imagePipeline.js')).href;
+const cpdoSurveyUrl = pathToFileURL(path.join(__dirname, 'js/features/cpdo-survey/index.js')).href;
+const masterlistUrl = pathToFileURL(path.join(__dirname, 'js/features/priority-masterlist/index.js')).href;
+const fieldReportUrl = pathToFileURL(path.join(__dirname, 'js/features/field-report/index.js')).href;
+
+/**
+ * Feature modules attach window bridges and run a DOMContentLoaded listener at
+ * import time. Import them against a minimal stub so the module graph loads, then
+ * restore the real globals — the same pattern the pre-existing module tests use.
+ */
+async function withMinimalDom(run) {
+  const originals = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = {};
+  globalThis.document = {
+    readyState: 'complete',
+    getElementById: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    addEventListener: () => {}
+  };
+  try {
+    return await run();
+  } finally {
+    if (originals.window === undefined) delete globalThis.window;
+    else globalThis.window = originals.window;
+    if (originals.document === undefined) delete globalThis.document;
+    else globalThis.document = originals.document;
+  }
+}
+
+test('tier labels and badge colours mirror the backend contract', async () => {
+  const { tierLabel, tierBadgeColor, TIER } = await import(priorityUtilsUrl);
+
+  assert.strictEqual(tierLabel(TIER.HIGH), 'HIGH PRIORITY');
+  assert.strictEqual(tierLabel(TIER.MEDIUM), 'MEDIUM PRIORITY');
+  assert.strictEqual(tierLabel(TIER.LOW), 'LOW PRIORITY');
+
+  // These three hex values are asserted on the Java side too
+  // (PriorityRankingServiceTest.badgesMatchSpecificationColours).
+  assert.strictEqual(tierBadgeColor(TIER.HIGH), '#dc3545');
+  assert.strictEqual(tierBadgeColor(TIER.MEDIUM), '#ff8c00');
+  assert.strictEqual(tierBadgeColor(TIER.LOW), '#28a745');
+});
+
+test('normalizeTier clamps unknown tiers to LOW instead of rendering blank', async () => {
+  const { normalizeTier, TIER } = await import(priorityUtilsUrl);
+  assert.strictEqual(normalizeTier(3), TIER.HIGH);
+  assert.strictEqual(normalizeTier('2'), TIER.MEDIUM);
+  assert.strictEqual(normalizeTier(0), TIER.LOW);
+  assert.strictEqual(normalizeTier(undefined), TIER.LOW);
+  assert.strictEqual(normalizeTier('nonsense'), TIER.LOW);
+});
+
+test('severityLabel treats an absent score as Unassessed, not as no damage', async () => {
+  const { severityLabel } = await import(priorityUtilsUrl);
+  assert.strictEqual(severityLabel(1), 'Low');
+  assert.strictEqual(severityLabel(2), 'Medium');
+  assert.strictEqual(severityLabel(3), 'High');
+  assert.strictEqual(severityLabel(0), 'Unassessed');
+  assert.strictEqual(severityLabel(null), 'Unassessed');
+  assert.strictEqual(severityLabel(undefined), 'Unassessed');
+});
+
+test('measurement formatters carry units and degrade to a dash', async () => {
+  const { formatMetres, formatCentimetres, formatFootprint, formatPriorityScore, formatConfidence } =
+    await import(priorityUtilsUrl);
+
+  assert.strictEqual(formatMetres(2.45), '2.5 m');
+  assert.strictEqual(formatMetres(null), '—');
+  assert.strictEqual(formatCentimetres(7), '7.0 cm');
+  assert.strictEqual(formatFootprint(0), '0');
+  assert.strictEqual(formatFootprint(24), '24.0 m²·cm');
+  assert.ok(formatFootprint(12000).includes('m²·cm'));
+  assert.strictEqual(formatPriorityScore(1.2349), '1.23');
+  assert.strictEqual(formatConfidence(87.25), '87.3%');
+});
+
+test('isSupportedDefectCategory accepts the four categories only', async () => {
+  const { isSupportedDefectCategory, DEFECT_CATEGORIES } = await import(priorityUtilsUrl);
+
+  assert.deepStrictEqual([...DEFECT_CATEGORIES],
+    ['Pothole', 'Cracking', 'Surface Disintegration', 'Block Failure']);
+  assert.strictEqual(isSupportedDefectCategory('Pothole'), true);
+  assert.strictEqual(isSupportedDefectCategory('  cracking '), true);
+  // Legacy labels are deliberately NOT silently remapped client-side.
+  assert.strictEqual(isSupportedDefectCategory('Edge Deformation'), false);
+  assert.strictEqual(isSupportedDefectCategory('Other'), false);
+  assert.strictEqual(isSupportedDefectCategory(null), false);
+});
+
+test('computeCrop picks the centred rectangle for too-wide and too-tall sources', async () => {
+  const { computeCrop } = await import(imagePipelineUrl);
+
+  // Already 4:3 — nothing to trim.
+  const exact = computeCrop(4000, 3000);
+  assert.deepStrictEqual(exact, { sx: 0, sy: 0, sw: 4000, sh: 3000 });
+
+  // Square source -> trim top and bottom.
+  const square = computeCrop(3000, 3000);
+  assert.strictEqual(square.sw, 3000);
+  assert.strictEqual(square.sh, 2250);
+  assert.strictEqual(square.sy, 375);
+
+  // Ultra-wide source -> trim the sides.
+  const wide = computeCrop(4000, 2000);
+  assert.strictEqual(wide.sh, 2000);
+  assert.strictEqual(wide.sw, 2667);
+  assert.ok(wide.sx > 0, 'a wide frame must be cropped from both sides');
+
+  // Degenerate input must not throw.
+  assert.deepStrictEqual(computeCrop(0, 0), { sx: 0, sy: 0, sw: 0, sh: 0 });
+});
+
+test('computeTargetSize caps the long edge and never upscales', async () => {
+  const { computeTargetSize, TARGET_LONG_EDGE } = await import(imagePipelineUrl);
+
+  const large = computeTargetSize(4000, 3000);
+  assert.strictEqual(large.width, TARGET_LONG_EDGE);
+  assert.strictEqual(large.height, Math.round(TARGET_LONG_EDGE * 0.75));
+
+  const small = computeTargetSize(640, 480);
+  assert.deepStrictEqual(small, { width: 640, height: 480 },
+    'a small source must keep its own resolution');
+
+  assert.deepStrictEqual(computeTargetSize(0, 0), { width: 0, height: 0 });
+});
+
+test('validateSelection caps at three photos and rejects unusable files', async () => {
+  const { validateSelection } = await import(imagePipelineUrl);
+
+  const photo = (name, type = 'image/jpeg', size = 500000) => ({ name, type, size });
+
+  const four = validateSelection([
+    photo('a.jpg'), photo('b.jpg'), photo('c.jpg'), photo('d.jpg')
+  ]);
+  assert.strictEqual(four.accepted.length, 3);
+  assert.strictEqual(four.rejected.length, 1);
+  assert.match(four.rejected[0].reason, /Only 3 photos/);
+
+  const badTypes = validateSelection([photo('doc.pdf', 'application/pdf'), photo('tiny.jpg', 'image/jpeg', 10)]);
+  assert.strictEqual(badTypes.accepted.length, 0);
+  assert.strictEqual(badTypes.rejected.length, 2);
+
+  const oversized = validateSelection([photo('huge.jpg', 'image/jpeg', 13 * 1024 * 1024)]);
+  assert.strictEqual(oversized.accepted.length, 0);
+  assert.match(oversized.rejected[0].reason, /too large/i);
+});
+
+test('perspectiveForIndex follows the capture order and clamps past the end', async () => {
+  const { perspectiveForIndex } = await import(imagePipelineUrl);
+  assert.strictEqual(perspectiveForIndex(0), 'CLOSE_UP');
+  assert.strictEqual(perspectiveForIndex(1), 'WIDE_ANGLE');
+  assert.strictEqual(perspectiveForIndex(2), 'PERPENDICULAR');
+  assert.strictEqual(perspectiveForIndex(9), 'PERPENDICULAR');
+});
+
+test('buildSurveyPayload omits blanks so a partial save never erases a measurement', async () => {
+  const { buildSurveyPayload } = await withMinimalDom(() => import(cpdoSurveyUrl));
+
+  const payload = buildSurveyPayload((id) => ({
+    'cpdo-damage-length': '2.5',
+    'cpdo-damage-width': '',
+    'cpdo-damage-depth': '',
+    'cpdo-surface-type': 'ASPHALT_CONCRETE',
+    'cpdo-repair-plan': '  '
+  }[id] ?? ''));
+
+  assert.deepStrictEqual(payload, { damageLength: 2.5, surfaceType: 'ASPHALT_CONCRETE' });
+  assert.ok(!('damageWidth' in payload), 'a blank width must not be sent as 0');
+});
+
+test('buildSurveyPayload rejects non-numeric measurements and unknown surfaces', async () => {
+  const { buildSurveyPayload } = await withMinimalDom(() => import(cpdoSurveyUrl));
+
+  assert.throws(
+    () => buildSurveyPayload((id) => (id === 'cpdo-damage-length' ? 'abc' : '')),
+    /positive number/
+  );
+  assert.throws(
+    () => buildSurveyPayload((id) => (id === 'cpdo-damage-depth' ? '-4' : '')),
+    /positive number/
+  );
+  assert.throws(
+    () => buildSurveyPayload((id) => (id === 'cpdo-surface-type' ? 'GRAVEL' : '')),
+    /Portland Cement Concrete/
+  );
+});
+
+test('escapeHtml neutralizes operator-entered markup', async () => {
+  const { escapeHtml } = await withMinimalDom(() => import(masterlistUrl));
+
+  assert.strictEqual(escapeHtml('<script>alert(1)</script>'),
+    '&lt;script&gt;alert(1)&lt;/script&gt;');
+  assert.strictEqual(escapeHtml('a & b "c" \'d\''), 'a &amp; b &quot;c&quot; &#39;d&#39;');
+  assert.strictEqual(escapeHtml(null), '');
+});
+
+test('buildMasterlistHtml renders an empty state for an empty queue', async () => {
+  const { buildMasterlistHtml } = await withMinimalDom(() => import(masterlistUrl));
+
+  assert.match(buildMasterlistHtml([]), /No validated reports/);
+  assert.match(buildMasterlistHtml(null), /No validated reports/);
+});
+
+test('buildMasterlistHtml escapes road names and uses the tier colours', async () => {
+  const { buildMasterlistHtml } = await withMinimalDom(() => import(masterlistUrl));
+
+  const html = buildMasterlistHtml([{
+    id: 42,
+    cityRoadName: '<img src=x onerror=alert(1)>',
+    damageType: 'Pothole',
+    cvSeverityScore: 3,
+    tierScore: 3,
+    areaScore: 24,
+    priorityScore: 2.5,
+    damageLength: 2,
+    damageWidth: 3,
+    damageDepth: 4
+  }]);
+
+  assert.ok(!html.includes('<img src=x'), 'road name must be escaped');
+  assert.ok(html.includes('&lt;img src=x'));
+  assert.ok(html.includes('#dc3545'), 'HIGH tier must carry the red badge colour');
+  assert.ok(html.includes('HIGH PRIORITY'));
+  assert.ok(html.includes('24.0 m²·cm'));
+  assert.ok(html.includes('2.0 m × 3.0 m × 4.0 cm'));
+});
+
+test('validateFieldInput requires photos, a supported category and coordinates', async () => {
+  const { validateFieldInput } = await withMinimalDom(() => import(fieldReportUrl));
+
+  const empty = validateFieldInput({ files: [], category: '', latitude: null, longitude: null });
+  assert.strictEqual(empty.ok, false);
+  assert.strictEqual(empty.errors.length, 3);
+
+  const ok = validateFieldInput({
+    files: [{ name: 'a.jpg' }], category: 'Pothole', latitude: 14.8, longitude: 121.0
+  });
+  assert.deepStrictEqual(ok, { ok: true, errors: [] });
+
+  // Engineering-looking but unsupported categories are refused, not coerced.
+  const legacy = validateFieldInput({
+    files: [{ name: 'a.jpg' }], category: 'Washout/Sinkhole', latitude: 14.8, longitude: 121.0
+  });
+  assert.strictEqual(legacy.ok, false);
+});
+
+test('buildFieldFormData emits images, perspectives and the three fields', async () => {
+  const { buildFieldFormData } = await withMinimalDom(() => import(fieldReportUrl));
+
+  const form = buildFieldFormData({
+    photos: [
+      { blob: new Blob(['x'], { type: 'image/jpeg' }), perspective: 'CLOSE_UP', name: 'a.jpg' },
+      { blob: new Blob(['y'], { type: 'image/jpeg' }), perspective: 'WIDE_ANGLE', name: 'b.jpg' }
+    ],
+    category: 'Pothole',
+    latitude: 14.8123,
+    longitude: 121.0456,
+    notes: 'deep hole near the school gate'
+  });
+
+  assert.strictEqual(form.getAll('images').length, 2);
+  assert.deepStrictEqual(form.getAll('perspectives'), ['CLOSE_UP', 'WIDE_ANGLE']);
+  assert.strictEqual(form.get('damageType'), 'Pothole');
+  assert.strictEqual(form.get('latitude'), '14.8123');
+  assert.strictEqual(form.get('longitude'), '121.0456');
+  assert.strictEqual(form.get('damageDescription'), 'deep hole near the school gate');
+
+  // The decoupling guarantee: no engineering field can be smuggled through this form.
+  assert.strictEqual(form.get('damageLength'), null);
+  assert.strictEqual(form.get('damageWidth'), null);
+  assert.strictEqual(form.get('damageDepth'), null);
+  assert.strictEqual(form.get('cpdoRepairPlan'), null);
+});
+
+
+test('shouldHideEngineeringFields fails closed and mirrors the server role matrix', async () => {
+  const { shouldHideEngineeringFields } = await withMinimalDom(() => import(fieldReportUrl));
+
+  // Inspectors (and anything unrecognised) must not be offered measured geometry:
+  // the server discards it, so showing the inputs would be a lie.
+  for (const role of ['BARANGAY', 'barangay', 'ROLE_BARANGAY', '  ROLE_barangay  ',
+                      '', 'INTERN', 'contractor', null, undefined]) {
+    assert.strictEqual(shouldHideEngineeringFields(role), true,
+      `${String(role)} must not see engineering inputs`);
+  }
+
+  // Survey-capable roles keep them, including the ROLE_ prefixed form the JWT
+  // filter emits and the spaced 'City Engineer' label.
+  for (const role of ['CPDO Admin', 'ROLE_CPDO ADMIN', 'cpdo  admin', 'ADMIN', 'admin',
+                      'ENGINEER', 'City Engineer', 'city engineer']) {
+    assert.strictEqual(shouldHideEngineeringFields(role), false,
+      `${role} must keep engineering inputs`);
+  }
+});

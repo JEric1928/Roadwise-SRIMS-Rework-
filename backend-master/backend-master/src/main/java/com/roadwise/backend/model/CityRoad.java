@@ -16,6 +16,17 @@ public class CityRoad {
     private String terrainType;    // Flat, Mountainous, Rolling
     private String roadType;       // Asphalt, Gravel, Earth, Concrete, Mixed
 
+    /**
+     * Authoritative core-arterial classification used by the priority engine (V20).
+     *
+     * <p>Derived once from {@link #roadImportance} by the V20 migration, then kept
+     * independent so an operator can override a mis-classified road without
+     * rewriting free text. Read it through {@link #qualifiesAsCoreArterial()} rather
+     * than directly — the column is nullable on legacy rows.</p>
+     */
+    @Column(name = "is_core_arterial")
+    private Boolean isCoreArterial = false;
+
     // This creates the "barangay_id" Foreign Key column in the database automatically!
     @ManyToOne
     @JoinColumn(name = "barangay_id", nullable = false)
@@ -45,4 +56,18 @@ public class CityRoad {
 
     public Barangay getBarangay() { return barangay; }
     public void setBarangay(Barangay barangay) { this.barangay = barangay; }
+
+    public Boolean getIsCoreArterial() { return isCoreArterial; }
+    public void setIsCoreArterial(Boolean isCoreArterial) { this.isCoreArterial = isCoreArterial; }
+
+    /**
+     * Null-safe read of the arterial flag.
+     *
+     * <p>Named distinctly from the {@code getIsCoreArterial()} bean accessor so
+     * Jackson does not emit a second, differently-named JSON property for the same
+     * column.</p>
+     */
+    public boolean qualifiesAsCoreArterial() {
+        return Boolean.TRUE.equals(isCoreArterial);
+    }
 }

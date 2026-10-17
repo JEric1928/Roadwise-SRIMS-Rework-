@@ -1,5 +1,6 @@
 package com.roadwise.backend.controller;
 
+import com.roadwise.backend.dto.PageResponseDto;
 import com.roadwise.backend.model.ActivityLog;
 import com.roadwise.backend.model.User;
 import com.roadwise.backend.repository.ActivityLogRepository;
@@ -10,6 +11,10 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -28,11 +33,29 @@ public class ActivityLogController {
     @Autowired
     private ActivityLogService activityLogService;
 
-    // 1. GET ALL ACTIVITY LOGS (Ordered by Newest First)
+    // 1. GET ACTIVITY LOGS (newest first, paged)
     @GetMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'CPDO Admin')")
-    public List<ActivityLog> getAllLogs() {
-        return activityLogRepository.findAllByOrderByTimestampDesc();
+    public PageResponseDto<ActivityLog> getAllLogs(
+            @RequestParam(value = "page", defaultValue = "0") int page,
+            @RequestParam(value = "size", defaultValue = "100") int size) {
+
+        // Cap the page size: an uncapped size is the unbounded read this replaces.
+        int cappedSize = Math.min(Math.max(1, size), 200);
+        // Stable tie-breaker on id keeps paging consistent when timestamps repeat.
+        Pageable pageable = PageRequest.of(Math.max(0, page), cappedSize,
+                Sort.by(Sort.Direction.DESC, "timestamp").and(Sort.by(Sort.Direction.DESC, "id")));
+
+        Page<ActivityLog> logPage = activityLogRepository.findAll(pageable);
+
+        return new PageResponseDto<>(
+                logPage.getContent(),
+                logPage.getNumber(),
+                logPage.getSize(),
+                logPage.getTotalElements(),
+                logPage.getTotalPages(),
+                logPage.isLast()
+        );
     }
 
     // 2. GET SINGLE LOG BY ID (For Audit Inspector Modal)

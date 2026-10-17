@@ -216,6 +216,14 @@
                     class="bd-btn-new-report">
               ➕ New Field Report
             </button>
+            <!-- Simplified path: photos + GPS + category only. The legacy form stays
+                 available until the report wizard is retired. -->
+            <button type="button"
+                    onclick="openFieldReportForm()"
+                    class="bd-btn-new-report"
+                    style="margin-left: 8px;">
+              📷 Quick Report
+            </button>
           </div>
         </div>
 
@@ -341,7 +349,7 @@
                   </div>
                 </div>
 
-                <div class="form-column">
+                <div class="form-column" data-engineering-field="damage-measurements">
                   <div style="display: flex; gap: 12px;">
                     <div class="form-group" style="flex: 1;">
                       <label for="damageLength">Damage Length (m)</label>
@@ -684,5 +692,67 @@
 <script src="js/api-base.js"></script>
 <script src="js/config.js"></script>
 <script src="js/app.js"></script>
+<!-- ==========================================================
+     BARANGAY FIELD REPORT — three-field upload
+     Photos (up to 3), a GPS pin, a defect category. No engineering fields: the CPDO
+     records measurements later, against the same report. Opened with
+     `openFieldReportForm()` so the legacy form can be retired independently.
+     ========================================================== -->
+<div id="field-report-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="field-report-title">
+  <div class="modal-content" style="max-width: 560px; width: 94%;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;" aria-hidden="true">📷</span>
+        <h3 id="field-report-title" style="margin: 0; font-size: 16px; font-weight: 700; color: #0f172a;">Report Road Damage</h3>
+      </div>
+      <button type="button" class="close-modal-btn" onclick="document.getElementById('field-report-modal').classList.add('hidden')" aria-label="Close field report modal">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 20px;">
+      <form id="field-report-form">
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label for="field-photo-input">Photos <span class="text-muted">(up to 3: close-up, wide angle, perpendicular)</span></label>
+          <input type="file" id="field-photo-input" name="images" accept="image/*" capture="environment" multiple />
+          <p style="margin: 4px 0 0; font-size: 12px; color: #64748b;">
+            Photos are compressed on this device before upload.
+          </p>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label for="field-defect-category">Defect category</label>
+          <select id="field-defect-category" name="damageType" required>
+            <option value="">Select category</option>
+            <option value="Pothole">Pothole</option>
+            <option value="Cracking">Cracking</option>
+            <option value="Surface Disintegration">Surface Disintegration</option>
+            <option value="Block Failure">Block Failure</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label>Location</label>
+          <div style="display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: end;">
+            <input type="number" id="field-latitude" step="0.000001" placeholder="Latitude" readonly />
+            <input type="number" id="field-longitude" step="0.000001" placeholder="Longitude" readonly />
+            <button type="button" id="field-locate-btn" class="btn-secondary">Use my location</button>
+          </div>
+          <p style="margin: 4px 0 0; font-size: 12px; color: #64748b;">
+            If GPS is unavailable, drop the pin on the map — the coordinates fill in here.
+          </p>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 4px;">
+          <label for="field-notes">Note <span class="text-muted">(optional)</span></label>
+          <textarea id="field-notes" rows="2" placeholder="Anything the CPDO should know?"></textarea>
+        </div>
+      </form>
+    </div>
+    <div class="modal-actions" style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; justify-content: flex-end; gap: 8px;">
+      <button type="button" class="btn-secondary" onclick="document.getElementById('field-report-modal').classList.add('hidden')">Cancel</button>
+      <button type="submit" form="field-report-form" id="field-submit-btn" class="btn-primary">Submit report</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

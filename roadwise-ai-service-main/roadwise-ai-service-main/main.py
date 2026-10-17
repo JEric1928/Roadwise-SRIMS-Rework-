@@ -4,7 +4,7 @@ import os
 import numpy as np
 import onnxruntime as ort
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, HTTPException, Header, Depends
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Header, Depends
 from fastapi.responses import JSONResponse
 from collections import OrderedDict
 import threading
@@ -61,6 +61,14 @@ def require_api_key(x_api_key: Optional[str] = Header(default=None)):
         raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key.")
 
 SEVERITY_LEVELS = ["Low", "Medium", "High"]
+
+# Numeric class for each severity label, so aggregation is an integer max rather
+# than string comparison. 1=Low, 2=Medium, 3=High; 0 means "not assessed".
+SEVERITY_SCORES = {"Low": 1, "Medium": 2, "High": 3}
+
+# One report carries at most three photos: close-up, wide angle, perpendicular.
+MAX_REPORT_IMAGES = 3
+DEFAULT_PERSPECTIVES = ("CLOSE_UP", "WIDE_ANGLE", "PERPENDICULAR")
 CONFIDENCE_FLOOR = 0.40
 MODEL_VERSION = "rdd2022-d4-resnet38-v2"
 MAX_CACHE_SIZE = 1000
@@ -86,37 +94,63 @@ def cache_set(key: str, value: dict):
             PREDICTION_CACHE.popitem(last=False)  # Evict LRU item
 
 
-def is_non_road_upload(img: Image.Image) -> tuple[bool, str, str]:
-    w_orig, h_orig = img.size
-    if w_orig > 512 or h_orig > 512:
-        img_val = img.copy()
-        img_val.thumbnail((512, 512))
-    else:
-        img_val = img
+# ==============================================================================
+# ROAD-SCENE GATE
+# ==============================================================================
+# validation.RoadSceneGate needs a pre-classifier embedding from the ONNX graph.
+# The shipped rdd2022_d4_resnet38.onnx exports exactly one tensor (logits [B, 3]),
+# so embed_to_vector() returns None and evaluate() returns REVIEW_REQUIRED
+# unconditionally - wiring it directly would quarantine every upload. Modes let
+# the gate be adopted without that cliff:
+#   off     : heuristic prescreen only (pre-gate behaviour)
+#   report  : run the gate, surface its verdict, never block publication (default)
+#   enforce : gate verdicts are authoritative (needs a 2-output model + calibration)
+ROAD_GATE_MODE = os.environ.get("ROAD_GATE_MODE", "report").strip().lower()
+if ROAD_GATE_MODE not in ("off", "report", "enforce"):
+    print(f">>> [ROAD GATE] Unknown ROAD_GATE_MODE='{ROAD_GATE_MODE}'; using 'report'.")
+    ROAD_GATE_MODE = "report"
 
-    rgb = np.array(img_val.convert("RGB"), dtype=np.float32)
-    gray = np.array(img_val.convert("L"), dtype=np.float32)
-    total_pixels = gray.size
+# Index of the embedding tensor within session.run() output. Must match the export
+# contract documented in calibrate_road_gate.py ("export it with TWO outputs").
+EMBEDDING_OUTPUT_INDEX = 1
 
-    white_ratio = float(np.sum(gray > 200.0) / total_pixels)
-    if white_ratio > 0.45:
-        return True, "Surface rejected: Document or paper surface detected.", "REJECTED"
+ROAD_GATE = V.RoadSceneGate()
 
-    h, w = gray.shape
-    center_rgb = rgb[int(h * 0.2):int(h * 0.8), int(w * 0.2):int(w * 0.8)]
-    r, g, b = center_rgb[:, :, 0], center_rgb[:, :, 1], center_rgb[:, :, 2]
-    center_saturation = float(np.mean(np.maximum.reduce([r, g, b]) - np.minimum.reduce([r, g, b])))
+if ROAD_GATE_MODE != "off":
+    if not ROAD_GATE.loaded:
+        print(">>> [ROAD GATE] Calibration unavailable; the gate cannot decide and will "
+              "report UNAVAILABLE. Do not set ROAD_GATE_MODE=enforce until "
+              "road_calibration.npz ships alongside a 2-output model export.")
+    print(f">>> [ROAD GATE] Mode={ROAD_GATE_MODE}, embedding output index={EMBEDDING_OUTPUT_INDEX}.")
 
-    if center_saturation > 42.0:
-        return True, "Surface rejected: High-saturation digital graphic detected.", "REJECTED"
 
-    mean_brightness = float(np.mean(gray))
-    if mean_brightness < 20.0:
-        return True, "Image is too dark to inspect.", "REJECTED"
+def evaluate_road_gate(outputs) -> dict:
+    """Return the road-gate verdict as a response-payload fragment.
 
-    quality = "ACCEPTABLE" if mean_brightness >= 40.0 else "LOW_QUALITY"
-    return False, "Passed", quality
+    Never raises: an unusable gate degrades to a reported status rather than
+    failing the prediction. Only 'enforce' mode may force manual review.
+    """
+    if ROAD_GATE_MODE == "off":
+        return {"roadGate": "DISABLED"}
 
+    embedding = ROAD_GATE.embed_to_vector(outputs, EMBEDDING_OUTPUT_INDEX)
+    if not ROAD_GATE.loaded or embedding is None:
+        # The gate cannot form an opinion. Say so, rather than passing off its
+        # fail-closed REVIEW_REQUIRED verdict as if a review had actually happened.
+        reason = ("road_calibration.npz not loaded" if not ROAD_GATE.loaded
+                  else f"model exports no embedding at output index {EMBEDDING_OUTPUT_INDEX}")
+        return {"roadGate": "UNAVAILABLE", "roadGateMessage": reason}
+
+    result = ROAD_GATE.evaluate(embedding)
+
+    payload = {"roadGate": result.decision}
+    if result.road_confidence:
+        payload["roadGateConfidence"] = round(float(result.road_confidence) * 100.0, 1)
+    if result.mahalanobis_distance is not None:
+        payload["roadGateDistance"] = round(float(result.mahalanobis_distance), 4)
+    if result.decision != "ROAD_CONFIRMED" and result.message:
+        payload["roadGateMessage"] = result.message
+    return payload
 
 # ==============================================================================
 # REQUEST & RESPONSE PYDANTIC MODELS
@@ -185,29 +219,75 @@ def health_check():
 def _unassessed(status: str, message: str, image_quality: str = "UNKNOWN") -> dict:
     return {
         "severity": "Unassessed",
+        "severityScore": 0,
         "confidence": 0.0,
         "status": status,
         "message": message,
         "modelVersion": MODEL_VERSION,
         "reviewRequired": True,
         "imageQuality": image_quality,
+        # No class distribution was produced, so the Stage-1 gate cannot pass.
+        "pMax": None,
+        "entropy": None,
+        "gatePassed": False,
+        "gateReason": message,
     }
 
 
-@app.post("/predict")
-async def predict_severity(file: UploadFile = File(...), _: None = Depends(require_api_key)):
-    if session is None:
-        raise HTTPException(status_code=503, detail="AI Model session is not initialized.")
+def _severity_score(label: str) -> int:
+    """Map a severity label to its 1-3 class number; 0 means 'not assessed'."""
+    return SEVERITY_SCORES.get(label, 0)
 
-    contents = await file.read(V.MAX_FILE_SIZE_BYTES + 1)
+
+def _perspective_label(raw: Optional[str], index: int) -> str:
+    """Normalize a client-supplied capture angle, falling back by position.
+
+    Position is the fallback rather than a hard error: the widget uploads in
+    close-up → wide → perpendicular order, so an older client that sends no
+    perspective labels still produces a correctly labelled set.
+    """
+    if raw:
+        normalized = raw.strip().upper().replace("-", "_").replace(" ", "_")
+        if normalized in DEFAULT_PERSPECTIVES:
+            return normalized
+    if index < len(DEFAULT_PERSPECTIVES):
+        return DEFAULT_PERSPECTIVES[index]
+    return DEFAULT_PERSPECTIVES[-1]
+
+
+async def _read_bounded(upload: UploadFile) -> bytes:
+    """Read at most the size cap, so an oversized body is never fully buffered."""
+    contents = await upload.read(V.MAX_FILE_SIZE_BYTES + 1)
     if contents is None or len(contents) == 0:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
     if len(contents) > V.MAX_FILE_SIZE_BYTES:
         # Cap was hit before the full body was buffered in memory.
         raise HTTPException(status_code=413, detail="Uploaded file exceeds the maximum allowed size.")
+    return contents
+
+
+def infer_image(contents: bytes, declared_mime: Optional[str]) -> dict:
+    """Run the layered single-image pipeline and return the response payload.
+
+    Extracted from the original /predict handler so the single-image and
+    multi-image endpoints cannot drift apart: both run the same five layers in the
+    same order, and the multi-image path only adds Stage-1 gating and aggregation on
+    top of what this returns.
+
+    Adds four keys beyond the historic payload — ``severityScore`` (1-3, 0 when
+    unassessed), ``pMax``, ``entropy`` and ``gatePassed`` — so callers can reason
+    about the decisiveness gate without recomputing the distribution. Existing keys
+    are unchanged.
+
+    Raises HTTPException(400/413) for a body that cannot be read; every *content*
+    rejection is returned as an ``Unassessed`` payload so the historic contract of
+    /predict (HTTP 200 + status field) is preserved.
+    """
+    if session is None:
+        raise HTTPException(status_code=503, detail="AI Model session is not initialized.")
 
     # Layer 1: file / security validation (size, MIME, magic bytes).
-    err_status, err_message = V.validate_upload_bytes(contents, file.content_type)
+    err_status, err_message = V.validate_upload_bytes(contents, declared_mime)
     if err_status:
         return _unassessed(err_status, err_message, "REJECTED")
 
@@ -244,34 +324,60 @@ async def predict_severity(file: UploadFile = File(...), _: None = Depends(requi
             cache_set(img_hash, res)
             return res
 
+        # Layer 5: road-scene gate. The verdict is always reported in the payload;
+        # it only blocks publication in 'enforce' mode (see ROAD_GATE_MODE).
+        road_gate = evaluate_road_gate(outputs)
+        gate_decision = road_gate.get("roadGate")
+        gate_blocks = (ROAD_GATE_MODE == "enforce"
+                       and gate_decision not in ("ROAD_CONFIRMED", "DISABLED"))
+
         probs = V.softmax(np.asarray(logits, dtype=np.float64))
         max_idx = int(np.argmax(probs))
         top_confidence = float(probs[max_idx])
         predicted_severity = SEVERITY_LEVELS[max_idx]
 
+        # Stage-1 decisiveness gate. Advisory here — /predict never rejects on it —
+        # and enforced by /predict-multi, which is where a bad photo could otherwise
+        # contaminate a multi-image severity aggregate.
+        decisiveness = V.confidence_gate(probs)
+
         review_required = (top_confidence < 0.70 or image_quality == "LOW_QUALITY"
-                           or V.margin_is_too_small(probs))
+                           or V.margin_is_too_small(probs)
+                           or gate_blocks)
+
+        gate_fields = {
+            "pMax": round(decisiveness.p_max, 4),
+            "entropy": round(decisiveness.entropy, 4),
+            "gatePassed": bool(decisiveness.passed),
+            "gateReason": decisiveness.reason,
+        }
 
         if top_confidence < CONFIDENCE_FLOOR:
             res = {
                 "severity": "Unassessed",
+                "severityScore": 0,
                 "confidence": round(top_confidence * 100.0, 1),
                 "status": "UNCERTAIN_PREDICTION",
                 "message": "Model confidence too low to determine distress severity.",
                 "modelVersion": MODEL_VERSION,
                 "reviewRequired": True,
-                "imageQuality": image_quality
+                "imageQuality": image_quality,
+                **gate_fields,
+                **road_gate,
             }
             cache_set(img_hash, res)
             return res
 
         res = {
             "severity": predicted_severity,
+            "severityScore": _severity_score(predicted_severity),
             "confidence": round(top_confidence * 100.0, 1),
-            "status": "CONFIRMED",
+            "status": gate_decision if gate_blocks else "CONFIRMED",
             "modelVersion": MODEL_VERSION,
             "reviewRequired": review_required,
-            "imageQuality": image_quality
+            "imageQuality": image_quality,
+            **gate_fields,
+            **road_gate,
         }
         cache_set(img_hash, res)
         return res
@@ -279,6 +385,114 @@ async def predict_severity(file: UploadFile = File(...), _: None = Depends(requi
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")
 
+
+@app.post("/predict")
+async def predict_severity(file: UploadFile = File(...), _: None = Depends(require_api_key)):
+    """Single-image severity prediction (unchanged contract)."""
+    contents = await _read_bounded(file)
+    return infer_image(contents, file.content_type)
+
+
+@app.post("/predict-multi")
+async def predict_multi_image_severity(
+    files: List[UploadFile] = File(...),
+    perspectives: Optional[List[str]] = Form(None),
+    _: None = Depends(require_api_key),
+):
+    """Cascaded validation + multi-image severity aggregation for one report.
+
+    Stage 1 — every photo must survive the layered pipeline and the decisiveness
+    gate. The submission is rejected as a whole with HTTP 422 when any single photo
+    fails, because max-aggregation over a set that contains an unusable image is
+    meaningless: a selfie scored as "High" would promote the whole report. The
+    response body names the offending indices so the client can highlight exactly
+    which frame to retake.
+
+    Stage 2 — ``S_cv = max(SeverityModel(I_1) .. SeverityModel(I_N))`` over the
+    validated images, returned as both the label and the 1-3 class number the
+    priority engine consumes. Reported confidence is the confidence of the image
+    that produced the maximum (the score that actually drove the result), with the
+    mean across images alongside it for auditing.
+    """
+    if session is None:
+        raise HTTPException(status_code=503, detail="AI Model session is not initialized.")
+    if not files:
+        raise HTTPException(status_code=400, detail="At least one image is required.")
+    if len(files) > MAX_REPORT_IMAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"At most {MAX_REPORT_IMAGES} images may be submitted per report.")
+
+    images: List[Dict] = []
+    rejected: List[Dict] = []
+
+    for index, upload in enumerate(files):
+        contents = await _read_bounded(upload)
+        payload = infer_image(contents, upload.content_type)
+        perspective = _perspective_label(
+            perspectives[index] if perspectives and index < len(perspectives) else None,
+            index)
+        passed = bool(payload.get("gatePassed"))
+        record = {
+            "index": index,
+            "perspective": perspective,
+            "severity": payload.get("severity"),
+            "severityScore": int(payload.get("severityScore") or 0),
+            "confidence": payload.get("confidence"),
+            "status": payload.get("status"),
+            "pMax": payload.get("pMax"),
+            "entropy": payload.get("entropy"),
+            "gatePassed": passed,
+            "reason": payload.get("gateReason") or payload.get("message") or "",
+            "roadGate": payload.get("roadGate"),
+        }
+        images.append(record)
+        if not passed:
+            rejected.append({
+                "index": index,
+                "perspective": perspective,
+                "severity": payload.get("severity"),
+                "status": payload.get("status"),
+                "pMax": payload.get("pMax"),
+                "entropy": payload.get("entropy"),
+                "reason": record["reason"],
+            })
+
+    if rejected:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": V.GATE_REJECTION_MESSAGE,
+                "rejected": rejected,
+            })
+
+    scores = [record["severityScore"] for record in images]
+    aggregate = max(scores)
+    if aggregate < 1:
+        # Defensive: imageCount>=1 but nothing scored. Reached only if the
+        # decisiveness floors and CONFIDENCE_FLOOR are reconfigured so that a
+        # gate-passing image can still be too uncertain to label.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": V.GATE_REJECTION_MESSAGE,
+                "rejected": [{"index": record["index"],
+                              "reason": "No image produced an assessable severity."}
+                             for record in images],
+            })
+    winner = images[scores.index(aggregate)]
+    mean_confidence = round(
+        sum(float(record["confidence"] or 0.0) for record in images) / len(images), 1)
+
+    return {
+        "aggregatedSeverity": SEVERITY_LEVELS[aggregate - 1],
+        "aggregatedSeverityScore": aggregate,
+        "confidence": winner["confidence"],
+        "meanConfidence": mean_confidence,
+        "modelVersion": MODEL_VERSION,
+        "imageCount": len(images),
+        "images": images,
+    }
 
 # --- ENGINE 1 ENDPOINT ---
 @app.post("/api/v1/forecasting/pavement-decay")

@@ -11,11 +11,11 @@ The dashboard markup and the feature modules have drifted apart. Every module ad
 | | |
 |---|---|
 | Pages audited | 6 |
-| Modules audited | 43 |
-| Distinct elements referenced but absent | 277 |
-| Known violations (baseline) | 410 |
+| Modules audited | 46 |
+| Distinct elements referenced but absent | 276 |
+| Known violations (baseline) | 408 |
 | New violations | 0 (the audit fails the build if this changes) |
-| Recoverable from `6e02540^` | 271 of 277 |
+| Recoverable from `6e02540^` | 270 of 276 |
 
 ## Findings by feature area
 
@@ -33,7 +33,6 @@ The dashboard markup and the feature modules have drifted apart. Every module ad
 | 3 | `all dashboards` | Profile navigation menu, logout confirmation | `#logout-confirm-modal`, `#btn-confirm-logout`, `#profile-nav-menu` | `js/features/profile-header/index.js` |
 | 2 | `all dashboards` | Profile tab navigation | `#tab-identity`, `#profile-nav-menu` | `js/features/navigation/index.js` |
 | 2 | `admin_dashboard.html` | Priority list print dropdown | `#print-dropdown`, `#view-overview` | `js/features/priority-report/index.js` |
-| 1 | `admin_dashboard.html` | Priority dispatch confirmation modal | `#dispatch-confirm-modal` | `js/features/priority-dispatch/index.js` |
 | 1 | `admin_dashboard.html` | Forecasting status labels | `#financial-var-status-label` | `js/forecasting_ui.js` |
 
 ## How to work through this

@@ -1,11 +1,14 @@
 package com.roadwise.backend.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "road_reports")
@@ -55,6 +58,20 @@ public class RoadReport {
     private Double damageLength;
     private Double damageWidth;
 
+    // --- 2a. CPDO technical survey (engineers only; null while un-surveyed) ---
+
+    /** Measured depth in centimetres. Units are fixed here, not in the column type. */
+    @Column(name = "damage_depth")
+    private Double damageDepth;
+
+    /** Pavement construction, stored as the {@link SurfaceType} name. */
+    @Column(name = "surface_type", length = 50)
+    private String surfaceType;
+
+    /** Official scope of work written by the CPDO engineer. */
+    @Column(name = "cpdo_repair_plan", columnDefinition = "TEXT")
+    private String cpdoRepairPlan;
+
     // --- 3. System & Analytics Tracking ---
     private Integer inventoryYear;
     private String status;
@@ -88,6 +105,21 @@ public class RoadReport {
     @Column(name = "cv_confidence_score")
     private Double cvConfidenceScore;
 
+    /**
+     * Aggregated vision severity class 1-3 — the maximum across every image in the
+     * report, never a single photo's score. Null means inference has not run.
+     */
+    @Column(name = "cv_severity_score")
+    private Integer cvSeverityScore;
+
+    /** LexSort primary key, 1-3. Written by {@code PriorityRankingService}. */
+    @Column(name = "tier_score")
+    private Integer tierScore = 0;
+
+    /** LexSort tie-breaker: volumetric footprint. Written by {@code PriorityRankingService}. */
+    @Column(name = "area_score")
+    private Double areaScore = 0.0;
+
     // Authoritative FK to the registered city road (the human-readable snapshot
     // code lives in city_road_code above). Writable so submissions persist the
     // real road relationship while keeping the snapshot columns for display.
@@ -114,6 +146,26 @@ public class RoadReport {
     @JoinColumn(name = "user_id")
     @OnDelete(action = OnDeleteAction.SET_NULL)
     private User user;
+
+    /** CPDO/CEO engineer who recorded the technical survey (V20). */
+    @JsonIgnoreProperties({"hibernateLazyInitializer", "handler", "password"})
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "surveyed_by")
+    @OnDelete(action = OnDeleteAction.SET_NULL)
+    private User surveyedBy;
+
+    /**
+     * Uploaded evidence, one row per photo (V20).
+     *
+     * <p>{@link JsonIgnore} is load-bearing: several legacy endpoints serialize this
+     * entity straight to the client, and a non-ignored collection would both recurse
+     * (ReportImage.report → RoadReport) and trigger a lazy read outside the
+     * transaction. New endpoints return {@code ReportImageDto} instead.</p>
+     */
+    @JsonIgnore
+    @OneToMany(mappedBy = "report", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("displayOrder ASC, id ASC")
+    private List<ReportImage> images = new ArrayList<>();
 
     private String reportedBy;
     private String severity;
@@ -472,4 +524,53 @@ public class RoadReport {
     public void setActualCompletionDate(LocalDate actualCompletionDate) {
         this.actualCompletionDate = actualCompletionDate;
     }
+    // ==========================================
+    // CPDO survey, multi-image evidence, priority ranking (V20)
+    // ==========================================
+
+    public Double getDamageDepth() { return damageDepth; }
+    public void setDamageDepth(Double damageDepth) { this.damageDepth = damageDepth; }
+
+    public String getSurfaceType() { return surfaceType; }
+    public void setSurfaceType(String surfaceType) { this.surfaceType = surfaceType; }
+
+    public String getCpdoRepairPlan() { return cpdoRepairPlan; }
+    public void setCpdoRepairPlan(String cpdoRepairPlan) { this.cpdoRepairPlan = cpdoRepairPlan; }
+
+    public User getSurveyedBy() { return surveyedBy; }
+    public void setSurveyedBy(User surveyedBy) { this.surveyedBy = surveyedBy; }
+
+    public List<ReportImage> getImages() { return images; }
+    public void setImages(List<ReportImage> images) { this.images = images; }
+
+    /** Adds an image and maintains the owning side of the association. */
+    public void addImage(ReportImage image) {
+        if (image == null) {
+            return;
+        }
+        image.setReport(this);
+        this.images.add(image);
+    }
+
+    public Integer getCvSeverityScore() { return cvSeverityScore; }
+    public void setCvSeverityScore(Integer cvSeverityScore) { this.cvSeverityScore = cvSeverityScore; }
+
+    public Integer getTierScore() { return tierScore; }
+    public void setTierScore(Integer tierScore) { this.tierScore = tierScore; }
+
+    public Double getAreaScore() { return areaScore; }
+    public void setAreaScore(Double areaScore) { this.areaScore = areaScore; }
+
+    /**
+     * Core-arterial qualification from the denormalised snapshot captured at
+     * submission.
+     *
+     * <p>The authoritative flag is {@code city_roads.is_core_arterial}; the ranking
+     * service prefers that and only falls back here when the road record is absent
+     * (legacy rows submitted before road linkage existed).</p>
+     */
+    public boolean isCoreArterialSnapshot() {
+        return roadImportance != null && roadImportance.trim().equalsIgnoreCase("Core");
+    }
+
 }

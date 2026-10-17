@@ -255,3 +255,68 @@ class TestModelOutputValidation:
         assert abs(probs.sum() - 1.0) < 1e-9
         assert V.margin_is_too_small(probs)
         assert not V.margin_is_too_small(V.softmax(np.array([5.0, 1.0, 0.1])))
+
+
+# ---------------------------------------------------------------------------
+# Stage-1 decisiveness gate (normalized entropy + max probability)
+# ---------------------------------------------------------------------------
+class TestConfidenceGate:
+    def test_rejection_message_matches_platform_spec(self):
+        assert V.GATE_REJECTION_MESSAGE == (
+            "Invalid Upload: Image does not contain recognizable road distress."
+        )
+
+    def test_entropy_is_normalized_to_unit_interval(self):
+        # One-hot is certain => 0.0; uniform => 1.0, independent of class count.
+        assert V.normalized_entropy(np.array([1.0, 0.0, 0.0])) == 0.0
+        assert abs(V.normalized_entropy(np.array([1 / 3, 1 / 3, 1 / 3])) - 1.0) < 1e-9
+        assert abs(V.normalized_entropy(np.array([0.25] * 4)) - 1.0) < 1e-9
+
+    def test_entropy_ignores_zero_probability_classes(self):
+        # log(0) must not leak a NaN or -inf through the normalization.
+        entropy = V.normalized_entropy(np.array([0.5, 0.5, 0.0]))
+        assert 0.9 < entropy <= 1.0
+
+    def test_decisive_distribution_passes(self):
+        gate = V.confidence_gate(np.array([0.90, 0.05, 0.05]))
+        assert gate.passed
+        assert abs(gate.p_max - 0.90) < 1e-9
+        assert gate.entropy < 0.5
+        assert gate.reason == ""
+
+    def test_flat_distribution_fails_on_max_probability(self):
+        gate = V.confidence_gate(np.array([0.34, 0.33, 0.33]))
+        assert not gate.passed
+        assert "confidence" in gate.reason
+
+    def test_smeared_distribution_fails_on_entropy(self):
+        # p_max clears the 0.65 floor, but the mass is spread over three classes
+        # so normalized entropy exceeds the 0.75 ceiling. This is the case the
+        # p_max check alone would let through.
+        gate = V.confidence_gate(np.array([0.65, 0.175, 0.175]))
+        assert gate.p_max >= V.CONFIDENCE_PMAX_FLOOR
+        assert gate.entropy > V.CONFIDENCE_ENTROPY_CEILING
+        assert not gate.passed
+        assert "entropy" in gate.reason
+
+    def test_floor_is_inclusive(self):
+        # Exactly at the floor, with low enough entropy, must pass.
+        gate = V.confidence_gate(np.array([0.65, 0.30, 0.05]))
+        assert gate.p_max == V.CONFIDENCE_PMAX_FLOOR
+        assert gate.passed
+
+    def test_unnormalized_input_is_renormalized(self):
+        gate = V.confidence_gate(np.array([2.0, 1.0, 1.0]))
+        assert abs(gate.p_max - 0.5) < 1e-9
+        assert not gate.passed
+
+    def test_degenerate_inputs_fail_closed(self):
+        for probs in (np.array([]), np.array([0.0, 0.0, 0.0]),
+                      np.array([np.nan, 1.0, 0.0]), np.array([np.inf, 1.0, 0.0])):
+            gate = V.confidence_gate(probs)
+            assert not gate.passed
+            assert gate.reason
+
+    def test_thresholds_match_platform_spec(self):
+        assert V.CONFIDENCE_PMAX_FLOOR == 0.65
+        assert V.CONFIDENCE_ENTROPY_CEILING == 0.75

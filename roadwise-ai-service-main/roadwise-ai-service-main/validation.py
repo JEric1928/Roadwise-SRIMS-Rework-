@@ -433,6 +433,93 @@ def margin_is_too_small(probs: np.ndarray, min_margin: float = 0.10) -> bool:
 
 
 # =============================================================================
+# 5b. Stage-1 single-pass input gate (normalized entropy + max probability)
+# =============================================================================
+# IMPORTANT — what this gate does and does not prove.
+#
+# p_max and H(p) are computed from the *severity* classifier's output distribution.
+# They measure how DECISIVE the model is about which severity class an image
+# belongs to. They are not evidence about whether the image contains a road at all:
+# a photograph of a document or an indoor scene can sit far outside the training
+# distribution and still produce a confidently peaked 3-way distribution, because
+# nothing in a softmax over severity classes penalizes "none of these".
+#
+# The genuine road/non-road signals in this module are the heuristic pre-screen
+# (section 3: documents, skies, screenshots, saturation) and the embedding-space
+# RoadSceneGate (section 4). This gate is an additional cheap filter that catches
+# the *ambiguous* upload — the one the classifier itself cannot place — and it is
+# applied per image on the multi-image path so a single unusable photo cannot
+# contribute to severity aggregation.
+#
+# Thresholds come from the platform specification; recalibrate them against a
+# labelled validation set alongside the other policy constants above.
+CONFIDENCE_PMAX_FLOOR = 0.65        # reject when max class probability is below this
+CONFIDENCE_ENTROPY_CEILING = 0.75   # reject when normalized entropy is above this
+
+GATE_REJECTION_MESSAGE = "Invalid Upload: Image does not contain recognizable road distress."
+
+
+@dataclass
+class ConfidenceGate:
+    """Outcome of the Stage-1 decisiveness gate for one image."""
+    passed: bool
+    p_max: float
+    entropy: float                  # normalized to [0, 1]: 0 certain, 1 uniform
+    reason: str = ""
+
+
+def normalized_entropy(probs: np.ndarray) -> float:
+    """Shannon entropy of a categorical distribution, normalized by log(C).
+
+    Normalizing keeps the ceiling meaningful if the severity head ever gains or
+    loses a class. Returns 0.0 for a degenerate distribution (a single non-zero
+    class) and 1.0 for a uniform one.
+    """
+    p = np.asarray(probs, dtype=np.float64).reshape(-1)
+    p = p[p > 0.0]
+    if p.size <= 1:
+        return 0.0
+    entropy = float(-(p * np.log(p)).sum())
+    ceiling = float(np.log(p.size))
+    if not np.isfinite(entropy) or ceiling <= 0.0:
+        return 0.0
+    return max(0.0, min(1.0, entropy / ceiling))
+
+
+def confidence_gate(probs: np.ndarray,
+                    p_max_floor: float = CONFIDENCE_PMAX_FLOOR,
+                    entropy_ceiling: float = CONFIDENCE_ENTROPY_CEILING) -> ConfidenceGate:
+    """Apply the Stage-1 rule to one image's class distribution.
+
+    Rejects when the distribution is not decisive: ``p_max < p_max_floor`` OR
+    ``H(p) / log(C) > entropy_ceiling``. Both conditions are checked because they
+    fail differently — p_max catches a distribution with no clear winner, entropy
+    catches one that is smeared across several classes even when the top class is
+    nominally above the floor.
+    """
+    p = np.asarray(probs, dtype=np.float64).reshape(-1)
+    if p.size == 0 or not np.all(np.isfinite(p)) or float(p.sum()) <= 0.0:
+        return ConfidenceGate(False, 0.0, 1.0, "Model produced no usable class distribution.")
+
+    total = float(p.sum())
+    if abs(total - 1.0) > 1e-6:
+        p = p / total     # tolerate float drift without trusting a bad distribution
+
+    p_max = float(np.max(p))
+    entropy = normalized_entropy(p)
+
+    if p_max < p_max_floor:
+        return ConfidenceGate(
+            False, p_max, entropy,
+            f"Classification confidence {p_max:.2f} is below the {p_max_floor:.2f} floor.")
+    if entropy > entropy_ceiling:
+        return ConfidenceGate(
+            False, p_max, entropy,
+            f"Classification entropy {entropy:.2f} exceeds the {entropy_ceiling:.2f} ceiling.")
+
+    return ConfidenceGate(True, p_max, entropy)
+
+# =============================================================================
 # Utility
 # =============================================================================
 def sha256_hex(data: bytes) -> str:

@@ -16,6 +16,9 @@ import org.springframework.web.multipart.MultipartFile;
 import org.springframework.http.HttpMethod;
 import org.springframework.core.ParameterizedTypeReference;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -125,17 +128,8 @@ public class RoadInspectionService {
                 headers.set("X-API-Key", aiServiceApiKey);
             }
 
-            byte[] bytes = file.getBytes();
-            ByteArrayResource fileResource = new ByteArrayResource(bytes) {
-                @Override
-                public String getFilename() {
-                    // Never trust the client filename for anything but transport.
-                    return file.getOriginalFilename() != null ? file.getOriginalFilename() : "damage_image.jpg";
-                }
-            };
-
             MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
-            body.add("file", fileResource);
+            body.add("file", asResource(file));
             HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
 
             ResponseEntity<Map<String, Object>> response;
@@ -226,6 +220,278 @@ public class RoadInspectionService {
         try {
             double d = Double.parseDouble(value.toString());
             return Double.isFinite(d) ? d : fallback;
+        } catch (NumberFormatException ex) {
+            return fallback;
+        }
+    }
+
+    // =====================================================================
+    // Cascaded multi-image pipeline (Stage 1 gate + Stage 2 max aggregation)
+    // =====================================================================
+
+    /** Stage-1 rejection message, fixed by the platform specification. */
+    public static final String GATE_REJECTION_MESSAGE =
+            "Invalid Upload: Image does not contain recognizable road distress.";
+
+    /** One report carries at most three photos: close-up, wide angle, perpendicular. */
+    public static final int MAX_REPORT_IMAGES = 3;
+
+    /** A photo the Stage-1 guardrail refused, with enough detail to retake it. */
+    public record RejectedImage(int index, String perspective, String severity, String status,
+                                Double pMax, Double entropy, String reason) {
+    }
+
+    /**
+     * Outcome of the cascaded multi-image pipeline.
+     *
+     * <p>{@code accepted == false} is not necessarily a failure: it is the Stage-1
+     * guardrail doing its job. Callers must distinguish the two cases —
+     * {@link #isValidationRejection()} maps to HTTP 422 (the submission is invalid
+     * and the user must retake a photo), while {@link #isTransportFailure()} maps to
+     * 503 (the inference service is down and the report may still be saved with an
+     * unassessed severity).</p>
+     */
+    public static final class MultiImageInspectionResult {
+
+        private static final String STATUS_VALIDATION_REJECTED = "VALIDATION_REJECTED";
+
+        private final boolean accepted;
+        private final String aggregatedSeverity;
+        private final int aggregatedSeverityScore;
+        private final double confidence;
+        private final double meanConfidence;
+        private final String status;
+        private final String message;
+        private final List<RejectedImage> rejected;
+
+        private MultiImageInspectionResult(boolean accepted, String aggregatedSeverity,
+                                           int aggregatedSeverityScore, double confidence,
+                                           double meanConfidence, String status, String message,
+                                           List<RejectedImage> rejected) {
+            this.accepted = accepted;
+            this.aggregatedSeverity = aggregatedSeverity;
+            this.aggregatedSeverityScore = aggregatedSeverityScore;
+            this.confidence = confidence;
+            this.meanConfidence = meanConfidence;
+            this.status = status;
+            this.message = message;
+            this.rejected = rejected == null ? Collections.emptyList() : List.copyOf(rejected);
+        }
+
+        static MultiImageInspectionResult accepted(String severity, int score,
+                                                   double confidence, double meanConfidence) {
+            return new MultiImageInspectionResult(true, severity, score, confidence, meanConfidence,
+                    "CONFIRMED", null, Collections.emptyList());
+        }
+
+        static MultiImageInspectionResult rejected(List<RejectedImage> rejected) {
+            return new MultiImageInspectionResult(false, SEVERITY_UNASSESSED, 0, 0.0, 0.0,
+                    STATUS_VALIDATION_REJECTED, GATE_REJECTION_MESSAGE, rejected);
+        }
+
+        static MultiImageInspectionResult failed(String status, String message) {
+            return new MultiImageInspectionResult(false, SEVERITY_UNASSESSED, 0, 0.0, 0.0,
+                    status, message, Collections.emptyList());
+        }
+
+        public boolean isAccepted() { return accepted; }
+
+        /** True when the submission must be refused with 422 rather than stored. */
+        public boolean isValidationRejection() {
+            return !accepted && STATUS_VALIDATION_REJECTED.equals(status);
+        }
+
+        /** True when the AI service itself could not be reached or errored. */
+        public boolean isTransportFailure() {
+            return !accepted && !STATUS_VALIDATION_REJECTED.equals(status);
+        }
+
+        public String getAggregatedSeverity() { return aggregatedSeverity; }
+        public int getAggregatedSeverityScore() { return aggregatedSeverityScore; }
+        public double getConfidence() { return confidence; }
+        public double getMeanConfidence() { return meanConfidence; }
+        public String getStatus() { return status; }
+        public String getMessage() { return message; }
+        public List<RejectedImage> getRejected() { return rejected; }
+    }
+
+    /**
+     * Run Stage-1 validation then Stage-2 max aggregation over one report's photos.
+     *
+     * <p>The max rule is deliberate: a report is as severe as its worst visible
+     * damage, so a single high-severity frame must not be averaged away by two mild
+     * ones. It also means a bad frame cannot be tolerated — which is why Stage 1
+     * rejects the whole submission rather than dropping the offending image.</p>
+     *
+     * <p>Never throws for a rejected or unreachable service; callers branch on the
+     * returned status. That keeps the upload endpoint's error handling in one place
+     * instead of scattered try/catch.</p>
+     */
+    public MultiImageInspectionResult analyzeMultiImage(List<MultipartFile> files,
+                                                        List<String> perspectives) {
+        if (files == null || files.isEmpty()) {
+            return MultiImageInspectionResult.failed("INVALID_INPUT",
+                    "At least one image is required.");
+        }
+        if (files.size() > MAX_REPORT_IMAGES) {
+            return MultiImageInspectionResult.failed("INVALID_INPUT",
+                    "At most " + MAX_REPORT_IMAGES + " images may be submitted per report.");
+        }
+        for (MultipartFile file : files) {
+            if (file == null || file.isEmpty()) {
+                return MultiImageInspectionResult.failed("INVALID_INPUT",
+                        "One of the uploaded images was empty; upload 1-3 photos and retry.");
+            }
+        }
+        if (isCircuitOpen()) {
+            return MultiImageInspectionResult.failed("AI_UNAVAILABLE",
+                    "AI service temporarily unavailable (circuit open); manual review required.");
+        }
+
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.MULTIPART_FORM_DATA);
+            if (aiServiceApiKey != null && !aiServiceApiKey.isBlank()) {
+                headers.set("X-API-Key", aiServiceApiKey);
+            }
+
+            MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
+            for (MultipartFile file : files) {
+                body.add("files", asResource(file));
+            }
+            if (perspectives != null) {
+                for (String perspective : perspectives) {
+                    if (perspective != null && !perspective.isBlank()) {
+                        body.add("perspectives", perspective);
+                    }
+                }
+            }
+
+            HttpEntity<MultiValueMap<String, Object>> requestEntity = new HttpEntity<>(body, headers);
+
+            ResponseEntity<Map<String, Object>> response;
+            try {
+                response = restTemplate.exchange(
+                        aiServiceUrl + "/predict-multi", HttpMethod.POST, requestEntity,
+                        new ParameterizedTypeReference<Map<String, Object>>() {});
+            } catch (HttpStatusCodeException hce) {
+                int code = hce.getStatusCode().value();
+                if (code == 422) {
+                    // Stage 1 refused at least one photo. This is an expected
+                    // outcome, not a service degradation, so the circuit breaker
+                    // is left alone.
+                    System.err.println(">>> [AI GATE] Stage-1 rejection HTTP 422");
+                    return MultiImageInspectionResult.rejected(parseRejectedImages(hce));
+                }
+                recordFailure();
+                System.err.println(">>> [AI MULTI ERROR] HTTP " + code);
+                return MultiImageInspectionResult.failed(mapRejectionStatus(code),
+                        "AI service rejected the multi-image request (HTTP " + code + ").");
+            }
+
+            Map<String, Object> respBody = response.getBody();
+            if (!response.getStatusCode().is2xxSuccessful() || respBody == null) {
+                recordFailure();
+                return MultiImageInspectionResult.failed("AI_UNAVAILABLE",
+                        "AI service returned an error status; manual review required.");
+            }
+
+            int score = asInt(respBody.get("aggregatedSeverityScore"), 0);
+            String severity = stringOrNull(respBody.get("aggregatedSeverity"));
+            if (score < 1 || severity == null) {
+                // Defence in depth: a 2xx that carries no usable class must not be
+                // persisted as severity 0 or silently promoted.
+                recordFailure();
+                return MultiImageInspectionResult.failed("AI_ERROR",
+                        "AI service returned an unusable aggregate; manual review required.");
+            }
+
+            consecutiveFailures.set(0);
+            String aggregated = severity;
+            double confidence = parseDouble(respBody.get("confidence"), 0.0);
+            double meanConfidence = parseDouble(respBody.get("meanConfidence"), confidence);
+            System.out.println(">>> [AI MULTI] images=" + files.size() + " severity=" + aggregated
+                    + " score=" + score + " conf=" + confidence + "%");
+            return MultiImageInspectionResult.accepted(aggregated, score, confidence, meanConfidence);
+
+        } catch (Exception e) {
+            recordFailure();
+            System.err.println(">>> [AI MULTI EXCEPTION] " + e.getMessage());
+            return MultiImageInspectionResult.failed("AI_UNAVAILABLE",
+                    "AI service could not be reached; manual review required.");
+        }
+    }
+
+    /**
+     * Wrap an upload for transport, discarding the client filename's path.
+     *
+     * <p>Shared by the single- and multi-image paths so the "never trust the client
+     * filename" rule is enforced in exactly one place.</p>
+     */
+    private ByteArrayResource asResource(MultipartFile file) throws java.io.IOException {
+        byte[] bytes = file.getBytes();
+        return new ByteArrayResource(bytes) {
+            @Override
+            public String getFilename() {
+                return file.getOriginalFilename() != null ? file.getOriginalFilename() : "damage_image.jpg";
+            }
+        };
+    }
+
+    /**
+     * Extract the per-image rejections from a Stage-1 422 body.
+     *
+     * <p>Failure here is tolerated: the rejection message is contractual, the detail
+     * list is not. An unparseable body still yields an empty detail list plus the
+     * fixed message, which is enough for the caller to refuse the submission.</p>
+     */
+    private static List<RejectedImage> parseRejectedImages(HttpStatusCodeException hce) {
+        List<RejectedImage> rejected = new ArrayList<>();
+        try {
+            Map<?, ?> body = hce.getResponseBodyAs(Map.class);
+            if (body != null && body.get("detail") instanceof Map<?, ?> detail
+                    && detail.get("rejected") instanceof List<?> rows) {
+                for (Object row : rows) {
+                    if (row instanceof Map<?, ?> entry) {
+                        rejected.add(new RejectedImage(
+                                asInt(entry.get("index"), -1),
+                                stringOrNull(entry.get("perspective")),
+                                stringOrNull(entry.get("severity")),
+                                stringOrNull(entry.get("status")),
+                                nullableDouble(entry.get("pMax")),
+                                nullableDouble(entry.get("entropy")),
+                                stringOrNull(entry.get("reason"))));
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+            // Detail list is best-effort; GATE_REJECTION_MESSAGE carries the contract.
+        }
+        return rejected;
+    }
+
+    private static String stringOrNull(Object value) {
+        return value == null ? null : value.toString();
+    }
+
+    private static Double nullableDouble(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            double parsed = Double.parseDouble(value.toString());
+            return Double.isFinite(parsed) ? parsed : null;
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private static int asInt(Object value, int fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(value.toString().trim());
         } catch (NumberFormatException ex) {
             return fallback;
         }

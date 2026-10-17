@@ -14,6 +14,14 @@ import { formatTargetEntity, getCategoryBadge, getStatusBadge } from '../../doma
 
 let rawActivityLogs = [];
 let filteredActivityLogs = [];
+// The audit endpoint is paged. rawActivityLogs holds the newest loaded window;
+// totalActivityLogEntries is the server's count for the whole trail, so the UI and
+// the exports can tell the user when they are looking at a partial view.
+let totalActivityLogEntries = 0;
+
+function auditWindowIncomplete() {
+  return totalActivityLogEntries > rawActivityLogs.length;
+}
 let initialized = false;
 
 // 1. Fetch & Initialize Activity Logs
@@ -43,8 +51,13 @@ export async function loadActivityLogs() {
   }
 
   try {
-    const res = await apiFetch('/api/activity-logs', { cache: 'no-store' });
+    const ACTIVITY_LOG_PAGE_SIZE = 200; // matches the server-side cap
+    const res = await apiFetch(`/api/activity-logs?page=0&size=${ACTIVITY_LOG_PAGE_SIZE}`, { cache: 'no-store' });
     if (!res || !Array.isArray(res)) throw new Error("Invalid response format");
+
+    totalActivityLogEntries = (res.pagination && typeof res.pagination.totalElements === 'number')
+      ? res.pagination.totalElements
+      : res.length;
 
     // Guarantee newest logs appear at the top
     rawActivityLogs = res.sort((a, b) => (parseInt(b.id) || 0) - (parseInt(a.id) || 0));
@@ -71,7 +84,10 @@ function renderActivityLogsTable(logs) {
   if (!tbody) return;
 
   if (countEl) {
-    countEl.innerText = `Showing ${logs.length} of ${rawActivityLogs.length} log entries`;
+    const windowNote = auditWindowIncomplete()
+      ? ` (newest ${rawActivityLogs.length} of ${totalActivityLogEntries} on server)`
+      : '';
+    countEl.innerText = `Showing ${logs.length} of ${rawActivityLogs.length} log entries${windowNote}`;
   }
 
   if (logs.length === 0) {
@@ -255,6 +271,10 @@ export async function exportActivityLogCSV() {
     return;
   }
 
+  if (auditWindowIncomplete() && typeof showToast === "function") {
+    showToast(`Export covers the newest ${rawActivityLogs.length} of ${totalActivityLogEntries} log entries.`, "warning");
+  }
+
   const currentUserId = sessionStorage.getItem("userId");
   try {
     await apiFetch('/api/activity-logs/log-action', {
@@ -337,6 +357,10 @@ export function openActivityLogPrintModal() {
   if (signerEl) {
     const formattedSigner = formatOfficialName(adminFirst, adminMiddle, adminLast).toUpperCase();
     signerEl.innerText = formattedSigner || "CPDO ADMINISTRATOR";
+  }
+
+  if (auditWindowIncomplete() && typeof showToast === "function") {
+    showToast(`Report covers the newest ${rawActivityLogs.length} of ${totalActivityLogEntries} log entries.`, "warning");
   }
 
   // Populate Printable Rows

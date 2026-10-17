@@ -9,6 +9,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.jdbc.BadSqlGrammarException;
 
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.AbstractPlatformTransactionManager;
+import org.springframework.transaction.support.DefaultTransactionStatus;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.util.List;
@@ -34,7 +38,33 @@ class DuplicateDetectionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new DuplicateDetectionService(repository);
+        service = new DuplicateDetectionService(repository, synchronousTransactionManager());
+    }
+
+    /**
+     * Runs transaction callbacks inline. The service isolates the PostGIS probe in a
+     * REQUIRES_NEW transaction; a mocked repository throws before any real transaction
+     * work happens, so a pass-through manager preserves this test's original meaning.
+     */
+    private static PlatformTransactionManager synchronousTransactionManager() {
+        return new AbstractPlatformTransactionManager() {
+            @Override
+            protected Object doGetTransaction() {
+                return new Object();
+            }
+
+            @Override
+            protected void doBegin(Object transaction, TransactionDefinition definition) {
+            }
+
+            @Override
+            protected void doCommit(DefaultTransactionStatus status) {
+            }
+
+            @Override
+            protected void doRollback(DefaultTransactionStatus status) {
+            }
+        };
     }
 
     private static RoadReport report(Long id, double lat, double lng, String roadName) {

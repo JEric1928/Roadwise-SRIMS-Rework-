@@ -740,6 +740,33 @@
   </div>
 </div>
 
+<!-- PRIORITY DISPATCH CONFIRMATION MODAL -->
+<div id="dispatch-confirm-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dispatch-confirm-title">
+  <div class="modal-content" style="max-width: 450px; padding: 0; overflow: hidden; border-radius: 12px; border: none; box-shadow: 0 15px 35px rgba(0,0,0,0.2);">
+    <div style="background-color: #f0f7ff; padding: 30px 20px 20px; text-align: center; border-bottom: 1px solid #cce5ff;">
+      <div style="background-color: #cce5ff; width: 65px; height: 65px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 15px; box-shadow: 0 4px 10px rgba(0,123,255,0.15);" aria-hidden="true">
+        <span style="font-size: 32px;">📨</span>
+      </div>
+      <h2 id="dispatch-confirm-title" style="margin: 0; color: #0056b3; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">Finalize Masterlist?</h2>
+    </div>
+    <div style="padding: 25px 30px; text-align: center; background: white;">
+      <p style="margin: 0; font-size: 15px; color: #444; line-height: 1.6;">
+        Are you absolutely sure you want to finalize this Priority List and dispatch it to the <strong>City Engineering Office</strong>?
+        <br><br>
+        <span style="color: #dc3545; font-size: 13px; font-weight: bold;">This action cannot be undone.</span>
+      </p>
+    </div>
+    <div style="background-color: #f8f9fa; padding: 20px 30px; border-top: 1px solid #e9ecef; display: flex; gap: 15px; justify-content: space-between;">
+      <button type="button" onclick="document.getElementById('dispatch-confirm-modal').classList.add('hidden')" style="padding: 12px 20px; border: 1px solid #d1d5db; background: white; color: #4b5563; cursor: pointer; border-radius: 8px; font-weight: 600; flex: 1; transition: all 0.2s ease; font-size: 15px;">
+        Cancel
+      </button>
+      <button type="button" onclick="window.executePriorityDispatch(event)" style="padding: 12px 20px; border: none; background: #007bff; color: white; cursor: pointer; border-radius: 8px; font-weight: 600; flex: 1; box-shadow: 0 4px 12px rgba(0,123,255,0.3); transition: all 0.2s ease; font-size: 15px;">
+        Yes, Dispatch Now
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- SINGLE NOTIFICATION MODAL -->
 <div id="single-notif-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="single-notif-title">
   <div class="modal-content" style="max-width: 520px; width: 92%;">
@@ -1099,5 +1126,107 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="js/app.js"></script>
 <script src="js/forecasting_ui.js"></script>
+<!-- ==========================================================
+     CPDO TECHNICAL SURVEY MODAL
+     Engineering measurements are recorded here, days after the barangay's
+     three-field upload. Kept in a modal so the admin dashboard layout is
+     untouched until an engineer opens it.
+     ========================================================== -->
+<div id="cpdo-survey-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cpdo-survey-title">
+  <div class="modal-content" style="max-width: 620px; width: 94%;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;" aria-hidden="true">📐</span>
+        <h3 id="cpdo-survey-title" style="margin: 0; font-size: 16px; font-weight: 700; color: #0f172a;">CPDO Field Survey</h3>
+      </div>
+      <button type="button" class="close-modal-btn" onclick="closeCpdoSurvey()" aria-label="Close survey modal">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 20px;">
+      <form id="cpdo-survey-form">
+        <input type="hidden" id="cpdo-survey-report-id" />
+
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px;">
+          <div class="form-group">
+            <label for="cpdo-damage-length">Damage length (m)</label>
+            <input type="number" id="cpdo-damage-length" min="0" step="0.01" placeholder="0.00" />
+          </div>
+          <div class="form-group">
+            <label for="cpdo-damage-width">Damage width (m)</label>
+            <input type="number" id="cpdo-damage-width" min="0" step="0.01" placeholder="0.00" />
+          </div>
+          <div class="form-group">
+            <label for="cpdo-damage-depth">Damage depth (cm)</label>
+            <input type="number" id="cpdo-damage-depth" min="0" step="0.1" placeholder="0.0" />
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 16px;">
+          <label for="cpdo-surface-type">Surface type</label>
+          <select id="cpdo-surface-type">
+            <option value="">Select surface type</option>
+            <option value="PORTLAND_CEMENT_CONCRETE">Portland Cement Concrete</option>
+            <option value="ASPHALT_CONCRETE">Asphalt Concrete</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="margin-bottom: 4px;">
+          <label for="cpdo-repair-plan">Official scope of work</label>
+          <textarea id="cpdo-repair-plan" rows="3" placeholder="Describe the repair scope, materials and method..."></textarea>
+        </div>
+
+        <p style="margin: 0; font-size: 12px; color: #64748b;">
+          Saving re-derives the priority tier and footprint for this report.
+          Blank fields are left unchanged, so a partial survey never erases a measurement.
+        </p>
+      </form>
+    </div>
+    <div class="modal-actions" style="padding: 12px 20px; background: #f8fafc; border-top: 1px solid #e2e8f0; justify-content: flex-end; gap: 8px;">
+      <button type="button" class="btn-secondary" onclick="closeCpdoSurvey()">Cancel</button>
+      <button type="submit" form="cpdo-survey-form" id="cpdo-survey-submit" class="btn-primary">Save survey</button>
+    </div>
+  </div>
+</div>
+
+<!-- ==========================================================
+     PRIORITY MASTERLIST (ranked queue)
+     Ordering is computed server-side (tier desc, footprint desc); this view only
+     renders it, so it can never disagree with the LGU report.
+     ========================================================== -->
+<div id="priority-masterlist-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="priority-masterlist-title">
+  <div class="modal-content" style="max-width: 1040px; width: 96%;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;" aria-hidden="true">🏆</span>
+        <h3 id="priority-masterlist-title" style="margin: 0; font-size: 16px; font-weight: 700; color: #0f172a;">Priority Masterlist</h3>
+      </div>
+      <button type="button" class="close-modal-btn" onclick="document.getElementById('priority-masterlist-modal').classList.add('hidden')" aria-label="Close priority masterlist">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 16px 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 12px;">
+        <span id="priority-weight-summary" style="font-size: 12px; color: #64748b;"></span>
+        <button type="button" id="priority-masterlist-refresh" class="btn-secondary">Refresh</button>
+      </div>
+      <div style="max-height: 60vh; overflow: auto;">
+        <table class="table" style="width: 100%; font-size: 13px;">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Road</th>
+              <th>Defect</th>
+              <th>Severity</th>
+              <th>Tier</th>
+              <th>Measurements (L × W × D)</th>
+              <th>Footprint</th>
+              <th>Score</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="priority-masterlist-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

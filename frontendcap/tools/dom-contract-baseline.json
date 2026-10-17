@@ -1,7 +1,7 @@
 {
   "note": "Known DOM contract violations. This file is a ratchet: it may only shrink. Regenerate deliberately with `node tools/dom-contract.js --update-baseline` after fixing findings — never to silence new ones.",
   "updatedBy": "tools/dom-contract.js",
-  "count": 410,
+  "count": 408,
   "keys": [
     "missing-element|admin_dashboard.html|js/features/activity-log/index.js|activity-detail-modal",
     "missing-element|admin_dashboard.html|js/features/activity-log/index.js|activity-export-dropdown",
@@ -77,7 +77,6 @@
     "missing-element|admin_dashboard.html|js/features/administration/index.js|rename-brgy-input",
     "missing-element|admin_dashboard.html|js/features/administration/index.js|rename-brgy-modal",
     "missing-element|admin_dashboard.html|js/features/administration/index.js|reset-confirm-modal",
-    "missing-element|admin_dashboard.html|js/features/priority-dispatch/index.js|dispatch-confirm-modal",
     "missing-element|admin_dashboard.html|js/features/report-generation/index.js|archive-selected-count",
     "missing-element|admin_dashboard.html|js/features/report-generation/index.js|batch-archive-confirm-modal",
     "missing-element|admin_dashboard.html|js/features/report-generation/index.js|batch-archive-confirm-text",
@@ -266,7 +265,6 @@
     "orphan-element-ref||js/features/map-engine/index.js|search-suggestions",
     "orphan-element-ref||js/features/navigation/index.js|profile-nav-menu",
     "orphan-element-ref||js/features/navigation/index.js|tab-identity",
-    "orphan-element-ref||js/features/priority-dispatch/index.js|dispatch-confirm-modal",
     "orphan-element-ref||js/features/priority-report/index.js|print-dropdown",
     "orphan-element-ref||js/features/priority-report/index.js|view-overview",
     "orphan-element-ref||js/features/profile-account/index.js|admin-handover-modal",

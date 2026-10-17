@@ -27,6 +27,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -38,12 +40,20 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
 
+
+import com.roadwise.backend.security.FieldScopePolicy;
+import com.roadwise.backend.security.RoleCapabilities;
 @RestController
 @RequestMapping("/api/reports")
 public class RoadReportController {
 
     @Autowired
     private RoadReportRepository repository;
+
+    // Resolves the spec's three tiers onto the five role labels the users table
+    // holds; see RoleCapabilities. Used to scope the engineering fields below.
+    @Autowired
+    private RoleCapabilities roleCapabilities;
 
     @Autowired
     private DashboardStatsService dashboardStatsService;
@@ -200,12 +210,23 @@ public class RoadReportController {
     @PostMapping(consumes = {"multipart/form-data"})
     @PreAuthorize("hasAnyRole('BARANGAY', 'ADMIN', 'CPDO Admin')")
     @CacheEvict(value = "dashboardStats", allEntries = true)
+    @Transactional
     public RoadReport createReport(
             @ModelAttribute ReportCreateDto createDto,
             @RequestParam(value = "imageFile", required = false) MultipartFile imageFile,
             HttpServletRequest request) {
 
         User currentUser = getAuthenticatedUser();
+
+        // Module 2 boundary. A caller without TECHNICAL_SURVEY records what and where
+        // only; their damage measurements are discarded after binding and before
+        // persistence. Discarding rather than rejecting is deliberate: the request is
+        // still a valid field report, and a 4xx here would cost the photos and the GPS
+        // pin as well as the two extra parameters. The fields that belong solely to the
+        // CPDO survey (depth, surface type, repair plan) are not on ReportCreateDto at
+        // all, so they cannot be bound in the first place.
+        FieldScopePolicy.applySurveyScope(
+                createDto, FieldScopePolicy.canSurvey(currentUser.getRole(), roleCapabilities));
         RoadReport report = new RoadReport();
 
         report.setDamageDescription(createDto.getDamageDescription());
@@ -287,15 +308,18 @@ public class RoadReportController {
             Long adminId = getAdminId();
 
             if (duplicateOpt.isPresent()) {
-                RoadReport existingDup = duplicateOpt.get();
-                System.out.println("⚠️ [DUPLICATE FLAGGED] Report PRJ-" + savedReport.getId() + " is near existing PRJ-" + existingDup.getId());
-                notificationService.sendNotification(
+                final Long duplicateId = duplicateOpt.get().getId();
+                final Long newReportId = savedReport.getId();
+                final String newReportRoad = savedReport.getCityRoadName();
+                System.out.println("⚠️ [DUPLICATE FLAGGED] Report PRJ-" + newReportId + " is near existing PRJ-" + duplicateId);
+                // A notification is an external effect; announce only once the report commits.
+                registerPostCommit(() -> notificationService.sendNotification(
                         adminId,
                         "⚠️ Potential Duplicate Report Flagged",
-                        "Report PRJ-" + savedReport.getId() + " on " + savedReport.getCityRoadName() +
-                                " was flagged as a potential duplicate of PRJ-" + existingDup.getId() + ".",
+                        "Report PRJ-" + newReportId + " on " + newReportRoad +
+                                " was flagged as a potential duplicate of PRJ-" + duplicateId + ".",
                         "DUPLICATE_WARNING"
-                );
+                ));
             }
 
             reportStatusLogService.log(
@@ -310,30 +334,38 @@ public class RoadReportController {
                     savedReport.getDamageImage()
             );
 
-            if (savedReport.getSeverity() != null && savedReport.getSeverity().equalsIgnoreCase("High")) {
-                notificationService.sendNotification(
-                        adminId,
-                        "🚨 CRITICAL HAZARD DETECTED",
-                        "System flagged a HIGH severity road damage reported by " + savedReport.getReportedBy() + ". Immediate CPDO review required!",
-                        "CRITICAL"
-                );
-            } else {
-                notificationService.sendNotification(
-                        adminId,
-                        "New Road Damage Report",
-                        "A new report has been submitted by " + savedReport.getReportedBy() + " and is awaiting CPDO review.",
-                        "REPORT"
-                );
-            }
+            final String reportedBy = savedReport.getReportedBy();
+            final String roadName = savedReport.getCityRoadName();
+            final boolean highSeverity = savedReport.getSeverity() != null
+                    && savedReport.getSeverity().equalsIgnoreCase("High");
+            final Long reporterId = savedReport.getUser() != null ? savedReport.getUser().getId() : null;
 
-            if (savedReport.getUser() != null) {
-                notificationService.sendNotification(
-                        savedReport.getUser().getId(),
-                        "Report Submitted Successfully",
-                        "Your damage report for " + savedReport.getCityRoadName() + " has been received by the CPDO and is awaiting initial validation.",
-                        "REPORT"
-                );
-            }
+            // Notifications are external effects; announce only once the report commits.
+            registerPostCommit(() -> {
+                if (highSeverity) {
+                    notificationService.sendNotification(
+                            adminId,
+                            "🚨 CRITICAL HAZARD DETECTED",
+                            "System flagged a HIGH severity road damage reported by " + reportedBy + ". Immediate CPDO review required!",
+                            "CRITICAL"
+                    );
+                } else {
+                    notificationService.sendNotification(
+                            adminId,
+                            "New Road Damage Report",
+                            "A new report has been submitted by " + reportedBy + " and is awaiting CPDO review.",
+                            "REPORT"
+                    );
+                }
+                if (reporterId != null) {
+                    notificationService.sendNotification(
+                            reporterId,
+                            "Report Submitted Successfully",
+                            "Your damage report for " + roadName + " has been received by the CPDO and is awaiting initial validation.",
+                            "REPORT"
+                    );
+                }
+            });
 
             activityLogService.log(
                     currentUser,
@@ -345,7 +377,9 @@ public class RoadReportController {
                     request
             );
 
-            liveUpdatePublisher.publish(barangaysOf(savedReport));
+            // Live-update fan-out is an external effect; publish only once the report commits.
+            final List<Long> affectedBarangays = barangaysOf(savedReport);
+            registerPostCommit(() -> liveUpdatePublisher.publish(affectedBarangays));
             return savedReport;
 
         } catch (Exception e) {
@@ -1387,6 +1421,35 @@ public class RoadReportController {
      * barangays rather than a global broadcast is what keeps a report filed in one barangay
      * from refetching every dashboard in the city.
      */
+    /**
+     * Runs a side effect only after the surrounding transaction commits.
+     *
+     * <p>Notifications and SSE fan-out talk to the outside world and cannot be rolled back. Firing
+     * them inside the transaction means a later failure returns an error to a user whose report is
+     * already saved, and the retry files a duplicate. Failures inside the callback are swallowed and
+     * logged rather than propagated: by the time it runs the report has committed, so surfacing an
+     * error would recreate the exact retry-into-a-duplicate problem this guards against.</p>
+     */
+    private void registerPostCommit(Runnable action) {
+        Runnable guarded = () -> {
+            try {
+                action.run();
+            } catch (Exception e) {
+                System.err.println("⚠️ [POST-COMMIT] side effect failed after report commit: " + e.getMessage());
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    guarded.run();
+                }
+            });
+        } else {
+            guarded.run();
+        }
+    }
+
     private static List<Long> barangaysOf(RoadReport report) {
         return report.getBarangay() != null ? List.of(report.getBarangay().getId()) : List.of();
     }

@@ -26,6 +26,9 @@ import './features/admin-dashboard/index.js'; // admin engine + window bridges
 import './features/ceo-dashboard/index.js'; // CEO engine + window bridges
 import './features/report-submission/index.js'; // report submission, modal confirm & form reset
 import './features/priority-dispatch/index.js'; // masterlist priority dispatch to CEO
+import './features/field-report/index.js'; // 3-field barangay upload, client-side compression + GPS
+import './features/cpdo-survey/index.js'; // CPDO technical survey capture + window bridges
+import './features/priority-masterlist/index.js'; // ranked masterlist rendering (tier badges)
 import './features/repair-tracking/index.js'; // repair tracking, modals, QA & extension review
 import './features/map-engine/index.js'; // Leaflet map instances, spotlight isolation & global maps
 
