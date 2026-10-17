@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS authz_role (
     -- Seniority. An administrator may only act on an account of strictly lower rank, so
     -- two peers at the same rank can never reset or disable each other. This is the rule
     -- that a "master admin" role was meant to provide, expressed as data instead.
-    rank         INT          NOT NULL,
+    rank_order   INT          NOT NULL,
     description  TEXT
 );
 
@@ -49,14 +49,14 @@ CREATE TABLE IF NOT EXISTS authz_role_permission (
 -- share a rank on purpose -- they are interchangeable in every existing rule, and making
 -- one senior to the other would hand it exactly the peer-takeover power this change
 -- removes.
-INSERT INTO authz_role (role_key, display_name, rank, description) VALUES
+INSERT INTO authz_role (role_key, display_name, rank_order, description) VALUES
     ('BARANGAY',   'Barangay Official',   10, 'Own barangay only; no administrative capability.'),
     ('ENGINEER',   'City Engineer',       20, 'Reads every barangay and drives field work.'),
     ('CPDO_ADMIN', 'CPDO Administrator',  50, 'Administrative tier. Peers cannot act on each other.'),
     ('ADMIN',      'Administrator',       50, 'Legacy administrative tier, same rank as CPDO_ADMIN.')
 ON CONFLICT (role_key) DO UPDATE
     SET display_name = EXCLUDED.display_name,
-        rank         = EXCLUDED.rank,
+        rank_order   = EXCLUDED.rank_order,
         description  = EXCLUDED.description;
 
 INSERT INTO authz_role_alias (role_text, role_key) VALUES

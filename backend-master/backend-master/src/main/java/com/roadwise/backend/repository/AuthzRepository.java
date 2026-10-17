@@ -29,7 +29,7 @@ public class AuthzRepository {
             """;
 
     private static final String RANK_FOR_USER = """
-            SELECT r.rank
+            SELECT r.rank_order
               FROM users u
               JOIN authz_role_alias ra ON ra.role_text = lower(u.role)
               JOIN authz_role r        ON r.role_key = ra.role_key

@@ -530,6 +530,24 @@ status table and surfaces it in the existing toast.
 | `activity-log/index.js:280,395` `POST /api/activity-logs/log-action` | **Kept, and must stay.** It is not an arbitrary audit write: the actor comes from the principal and the category is restricted to `EXPORT`/`PRINT`/`UI_ACTION`, so the client can only record what only the client can observe. |
 | Approval queue / break-glass screens | **Built.** `js/features/access-control/index.js` + `#view-access-control` in `admin_dashboard.html`, reached from the sidebar ("Access Control") and loaded by `navigation/index.js` like every other view. |
 
+### Test profile: the policy tables have to exist
+
+Six controller tests failed the image build, and none of them was a policy bug.
+`@PreAuthorize("@authz…")` now runs real SQL, and the test profile boots H2 with Flyway
+disabled (the chain contains PostGIS), so `authz_role` / `authz_role_alias` /
+`authz_role_permission` did not exist — every annotated endpoint answered 500 instead of the
+expected 200 or 403.
+
+`src/test/resources/schema.sql` supplies those tables and the reference seed for the test
+profile only, idempotently (`MERGE … KEY`, because contexts share one in-memory database).
+The migrations remain the source of truth; `AuthorizationPolicyIntegrationTest` asserts the
+real lookup against the real repository, so a missing or renamed table fails as a policy test
+instead of as six unexplained 500s.
+
+`rank` is now `rank_order` in V21 and `AuthzRepository`: `RANK` is a window-function keyword,
+and there is no reason to discover whether a given H2 or Postgres version accepts it as a
+column name in every position. The migration had not shipped, so the rename cost nothing.
+
 ### Verification
 
 `javac --release 17` main and test rc 0; route coverage 86 endpoint/verb combinations, all
