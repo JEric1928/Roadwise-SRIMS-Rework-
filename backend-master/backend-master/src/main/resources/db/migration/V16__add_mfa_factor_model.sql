@@ -43,6 +43,27 @@ CREATE TABLE IF NOT EXISTS user_mfa_factors (
     disabled_at TIMESTAMP WITHOUT TIME ZONE
 );
 
+-- Column-level repair, because CREATE TABLE IF NOT EXISTS above is a no-op whenever a
+-- table of that name already exists -- whatever shape it happens to have. A
+-- pre-existing user_mfa_factors without `status` is what made the partial index below
+-- abort the chain with
+--   ERROR: column "status" does not exist  (SQLSTATE 42703, line 48)
+-- and with it every deployment of this build. On a fresh database each ALTER is a
+-- no-op; on a drifted one it fills the gaps before anything reads those columns, so
+-- the indexes, the FKs from mfa_challenges and the entity mapping all resolve.
+-- Types and defaults match the CREATE above so the two paths converge on one schema.
+ALTER TABLE user_mfa_factors ADD COLUMN IF NOT EXISTS id BIGSERIAL;
+ALTER TABLE user_mfa_factors ADD COLUMN IF NOT EXISTS user_id BIGINT;
+ALTER TABLE user_mfa_factors ADD COLUMN IF NOT EXISTS factor_type VARCHAR(32);
+ALTER TABLE user_mfa_factors ADD COLUMN IF NOT EXISTS label VARCHAR(100);
+ALTER TABLE user_mfa_factors ADD COLUMN IF NOT EXISTS status VARCHAR(24) NOT NULL DEFAULT 'PENDING';
+ALTER TABLE user_mfa_factors ADD COLUMN IF NOT EXISTS secret_ciphertext TEXT;
+ALTER TABLE user_mfa_factors ADD COLUMN IF NOT EXISTS secret_key_version INT;
+ALTER TABLE user_mfa_factors ADD COLUMN IF NOT EXISTS last_totp_step BIGINT;
+ALTER TABLE user_mfa_factors ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE user_mfa_factors ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMP WITHOUT TIME ZONE;
+ALTER TABLE user_mfa_factors ADD COLUMN IF NOT EXISTS disabled_at TIMESTAMP WITHOUT TIME ZONE;
+
 -- At most one non-disabled TOTP factor per user. Partial so that disabled rows
 -- keep their history without blocking a re-enrolment.
 CREATE UNIQUE INDEX IF NOT EXISTS uk_mfa_factors_user_type_active
@@ -66,6 +87,13 @@ CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
     used_at TIMESTAMP WITHOUT TIME ZONE,
     created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Same reasoning as user_mfa_factors above: the index on used_at cannot be built if a
+-- pre-existing table carries a different column set.
+ALTER TABLE mfa_recovery_codes ADD COLUMN IF NOT EXISTS user_id BIGINT;
+ALTER TABLE mfa_recovery_codes ADD COLUMN IF NOT EXISTS code_hash VARCHAR(255);
+ALTER TABLE mfa_recovery_codes ADD COLUMN IF NOT EXISTS used_at TIMESTAMP WITHOUT TIME ZONE;
+ALTER TABLE mfa_recovery_codes ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP;
 
 CREATE INDEX IF NOT EXISTS idx_mfa_recovery_codes_user_unused
     ON mfa_recovery_codes(user_id) WHERE used_at IS NULL;

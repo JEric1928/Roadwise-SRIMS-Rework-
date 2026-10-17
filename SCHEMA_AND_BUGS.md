@@ -91,12 +91,19 @@ verification, remote-socket revocation), `DOM_CONTRACT_FINDINGS.md`
   - V6 also destructively drops `barangays.name`, `notifications.report_id`,
     `report_status_logs.changed_by_user_id`, `activity_logs.details/created_at/user_id`
     (V6:11, 68, 101-103, 156) — data loss on a legacy DB. ✔
-- `repair-on-migrate=true` additionally auto-realigned checksums, which can mask
-  edited/misapplied migrations instead of failing loudly. ◦
+- ~~`repair-on-migrate=true` additionally auto-realigned checksums, which can mask
+  edited/misapplied migrations instead of failing loudly.~~ **It never did anything:**
+  Boot exposes no `spring.flyway.repair-on-migrate` key (`FlywayProperties` has no
+  repair switch, and Flyway exposes `repair` only as an operation), so the property was
+  ignored and the checksum mismatches it was supposed to clear kept failing startup
+  validation. Removed. The real switch is `roadwise.flyway.repair-on-startup`
+  (`FLYWAY_REPAIR_ON_STARTUP=true`, implemented in `FlywayRepairConfig`), off unless a
+  single release explicitly asks for it; `flyway repair` and a direct
+  `UPDATE flyway_schema_history SET checksum = …` remain the operator alternatives. ✔
 - Fix: for the existing production DB, baseline at the correct version
-  (`baseline-version` = the last applied migration) instead of 0; remove
-  `repair-on-migrate=true` from production; make V6/V12 idempotent (guarded
-  `DO $$ … END $$;`, backfills before `SET NOT NULL`).
+  (`baseline-version` = the last applied migration) instead of 0; make V12 idempotent
+  (guarded `DO $$ … END $$;`, backfills before `SET NOT NULL`). V6 became replay-safe in
+  9076a16/e792ff0. ◦
 
 ---
 
@@ -178,6 +185,13 @@ verification, remote-socket revocation), `DOM_CONTRACT_FINDINGS.md`
   rollover scan (`RoadReportRepository.java:20,101`, `UserRepository.java:22`,
   `BarangayRepository.java:8`, `CityRoadRepository.java:18`) ◦.
 - Non-idempotent DDL contradicts the surrounding "idempotent" comments (V12:4) ◦.
+- `V16:48` built its partial index on `user_mfa_factors(status)` straight after
+  `CREATE TABLE IF NOT EXISTS user_mfa_factors`, so a pre-existing table of that
+  name without `status` — `IF NOT EXISTS` skips the create, not the index — killed
+  the whole chain and every deploy with `42703 column "status" does not exist` ✔ —
+  V16 now also ensures each column with `ADD COLUMN IF NOT EXISTS` ahead of the
+  indexes (same for `mfa_recovery_codes`), so it converges from a fresh or a drifted
+  table instead of only from a fresh one.
 
 **Schema clean bill (verified)**: every entity field maps to an existing column
 (no `ddl-auto=validate` startup blocker) ◦; the V13 `geom` column is
