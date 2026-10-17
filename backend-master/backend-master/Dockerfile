@@ -17,12 +17,17 @@ WORKDIR /build
 # step below.
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
-RUN chmod +x mvnw \
+# The Maven repository is a cache mount rather than part of the layer. Two reasons: a
+# rebuild reuses the toolchain, plugins and providers instead of asking Maven Central
+# again (a transient 429 there once failed an otherwise-green revision), and nothing
+# downloaded ends up in the image. Both Maven steps share the same cache.
+RUN --mount=type=cache,id=roadwise-m2,target=/root/.m2 \
+    chmod +x mvnw \
     && (./mvnw -B dependency:go-offline \
         || echo "dependency pre-fetch skipped; the package step will resolve them")
 
 COPY src/ src/
-RUN ./mvnw -B clean package
+RUN --mount=type=cache,id=roadwise-m2,target=/root/.m2 ./mvnw -B clean package
 
 # ---------------------------------------------------------------------------
 # Runtime stage
