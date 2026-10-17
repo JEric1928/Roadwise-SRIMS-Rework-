@@ -1,12 +1,29 @@
 -- V6: Align database schema with JPA entity mappings (Option A: keep entity fields, add DB columns)
--- Idempotent and safe against both an empty database and a copy of the existing production schema.
+-- Idempotent and safe against an empty database, a copy of the existing production
+-- schema, and a *replay* on a database where this file has already run. The replay case
+-- is not hypothetical: the checksum of this file changed after it had been applied once,
+-- and clearing that mismatch (flyway repair, or a deleted history row plus
+-- out-of-order=true) executes it a second time. Every statement that reads a legacy
+-- column this file drops is therefore guarded by an existence check — without it the
+-- second run aborts on this file's own earlier DROP, e.g. "column name does not exist"
+-- from section 1 below.
 
 -- =========================================================
 -- 1. barangays: entity uses barangay_name / brgy_captain / contact_number / email_address
 --    Baseline only had "name". Add missing columns, backfill from name, then drop legacy column.
 -- =========================================================
 ALTER TABLE barangays ADD COLUMN IF NOT EXISTS barangay_name VARCHAR(255);
-UPDATE barangays SET barangay_name = name WHERE barangay_name IS NULL;
+-- `name` is dropped two lines below, so on a replay the backfill runs against a column
+-- that no longer exists. Guarded rather than reordered: the ADD above is what creates
+-- barangay_name, and a replay has to tolerate both halves being already done.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = current_schema()
+                 AND table_name = 'barangays' AND column_name = 'name') THEN
+        EXECUTE 'UPDATE barangays SET barangay_name = name WHERE barangay_name IS NULL';
+    END IF;
+END $$;
 ALTER TABLE barangays ALTER COLUMN barangay_name SET NOT NULL;
 ALTER TABLE barangays DROP COLUMN IF EXISTS name;
 
@@ -92,10 +109,30 @@ ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS status VARCHAR(50);
 ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS http_method VARCHAR(20);
 ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS user_agent TEXT;
 
--- Backfill from legacy columns before dropping them.
-UPDATE activity_logs SET timestamp   = COALESCE(timestamp, created_at) WHERE timestamp IS NULL;
-UPDATE activity_logs SET actor_id    = COALESCE(actor_id, user_id);
-UPDATE activity_logs SET description = COALESCE(description, details);
+-- Backfill from legacy columns before dropping them. created_at, user_id and details are
+-- all dropped at the end of this section, so each reference is guarded by its own
+-- existence check: on a replay they are already gone, and an unguarded COALESCE would
+-- abort the migration before it reached the DROPs that make it idempotent.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = current_schema()
+                 AND table_name = 'activity_logs' AND column_name = 'created_at') THEN
+        EXECUTE 'UPDATE activity_logs SET timestamp = COALESCE(timestamp, created_at) WHERE timestamp IS NULL';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = current_schema()
+                 AND table_name = 'activity_logs' AND column_name = 'user_id') THEN
+        EXECUTE 'UPDATE activity_logs SET actor_id = COALESCE(actor_id, user_id)';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = current_schema()
+                 AND table_name = 'activity_logs' AND column_name = 'details') THEN
+        EXECUTE 'UPDATE activity_logs SET description = COALESCE(description, details)';
+    END IF;
+END $$;
 UPDATE activity_logs SET category    = COALESCE(category, 'SYSTEM');
 UPDATE activity_logs SET status      = COALESCE(status, 'SUCCESS');
 
