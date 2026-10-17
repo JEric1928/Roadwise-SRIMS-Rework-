@@ -13,7 +13,7 @@ import org.springframework.amqp.rabbit.annotation.EnableRabbit;
 /** A per-instance ephemeral queue fans revocations out to every live API instance. */
 @Configuration
 @EnableRabbit
-@ConditionalOnProperty(prefix = "websocket.broker-relay", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "roadwise.bus", name = "enabled", havingValue = "true")
 public class SessionRevocationRabbitConfig {
 
     public static final String EXCHANGE_NAME = "roadwise.session-revocations";

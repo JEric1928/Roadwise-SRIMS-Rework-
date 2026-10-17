@@ -19,21 +19,21 @@ public class SessionRevocationEventHandler {
 
     private final LiveWebSocketSessionRegistry sessionRegistry;
     private final RabbitTemplate rabbitTemplate;
-    private final boolean brokerRelayEnabled;
+    private final boolean busEnabled;
 
     public SessionRevocationEventHandler(
             LiveWebSocketSessionRegistry sessionRegistry,
             RabbitTemplate rabbitTemplate,
-            @Value("${websocket.broker-relay.enabled:false}") boolean brokerRelayEnabled) {
+            @Value("${roadwise.bus.enabled:false}") boolean busEnabled) {
         this.sessionRegistry = sessionRegistry;
         this.rabbitTemplate = rabbitTemplate;
-        this.brokerRelayEnabled = brokerRelayEnabled;
+        this.busEnabled = busEnabled;
     }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onSessionRevoked(SessionRevokedEvent event) {
         sessionRegistry.closeUserSessions(event.userId());
-        if (brokerRelayEnabled) {
+        if (busEnabled) {
             try {
                 rabbitTemplate.convertAndSend(
                         SessionRevocationRabbitConfig.EXCHANGE_NAME, "", event.userId().toString());

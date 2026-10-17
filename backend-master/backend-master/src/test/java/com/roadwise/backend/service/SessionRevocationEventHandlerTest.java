@@ -18,7 +18,7 @@ import static org.mockito.Mockito.verify;
 class SessionRevocationEventHandlerTest {
 
     @Test
-    void closesLocalSocketsAfterCommitAndFansOutWhenRelayIsEnabled() {
+    void closesLocalSocketsAfterCommitAndFansOutWhenTheBusIsEnabled() {
         LiveWebSocketSessionRegistry registry = mock(LiveWebSocketSessionRegistry.class);
         RabbitTemplate rabbitTemplate = mock(RabbitTemplate.class);
         SessionRevocationEventHandler handler =

@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 
 /** Receives cross-instance revocations and closes sockets owned by this API instance. */
 @Component
-@ConditionalOnProperty(prefix = "websocket.broker-relay", name = "enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "roadwise.bus", name = "enabled", havingValue = "true")
 public class SessionRevocationRabbitListener {
 
     private final LiveWebSocketSessionRegistry sessionRegistry;

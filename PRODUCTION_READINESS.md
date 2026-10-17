@@ -220,12 +220,17 @@ The token-status and session-version rules themselves moved into `SessionAuthent
 shared with `JwtAuthenticationFilter`, so the HTTP and socket paths cannot drift apart.
 The HTTP path's statuses and bodies are unchanged and its tests still pass.
 
-**Implemented, infrastructure verification still open — shared broker relay.** Local and
-test profiles retain the simple broker. The production profile enables Spring's STOMP
-broker relay to RabbitMQ, with host, port, virtual host, username, and password supplied
-through deployment configuration/secrets. Do not disable the relay for a multi-instance
-deployment: sticky sessions alone do not provide cross-instance fan-out. The actual
-RabbitMQ-backed two-instance delivery test remains a deployment gate.
+**Implemented, infrastructure verification still open — shared broker.** Local and test
+profiles keep the in-process simple broker. Production expects one shared AMQP 0-9-1 service
+— LavinMQ or RabbitMQ, the application does not care which — and uses it for both
+cross-instance signals: session revocation, and live-update fan-out. `LiveUpdateBusConfig`
+gives every instance an ephemeral queue on the `roadwise.live-updates` fanout exchange, and
+`LiveUpdateBusListener` re-publishes what arrives there to that instance's own subscribers,
+which is the job the broker used to do for the relay. Spring's STOMP relay remains available
+for a RabbitMQ deployment via `WEBSOCKET_BROKER_RELAY_ENABLED=true`, but it is now opt-in:
+it needs the `rabbitmq_stomp` plugin, and LavinMQ has no STOMP listener at all. Do not run a
+multi-instance deployment with the bus and the relay both off — sticky sessions alone do not
+provide cross-instance fan-out. The two-instance delivery test remains a deployment gate.
 
 **Fixed — the single global topic is gone.** `/topic/updates` is retired, and a change now
 notifies `/topic/updates/admin`, `/topic/updates/engineering` and one
@@ -350,13 +355,26 @@ separate broker, transport, client-handler, and revocation failures.
 
 ### Scaling decision
 
-Sticky sessions alone are not sufficient. Production now selects the RabbitMQ STOMP
-relay when the production profile is active; the same RabbitMQ deployment also carries
-fan-out session-revocation events. Provision the STOMP listener and AMQP endpoint, set
-`RABBITMQ_HOST`, `RABBITMQ_STOMP_PORT`, `RABBITMQ_AMQP_PORT`, `RABBITMQ_VHOST`,
-`RABBITMQ_USERNAME`, and `RABBITMQ_PASSWORD` from deployment configuration/secrets, and
-leave `WEBSOCKET_BROKER_RELAY_ENABLED=true`. The application intentionally fails startup
-if the STOMP relay is enabled without its required host or credentials.
+Sticky sessions alone are not sufficient. Production needs one shared AMQP 0-9-1 broker —
+LavinMQ or RabbitMQ — reachable from every API instance, and it carries both cross-instance
+signals:
+
+- session revocation — the `roadwise.session-revocations` fanout exchange, one ephemeral
+  queue per instance;
+- live updates — the `roadwise.live-updates` fanout exchange, same shape.
+
+Provision `RABBITMQ_HOST`, `RABBITMQ_AMQP_PORT`, `RABBITMQ_VHOST`, `RABBITMQ_USERNAME`, and
+`RABBITMQ_PASSWORD` from deployment configuration/secrets, and leave `ROADWISE_BUS_ENABLED`
+at its production default of `true`. These are AMQP variables: pointing them at LavinMQ is
+the whole migration. Nothing the application declares — fanout exchanges, exclusive
+auto-delete queues, bindings — is RabbitMQ-specific.
+
+The STOMP relay is a RabbitMQ-only alternative for live updates. It needs the
+`rabbitmq_stomp` plugin on port 61613, which LavinMQ does not implement, so it stays off
+unless `WEBSOCKET_BROKER_RELAY_ENABLED=true`; when it is enabled it also needs
+`RABBITMQ_STOMP_HOST` / `RABBITMQ_STOMP_PORT`, and it takes precedence over the bus so each
+refresh is delivered once rather than twice. The application intentionally fails startup if
+the relay is enabled without its required host or credentials.
 
 Before any topic carries report details or other sensitive data:
 
