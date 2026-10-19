@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import io
 import os
 import numpy as np
@@ -13,7 +14,10 @@ from typing import Optional, List, Dict
 
 import forecasting_engines as fe
 import validation as V
-from csjdm_parameters import CSJDM_GEOMORPHIC_PROFILE
+from csjdm_parameters import CSJDM_GEOMORPHIC_PROFILE, SoilType
+import multi_hazard as mh
+
+logger = logging.getLogger("roadwise.forecasting")
 
 app = FastAPI(
     title="RoadWise AI & Advanced Mathematical Forecasting Service",
@@ -157,7 +161,9 @@ def evaluate_road_gate(outputs) -> dict:
 # ==============================================================================
 class PavementDecayRequest(BaseModel):
     road_id: str = Field(default="RD-001", description="Road Identifier")
-    soil_type: str = Field(default="Sibul_Clay", description="Subgrade soil type")
+    # Typed as the registered series rather than a free string: an unknown soil is
+    # now a 422 at the boundary instead of a silent fallback to stable parameters.
+    soil_type: SoilType = Field(default=SoilType.SIBUL_CLAY, description="Subgrade soil type")
     initial_pci: float = Field(default=100.0, ge=0.0, le=100.0)
     years_horizon: int = Field(default=10, ge=1, le=30)
     fractional_alpha: float = Field(default=0.35, ge=0.01, le=0.99)
@@ -165,7 +171,7 @@ class PavementDecayRequest(BaseModel):
 
 class HydrologicalShockRequest(BaseModel):
     road_id: str = Field(default="RD-102")
-    soil_type: str = Field(default="Sibul_Clay")
+    soil_type: SoilType = Field(default=SoilType.SIBUL_CLAY)
     # Upper bounds keep the engines from being driven into excessive allocation
     # or runtime by hostile inputs.
     rainfall_mm: float = Field(default=180.0, ge=0.0, le=2000.0)
@@ -194,6 +200,32 @@ class DataAssimilationRequest(BaseModel):
     sensor_telemetry_score: float = Field(default=0.40, ge=0.0, le=1.0)
     geomechanical_baseline: float = Field(default=0.50, ge=0.0, le=1.0)
     tradeoff_alpha: float = Field(default=0.5, ge=0.0, le=1.0)
+
+class MultiHazardRequest(BaseModel):
+    """Roadmap scaffold (§2.D): caller-supplied normalised hazard severities."""
+
+    flood: float = Field(default=0.0, ge=0.0, le=1.0)
+    landslide: float = Field(default=0.0, ge=0.0, le=1.0)
+    seismic: float = Field(default=0.0, ge=0.0, le=1.0)
+    erosion: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+
+def _engine_error(engine: str, exc: Exception) -> HTTPException:
+    """
+    Map a forecasting failure onto a sanitised HTTPException.
+
+    The engine endpoints previously interpolated ``str(exc)`` straight into the
+    response detail, which leaked internal paths and stack detail to any caller
+    holding the service key. Client-caused ``ValueError`` (e.g. an unregistered
+    soil reaching the registry) still returns its message as a 4xx; everything
+    else is logged with a traceback and reported opaquely.
+    """
+    if isinstance(exc, ValueError):
+        logger.warning("%s rejected input: %s", engine, exc)
+        return HTTPException(status_code=422, detail=str(exc))
+    logger.exception("%s failed", engine)
+    return HTTPException(status_code=500, detail="Internal forecasting processing error.")
 
 
 # ==============================================================================
@@ -506,7 +538,7 @@ def predict_pavement_decay(req: PavementDecayRequest, _: None = Depends(require_
             fractional_alpha=req.fractional_alpha
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Pavement decay engine error: {str(e)}")
+        raise _engine_error("Pavement decay engine", e) from e
 
 
 # --- ENGINE 2 ENDPOINT ---
@@ -521,7 +553,7 @@ def predict_hydrological_shock(req: HydrologicalShockRequest, _: None = Depends(
             drainage_capacity_mm=req.drainage_capacity_mm
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Hydrological shock engine error: {str(e)}")
+        raise _engine_error("Hydrological shock engine", e) from e
 
 
 # --- ENGINE 3 ENDPOINT ---
@@ -535,7 +567,7 @@ def predict_defect_propagation(req: DefectPropagationRequest, _: None = Depends(
             growth_rate=req.growth_rate
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Defect propagation engine error: {str(e)}")
+        raise _engine_error("Defect propagation engine", e) from e
 
 
 # --- ENGINE 4 ENDPOINT ---
@@ -550,7 +582,7 @@ def predict_financial_risk(req: FinancialRiskRequest, _: None = Depends(require_
             num_simulations=req.num_simulations
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Financial risk engine error: {str(e)}")
+        raise _engine_error("Financial risk engine", e) from e
 
 
 # --- ENGINE 5 ENDPOINT ---
@@ -565,4 +597,26 @@ def assimilate_sensor_data(req: DataAssimilationRequest, _: None = Depends(requi
             tradeoff_alpha=req.tradeoff_alpha
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Data assimilation engine error: {str(e)}")
+        raise _engine_error("Data assimilation engine", e) from e
+
+
+# --- MULTI-HAZARD COMPOSITE INDEX (roadmap scaffold, spec §2.D) ---
+@app.post("/api/v1/forecasting/multi-hazard-index")
+def multi_hazard_index(req: MultiHazardRequest, _: None = Depends(require_api_key)):
+    """
+    CSJDM multi-hazard composite risk index, R_b in [0, 1].
+
+    Roadmap scaffold: evaluates the documented weighted formula over caller-supplied
+    normalised hazards. It sources no rasters, does not touch the production ranking
+    queue, and stamps ``implementation_status: ROADMAP`` on every reply so a consumer
+    cannot mistake it for a production risk score.
+    """
+    try:
+        return mh.composite_risk_index(
+            flood=req.flood,
+            landslide=req.landslide,
+            seismic=req.seismic,
+            erosion=req.erosion,
+        )
+    except Exception as e:
+        raise _engine_error("Multi-hazard index", e) from e

@@ -31,6 +31,17 @@ public final class RecursiveLeastSquares {
      */
     private static final double INITIAL_COVARIANCE = 100.0;
 
+    /**
+     * Bounds on {@code tr(P)}. Below the floor the gain has collapsed and the
+     * estimate has stopped learning; above the ceiling an exponentially-weighted
+     * forgetting factor has inflated the covariance until a single observation
+     * can swing the weights arbitrarily. Either way the deterministic remedy is
+     * the warm start, which is exactly {@code INITIAL_COVARIANCE · I}.
+     */
+    private static final double MIN_TRACE = 1e-4;
+
+    private static final double MAX_TRACE = 1e4;
+
     private final int dimension;
     private final double lambda;
 
@@ -123,6 +134,7 @@ public final class RecursiveLeastSquares {
                 covariance[i * d + j] = (covariance[i * d + j] - gain[i] * px[j]) / lambda;
             }
         }
+        enforceTraceBound();
         return weights.clone();
     }
 
@@ -154,7 +166,8 @@ public final class RecursiveLeastSquares {
                                                 String covarianceCsv) {
         RecursiveLeastSquares rls = new RecursiveLeastSquares(dimension, lambda);
         double[] parsed = parseCsv(covarianceCsv);
-        if (parsed != null && parsed.length == dimension * dimension) {
+        if (parsed != null && parsed.length == dimension * dimension
+                && isRestorableCovariance(parsed, dimension)) {
             System.arraycopy(parsed, 0, rls.covariance, 0, parsed.length);
         }
         if (previousWeights != null && previousWeights.length == dimension) {
@@ -199,5 +212,92 @@ public final class RecursiveLeastSquares {
             }
         }
         return values;
+    }
+
+    // ---- covariance sanity ---------------------------------------------------
+
+    /**
+     * A persisted covariance is only adopted when it is symmetric, inside the trace
+     * bounds, and positive-definite.
+     *
+     * <p>{@link #restore} previously accepted any payload of the right <em>length</em>.
+     * A corrupt or hand-edited {@code covariance_json} could therefore install a
+     * matrix with a zero or negative eigenvalue, after which every subsequent update
+     * interpolates through a non-invertible prior and the estimate is meaningless —
+     * silently, on the request path. Rejecting it here downgrades to the warm start,
+     * which this class already documents as the safe failure mode.</p>
+     */
+    private static boolean isRestorableCovariance(double[] matrix, int dimension) {
+        return isSymmetric(matrix, dimension)
+                && isInsideTraceBounds(matrix, dimension)
+                && isPositiveDefinite(matrix, dimension);
+    }
+
+    private static boolean isSymmetric(double[] matrix, int dimension) {
+        for (int i = 0; i < dimension; i++) {
+            for (int j = i + 1; j < dimension; j++) {
+                double upper = matrix[i * dimension + j];
+                double lower = matrix[j * dimension + i];
+                double scale = Math.max(1.0, Math.max(Math.abs(upper), Math.abs(lower)));
+                if (!(Math.abs(upper - lower) <= 1e-9 * scale)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Cholesky feasibility test. Cheaper than an eigenvalue decomposition, and the
+     * factorisation succeeding is itself the positive-definiteness certificate.
+     */
+    private static boolean isPositiveDefinite(double[] matrix, int dimension) {
+        double[] lower = new double[dimension * dimension];
+        for (int i = 0; i < dimension; i++) {
+            for (int j = 0; j <= i; j++) {
+                double sum = matrix[i * dimension + j];
+                for (int k = 0; k < j; k++) {
+                    sum -= lower[i * dimension + k] * lower[j * dimension + k];
+                }
+                if (i == j) {
+                    if (!(sum > 0.0) || !Double.isFinite(sum)) {
+                        return false;
+                    }
+                    lower[i * dimension + j] = Math.sqrt(sum);
+                } else {
+                    double pivot = lower[j * dimension + j];
+                    if (!(pivot > 0.0)) {
+                        return false;
+                    }
+                    lower[i * dimension + j] = sum / pivot;
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean isInsideTraceBounds(double[] matrix, int dimension) {
+        double trace = 0.0;
+        for (int i = 0; i < dimension; i++) {
+            trace += matrix[i * dimension + i];
+        }
+        return Double.isFinite(trace) && trace >= MIN_TRACE && trace <= MAX_TRACE;
+    }
+
+    /**
+     * Reset to the warm start when {@code tr(P)} leaves its bounds. Applied after
+     * every update as well as on restore, so long runs cannot accumulate drift into
+     * a singular estimate.
+     */
+    private void enforceTraceBound() {
+        if (isInsideTraceBounds(covariance, dimension)) {
+            return;
+        }
+        for (int i = 0; i < dimension * dimension; i++) {
+            covariance[i] = 0.0;
+        }
+        for (int i = 0; i < dimension; i++) {
+            covariance[i * dimension + i] = INITIAL_COVARIANCE;
+        }
     }
 }

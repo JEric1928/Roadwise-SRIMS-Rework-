@@ -140,4 +140,91 @@ class RecursiveLeastSquaresTest {
         assertArrayEquals(new double[4], restored.weights(), 1e-12,
                 "a poisoned calibration row must not seed NaN weights");
     }
+    // ---- persisted-covariance guard ------------------------------------------
+    //
+    // restore() used to accept any payload of the right *length*. A corrupt or
+    // hand-edited covariance_json could therefore install a matrix with a zero or
+    // negative eigenvalue, after which every later update interpolates through a
+    // non-invertible prior — silently, on the request path. Each case below must
+    // degrade to the warm start (100·I) rather than throw or absorb the payload.
+
+    @Test
+    void asymmetricPersistedCovarianceDegradesToWarmStart() {
+        double[] asymmetric = diagonal(new double[]{4, 4, 4, 4});
+        asymmetric[1] = 98.0; // breaks symmetry only
+        assertDegradesToWarmStart("asymmetric", csv(asymmetric));
+    }
+
+    @Test
+    void nonPositiveDefinitePersistedCovarianceDegradesToWarmStart() {
+        assertDegradesToWarmStart("negative diagonal", csv(diagonal(new double[]{-4, 4, 4, 4})));
+
+        // Symmetric and trace-legal, but with a zero eigenvalue: (1,0,0,0) and
+        // (0,1,0,0) rows are dependent. Only the Cholesky step catches this.
+        double[] singular = new double[16];
+        singular[0] = 1.0;
+        singular[1] = 1.0;
+        singular[4] = 1.0;
+        singular[5] = 1.0;
+        singular[10] = 1.0;
+        singular[15] = 1.0;
+        assertDegradesToWarmStart("singular block", csv(singular));
+    }
+
+    @Test
+    void outOfBoundsTraceDegradesToWarmStart() {
+        assertDegradesToWarmStart("trace above ceiling", csv(diagonal(new double[]{1e6, 1e6, 1e6, 1e6})));
+        assertDegradesToWarmStart("trace below floor", csv(diagonal(new double[]{1e-9, 1e-9, 1e-9, 1e-9})));
+    }
+
+    @Test
+    void legalPersistedCovarianceIsStillAdopted() {
+        // Guards against an over-eager validator: 4·I is symmetric, positive-definite
+        // and well inside the trace bounds, so it must survive the round trip.
+        RecursiveLeastSquares restored = RecursiveLeastSquares.restore(
+                4, 1.0, null, csv(diagonal(new double[]{4, 4, 4, 4})));
+        assertArrayEquals(diagonal(new double[]{4, 4, 4, 4}), restored.covariance(), 1e-12);
+    }
+
+    @Test
+    void traceStaysBoundedAcrossALongRun() {
+        RecursiveLeastSquares rls = new RecursiveLeastSquares(4, 1.0);
+        for (int i = 0; i < 400; i++) {
+            rls.update(new double[]{1, 0.5, 0.25, 0.125}, 1.0 + (i % 3));
+        }
+        double[] p = rls.covariance();
+        double trace = p[0] + p[5] + p[10] + p[15];
+        assertTrue(trace >= 1e-4, "trace collapsed below the floor: " + trace);
+        assertTrue(trace <= 1e4, "trace escaped the ceiling: " + trace);
+        for (double value : p) {
+            assertTrue(Double.isFinite(value), "covariance leaked a non-finite value");
+        }
+    }
+
+    private static void assertDegradesToWarmStart(String label, String payload) {
+        RecursiveLeastSquares restored = RecursiveLeastSquares.restore(4, 0.98, null, payload);
+        assertArrayEquals(diagonal(new double[]{100, 100, 100, 100}), restored.covariance(), 1e-12,
+                label + " covariance must degrade to the 100·I warm start");
+    }
+
+    private static double[] diagonal(double[] values) {
+        int d = values.length;
+        double[] matrix = new double[d * d];
+        for (int i = 0; i < d; i++) {
+            matrix[i * d + i] = values[i];
+        }
+        return matrix;
+    }
+
+    private static String csv(double[] values) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0) {
+                sb.append(',');
+            }
+            sb.append(values[i]);
+        }
+        return sb.toString();
+    }
+
 }

@@ -13,6 +13,44 @@ from scipy.special import gamma
 from csjdm_parameters import get_soil_parameters, CSJDM_GEOMORPHIC_PROFILE
 
 
+# --- shared engine limits -----------------------------------------------------
+# Factor of safety is reported on a clipped band. The infinite-slope model
+# divides by shear stress, which is floored at 0.01 kPa so a level slope cannot
+# divide by zero — but that same floor lets FS reach ~1e3 on near-flat ground,
+# and an unbounded FS distorts any downstream risk index it is multiplied into.
+FS_MIN = 0.1
+FS_MAX = 5.0
+FS_RISK_SCALE = 1.5
+
+# PCI below which a segment is reported CRITICAL regardless of extrapolation.
+CRITICAL_PCI = 55.0
+
+
+def calculate_true_ttf(
+    initial_pci: float,
+    wear_rate_monthly: float,
+    threshold: float = 40.0,
+) -> float:
+    """
+    Years until PCI reaches ``threshold`` at the observed mean wear rate.
+
+    Deliberately independent of the forecast horizon. The horizon-bounded loop in
+    ``simulate_pavement_lifecycle`` only observes crossings *inside* its window;
+    at CSJDM wear rates (~0.02-0.11 PCI/month) a 60-PCI drop takes decades, so
+    the old fallback assigned ``years_horizon`` as the failure date — which then
+    drove ``status`` off the request parameter instead of the physical state.
+
+    Returns ``inf`` when wear is zero or negative (no failure at any horizon).
+    """
+    if not np.isfinite(initial_pci) or not np.isfinite(wear_rate_monthly):
+        return float("inf")
+    remaining = float(initial_pci) - float(threshold)
+    if remaining <= 0.0:
+        return 0.0
+    if wear_rate_monthly <= 0.0:
+        return float("inf")
+    return (remaining / wear_rate_monthly) / 12.0
+
 # ==============================================================================
 # ENGINE 1: Continuous Gamma Process & Grünwald-Letnikov Fractional Viscoelastic
 # ==============================================================================
@@ -73,8 +111,28 @@ def simulate_pavement_lifecycle(
         if current_pci <= failure_threshold and time_to_failure_years is None:
             time_to_failure_years = round(m / 12.0, 2)
 
-    if time_to_failure_years is None:
-        time_to_failure_years = float(years_horizon)
+    # Mean wear observed over the window drives extrapolation past the horizon.
+    wear_rate_monthly = float(wear_accumulated[-1] / months) if months > 0 else 0.0
+    final_pci = float(pci_trajectory[-1])
+
+    if time_to_failure_years is not None:
+        ttf_basis = "OBSERVED"
+    else:
+        extrapolated = calculate_true_ttf(initial_pci, wear_rate_monthly, failure_threshold)
+        if np.isfinite(extrapolated):
+            time_to_failure_years = round(float(extrapolated), 2)
+            ttf_basis = "EXTRAPOLATED"
+        else:
+            time_to_failure_years = None
+            ttf_basis = "NONE"
+
+    # Status follows physical state, not the requested horizon. The previous form
+    # compared the horizon-bounded fallback against 3.0, so a 1-year forecast on
+    # undamaged pavement reported CRITICAL while a 10-year forecast showing real
+    # decay reported STABLE.
+    critical = final_pci < CRITICAL_PCI or (
+        time_to_failure_years is not None and time_to_failure_years < 3.0)
+    status = "CRITICAL" if critical else "STABLE"
 
     time_axis_years = [round(m / 12.0, 2) for m in range(months + 1)]
 
@@ -91,7 +149,10 @@ def simulate_pavement_lifecycle(
         "pci_trajectory": pci_trajectory.tolist(),
         "linear_baseline_pci": linear_baseline_pci,
         "total_wear": round(float(wear_accumulated[-1]), 2),
-        "status": "CRITICAL" if time_to_failure_years < 3.0 else "STABLE",
+        "final_pci": round(final_pci, 2),
+        "wear_rate_pci_per_month": round(wear_rate_monthly, 4),
+        "time_to_failure_basis": ttf_basis,
+        "status": status,
         "model_version": "pavement-decay-gamma-v2.1"
     }
 
@@ -119,7 +180,10 @@ def simulate_hydrological_shock(
     Q0 = CSJDM_GEOMORPHIC_PROFILE["hydrology"]["base_pore_water_pressure_kpa"]
     mu = 0.05  # Drift rate (gradual drainage / dissipation)
     sigma = 0.15  # Volatility from continuous soil moisture variation
-    lambda_jump = 0.12  # Storm jump arrival rate (Poisson intensity)
+    # Storm jump arrival rate, bound to the EP-2024 registry. The profile carries
+    # 0.15 while this function hardcoded 0.12, leaving the registry entry dead.
+    lambda_jump = float(CSJDM_GEOMORPHIC_PROFILE["hydrology"].get(
+        "merton_jump_intensity_lambda", 0.15))
 
     steps = 100
     T = 7.0  # 7-day storm evolution window
@@ -151,8 +215,12 @@ def simulate_hydrological_shock(
 
     # Factor of Safety (FS) slope stability equation (Infinite Slope Model)
     # FS = (c' + (gamma_s * z - Q_t) * cos^2(beta) * tan(phi')) / (gamma_s * z * sin(beta) * cos(beta))
-    cohesion = 15.0 if soil_type == "Sibul_Clay" else 25.0  # kPa
-    phi_deg = 18.0 if soil_type == "Sibul_Clay" else 28.0   # Friction angle
+    # Geotechnical strength comes from the CSJDM registry. Branching on the soil
+    # string here gave every series except Sibul_Clay the stable cohesion/friction
+    # pair, so an unregistered soil was silently treated as competent ground — and
+    # adding a new series would have inherited that same default.
+    cohesion = float(soil["cohesion_kpa"])        # kPa
+    phi_deg = float(soil["friction_angle_deg"])   # Friction angle
     unit_weight = 18.5  # kN/m^3
     depth = 2.0  # m
     beta_rad = np.radians(slope_degrees)
@@ -162,7 +230,13 @@ def simulate_hydrological_shock(
     shear_strength = cohesion + effective_stress * (np.cos(beta_rad) ** 2) * np.tan(phi_rad)
     shear_stress = unit_weight * depth * np.sin(beta_rad) * np.cos(beta_rad)
 
-    factor_of_safety = round(float(shear_strength / max(0.01, shear_stress)), 3)
+    raw_factor_of_safety = float(shear_strength / max(0.01, shear_stress))
+    # Bound before anything downstream consumes it: the 0.01 kPa shear-stress
+    # floor lets FS reach ~1e3 on near-level ground, which would dominate a
+    # weighted risk sum without saying anything about actual stability.
+    factor_of_safety = round(float(np.clip(raw_factor_of_safety, FS_MIN, FS_MAX)), 3)
+    # Smooth 1 -> 0 ramp across the bounded band (FS 0.1 -> ~0.93, FS 5.0 -> ~0.003).
+    factor_of_safety_risk = round(float(1.0 - np.tanh(factor_of_safety / FS_RISK_SCALE)), 4)
 
     # Slope failure probability P_f = P(FS < 1.0) via Monte Carlo perturbation
     fs_sims = []
@@ -181,11 +255,38 @@ def simulate_hydrological_shock(
         "slope_degrees": slope_degrees,
         "peak_pore_water_pressure_kpa": round(max_pore_pressure, 2),
         "factor_of_safety": factor_of_safety,
+        "factor_of_safety_raw": round(raw_factor_of_safety, 3),
+        "factor_of_safety_risk": factor_of_safety_risk,
         "failure_probability": failure_prob,
         "pressure_trajectory": np.round(Q_t, 2).tolist(),
         "time_axis_days": np.round(np.linspace(0, T, steps), 2).tolist(),
         "hazard_status": "HIGH_RISK" if failure_prob > 0.35 or factor_of_safety < 1.1 else "SAFE"
     }
+
+
+def build_normalized_laplacian(adjacency) -> np.ndarray:
+    """
+    Symmetrically normalized graph Laplacian, ``L = I - D^-1/2 A D^-1/2``.
+
+    Isolated (degree-0) nodes are handled by mapping their inverse square root to
+    zero rather than inverting ``sqrt(0)``. The previous form called
+    ``np.linalg.inv(np.sqrt(np.diag(deg)))``, which raises ``LinAlgError`` for any
+    graph containing an isolated node — reachable from any caller that builds an
+    adjacency matrix differently from the internal chain construction.
+
+    With a zero row/column, such a node contributes nothing to diffusion and keeps
+    a self-loop coefficient of 1, which is the correct limit (nothing flows in).
+    """
+    adj = np.asarray(adjacency, dtype=float)
+    if adj.ndim != 2 or adj.shape[0] != adj.shape[1]:
+        raise ValueError("adjacency must be a square matrix")
+
+    n = adj.shape[0]
+    deg = np.sum(adj, axis=1)
+    safe_deg = np.where(deg > 0.0, deg, 1.0)
+    inv_sqrt_deg = np.where(deg > 0.0, 1.0 / np.sqrt(safe_deg), 0.0)
+    d_inv_sqrt = np.diag(inv_sqrt_deg)
+    return np.eye(n) - d_inv_sqrt @ adj @ d_inv_sqrt
 
 
 # ==============================================================================
@@ -219,9 +320,9 @@ def simulate_defect_propagation(
         adj[0, 5] = 1.0
         adj[5, 0] = 1.0
 
-    deg = np.diag(np.sum(adj, axis=1))
-    deg_inv_sqrt = np.linalg.inv(np.sqrt(deg))
-    laplacian = np.eye(num_nodes) - deg_inv_sqrt @ adj @ deg_inv_sqrt
+    # Normalized Laplacian via the regularized helper, which tolerates degree-0
+    # nodes instead of inverting sqrt(0).
+    laplacian = build_normalized_laplacian(adj)
 
     # Initial defect levels (node 0 starts with severe defect, others minimal)
     p_t = np.zeros((timesteps + 1, num_nodes))
@@ -259,6 +360,58 @@ def simulate_defect_propagation(
     }
 
 
+def sample_levy_stable(alpha, beta, size, rng) -> np.ndarray:
+    """
+    Chambers-Mallows-Stuck sampler for an alpha-stable variate, ``S(alpha, beta)``.
+
+    Uses Nolan's S1 parameterisation:
+
+    .. code-block:: text
+
+        zeta   = beta * tan(pi*alpha/2)
+        theta0 = arctan(zeta) / alpha
+        X = (1+zeta^2)^(1/(2*alpha))
+            * sin(alpha*(V+theta0)) / cos(V)^(1/alpha)
+            * (cos(alpha*theta0 + (alpha-1)*V) / W)^((1-alpha)/alpha)
+
+    with ``V ~ U(-pi/2, pi/2)`` and ``W ~ Exp(1)``. Verified against the closed-form
+    characteristic function ``exp(-|t|^alpha * (1 - i*beta*sign(t)*tan(pi*alpha/2)))``
+    in the test suite.
+
+    The third factor's base is positive on ``alpha in (1, 2)``; the ``clip`` only
+    absorbs floating-point noise at the interval edges. The previous implementation
+    used ``cos(u - alpha*(u + theta0))`` — a different theta0 coefficient — whose base
+    goes negative, so raising it to a fractional power produced NaN at the default
+    ``alpha=1.4``.
+    """
+    a = float(np.clip(alpha, 1.01, 2.0))
+    b = float(np.clip(beta, -1.0, 1.0))
+
+    v = rng.uniform(-np.pi / 2.0, np.pi / 2.0, size=size)
+    w = rng.exponential(scale=1.0, size=size)
+
+    zeta = b * np.tan(np.pi * a / 2.0)
+    theta0 = np.arctan(zeta) / a
+
+    cos_v = np.cos(v)
+    cos_v = np.where(np.abs(cos_v) < 1e-12, 1e-12, cos_v)
+
+    # Third factor. The argument is alpha*theta0 + (alpha-1)*V — NOT
+    # alpha*theta0 + (alpha-1)*(theta0+V), which yields a negative base for roughly
+    # 7% of draws at alpha=1.4 and pushes the whole distribution's mass into one
+    # spurious tail. Verified against scipy.stats.levy_stable in the test suite.
+    base = np.cos(a * theta0 + (a - 1.0) * v) / w
+    base = np.where(base > 0.0, base, np.finfo(float).tiny)
+
+    term1 = (1.0 + zeta ** 2) ** (1.0 / (2.0 * a))
+    term2 = np.sin(a * (v + theta0)) / np.power(np.abs(cos_v), 1.0 / a)
+    term3 = np.power(base, (1.0 - a) / a)
+
+    variates = term1 * term2 * term3
+    # A non-finite variate would poison np.percentile and silently return NaN as VaR.
+    return np.where(np.isfinite(variates), variates, 0.0)
+
+
 # ==============================================================================
 # ENGINE 4: Heavy-Tailed Lévy-Stable CMS Financial VaR / ES Engine
 # ==============================================================================
@@ -277,20 +430,8 @@ def simulate_financial_risk_var(
     """
     rng = np.random.default_rng(seed)
 
-    # 1. CMS Algorithm for Lévy-Stable variates
-    # Uniform U in (-pi/2, pi/2), Exponential W with mean 1
-    u = rng.uniform(-np.pi / 2.0, np.pi / 2.0, size=num_simulations)
-    w = rng.exponential(scale=1.0, size=num_simulations)
-
-    # CMS formula for alpha != 1
-    zeta = -beta_skew * np.tan(np.pi * alpha_tail / 2.0)
-    theta0 = (1.0 / alpha_tail) * np.arctan(-zeta)
-
-    term1 = (1.0 + zeta**2) ** (1.0 / (2.0 * alpha_tail))
-    term2 = np.sin(alpha_tail * (u + theta0)) / (np.cos(u) ** (1.0 / alpha_tail))
-    term3 = (np.cos(u - alpha_tail * (u + theta0)) / w) ** ((1.0 - alpha_tail) / alpha_tail)
-
-    levy_variates = term1 * term2 * term3
+    # 1. CMS Algorithm for Lévy-Stable variates (see sample_levy_stable).
+    levy_variates = sample_levy_stable(alpha_tail, beta_skew, num_simulations, rng)
 
     # Rescale and shift variates to represent cost multiplier shocks
     cost_multipliers = 1.0 + 0.15 * np.maximum(0.0, levy_variates)
