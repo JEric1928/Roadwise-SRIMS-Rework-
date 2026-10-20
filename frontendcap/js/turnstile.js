@@ -16,12 +16,11 @@
 //   3. BUILD_SITE_KEY - substituted at build time from ROADWISE_TURNSTILE_SITE_KEY by the
 //      CopyPlugin transform in webpack.config.prod.js.
 //   4. On loopback, Cloudflare's documented always-pass test site key. Its tokens only
-//      verify against the matching test secret, so a build that ships this by accident
-//      fails loudly at login instead of silently shipping without a bot check.
-//   5. Empty - the widget cannot render and login reports that the security check is
-//      unavailable. There is no "render nothing and carry on" branch: the backend refuses
-//      an unverified login, so pretending here would only produce a confusing refusal
-//      later.
+//      verify against the matching test secret, so local development does not depend on the
+//      production widget's hostname allowlist.
+//   5. The configured production site key. This public fallback keeps the widget available
+//      when a static host does not inject build-time environment variables. There is no
+//      "render nothing and carry on" branch: the backend refuses an unverified login.
 //
 // A site key is public. It is not a credential, and nothing in this file is trusted by the
 // backend: the token below proves nothing until TurnstileService exchanges it with
@@ -32,6 +31,7 @@
 
   var BUILD_SITE_KEY = '__ROADWISE_TURNSTILE_SITE_KEY__';
   var ALWAYS_PASS_TEST_SITE_KEY = '1x00000000000000000000AA';
+  var DEFAULT_SITE_KEY = '0x4AAAAAAFdkICnlAs5k2LwJ';
   var LOAD_TIMEOUT_MS = 10000;
 
   // The widget is rendered with action="login" and application.properties sets
@@ -76,7 +76,7 @@
 
     if (isLoopback()) return ALWAYS_PASS_TEST_SITE_KEY;
 
-    return '';
+    return DEFAULT_SITE_KEY;
   }
 
   var siteKey = resolveSiteKey();
