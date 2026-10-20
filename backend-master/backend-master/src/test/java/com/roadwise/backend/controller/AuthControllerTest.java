@@ -155,11 +155,10 @@ class AuthControllerTest {
                 .andExpect(jsonPath("$.type").value("TURNSTILE_FAILED"))
                 .andExpect(jsonPath("$.mfaRequired").doesNotExist());
 
-        // A refused bot check is not a credential attempt: the *correct* password presented
-        // with a rejected token must leave the account's lockout state untouched, so that
-        // sprayed junk tokens cannot be used to lock a known account out.
-        assertEquals(0, userRepository.findById(testUser.getId()).orElseThrow()
-                .getFailedLoginAttempts());
+        // A refused bot check is not a credential attempt: junk tokens must not increment
+        // the per-user throttle and let someone lock a known account out. The IP throttle is
+        // intentionally charged to slow repeated requests from the same client.
+        assertTrue(loginRateLimitRepository.findByKeyIdentifier("USER:" + testUser.getUsername()).isEmpty());
     }
 
     @Test
