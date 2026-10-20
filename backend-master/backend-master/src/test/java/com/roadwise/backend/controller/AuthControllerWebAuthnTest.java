@@ -18,6 +18,7 @@ import com.roadwise.backend.service.NotificationService;
 import com.roadwise.backend.service.PasskeyService;
 import com.roadwise.backend.service.RoadInspectionService;
 import com.roadwise.backend.service.SupabaseStorageService;
+import com.roadwise.backend.service.TurnstileService;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -89,6 +90,14 @@ class AuthControllerWebAuthnTest {
     @MockitoBean
     private RoadInspectionService roadInspectionService;
 
+    /**
+     * The login step is the entry to the ceremony under test, and its Turnstile check is
+     * stubbed: the verdict is not what this class is about, and reaching
+     * challenges.cloudflare.com from a unit test would make it depend on the network.
+     */
+    @MockitoBean
+    private TurnstileService turnstileService;
+
     private User testUser;
 
     @BeforeEach
@@ -97,6 +106,9 @@ class AuthControllerWebAuthnTest {
                 .webAppContextSetup(context)
                 .apply(springSecurity())
                 .build();
+
+        when(turnstileService.verify(any(), any()))
+                .thenReturn(new TurnstileService.Result(true, null));
 
         loginRateLimitRepository.deleteAll();
         ceremonyRepository.deleteAll();

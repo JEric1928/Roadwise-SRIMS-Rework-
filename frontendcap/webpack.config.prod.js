@@ -74,6 +74,26 @@ module.exports = merge(common, {
             return content.toString().replace('__ROADWISE_BUILD_API_BASE__', configured);
           },
         },
+        // js/turnstile.js carries the Cloudflare Turnstile site key. A site key is public --
+        // it is not a credential, and the backend never trusts anything it produced until
+        // Cloudflare confirms it -- but it does identify the deployment, so it is substituted
+        // here like the API base rather than edited by hand in a shipped file.
+        //
+        // Unset: the placeholder stays and the script falls back (loopback -> Cloudflare's
+        // always-pass test key, anywhere else -> no widget). Both endings fail visibly at
+        // login instead of shipping a build that silently has no bot check.
+        {
+          from: 'js/turnstile.js',
+          to: 'js/turnstile.js',
+          transform(content) {
+            const configured = (process.env.ROADWISE_TURNSTILE_SITE_KEY || '').trim();
+            if (!configured) return content;
+            // replace() with a string pattern touches only the first occurrence, which is the
+            // BUILD_SITE_KEY declaration; the placeholder check below it is written against
+            // the '__ROADWISE_' prefix so it survives the substitution either way.
+            return content.toString().replace('__ROADWISE_TURNSTILE_SITE_KEY__', configured);
+          },
+        },
         { from: 'js/config.js', to: 'js/config.js' },
         { from: 'js/forecasting_ui.js', to: 'js/forecasting_ui.js' },
         { from: 'sjdm_barangays.geojson', to: 'sjdm_barangays.geojson' },

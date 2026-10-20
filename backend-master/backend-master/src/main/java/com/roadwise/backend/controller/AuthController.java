@@ -13,6 +13,7 @@ import com.roadwise.backend.service.MfaPolicyService;
 import com.roadwise.backend.service.MfaRecoveryCodeService;
 import com.roadwise.backend.service.PasskeyService;
 import com.roadwise.backend.service.SessionRevocationService;
+import com.roadwise.backend.service.TurnstileService;
 import com.roadwise.backend.util.PasswordPolicy;
 import com.roadwise.backend.util.SecurityUtils;
 import com.roadwise.backend.util.TokenHashes;
@@ -65,6 +66,10 @@ public class AuthController {
 
     @Autowired
     private PasskeyService passkeyService;
+
+    @Autowired
+    private TurnstileService turnstileService;
+
     @Autowired
     private PasswordResetTokenRepository passwordResetTokenRepository;
 
@@ -173,6 +178,26 @@ public class AuthController {
             return ResponseEntity.status(429)
                     .header("Retry-After", "60")
                     .body(Map.of("error", "Too many attempts. Account or IP temporarily rate-limited."));
+        }
+
+        // Bot check before anything is looked up. It runs after the rate limiters, so a
+        // flood of token-less requests is still throttled per IP, and before the user
+        // lookup, so a refused widget costs no database work and cannot be used to probe
+        // which usernames exist. Only the IP counter is charged: charging the account
+        // counter here would let anyone lock a known account out by posting junk tokens,
+        // which is the same denial of service the lockout policy is meant to prevent.
+        // Failures are refusals in every direction -- see TurnstileService's class docs.
+        TurnstileService.Result turnstile = turnstileService.verify(
+                loginDto.getTurnstileToken(), clientIp);
+        if (!turnstile.success()) {
+            recordFailedAttempt("IP:" + clientIp);
+            activityLogService.log(
+                    null, "AUTH", "AUTH_BOT_CHECK_FAILED", username,
+                    "Login blocked: Turnstile verification failed (" + turnstile.reason() + ").",
+                    "FAILED", request);
+            return ResponseEntity.status(403).body(Map.of(
+                    "error", "Security check failed. Please complete the verification and try again.",
+                    "type", "TURNSTILE_FAILED"));
         }
 
         Optional<User> userOpt = userRepository.findByUsername(username)

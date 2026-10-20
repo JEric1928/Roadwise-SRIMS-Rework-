@@ -14,6 +14,7 @@ import com.roadwise.backend.service.EmailService;
 import com.roadwise.backend.service.NotificationService;
 import com.roadwise.backend.service.SupabaseStorageService;
 import com.roadwise.backend.service.RoadInspectionService;
+import com.roadwise.backend.service.TurnstileService;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,9 +35,11 @@ import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -89,12 +92,25 @@ class AuthControllerTest {
     @MockitoBean
     private RoadInspectionService roadInspectionService;
 
+    /**
+     * Cloudflare verification is stubbed here. What this class covers is "password rules and
+     * lockouts apply once the bot check passes"; TurnstileService's own behaviour is tested
+     * against its own stub, so no test in this suite reaches challenges.cloudflare.com.
+     */
+    @MockitoBean
+    private TurnstileService turnstileService;
+
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders
                 .webAppContextSetup(context)
                 .apply(springSecurity())
                 .build();
+
+        // Default verdict: the bot check passes, so these tests exercise the credential path.
+        // any() rather than anyString() because a body with no turnstileToken arrives as null.
+        when(turnstileService.verify(any(), any()))
+                .thenReturn(new TurnstileService.Result(true, null));
 
         loginRateLimitRepository.deleteAll();
         mfaChallengeRepository.deleteAll();
@@ -124,6 +140,26 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.mfaRequired").value(true))
                 .andExpect(jsonPath("$.demoOtp").doesNotExist());
+    }
+
+    @Test
+    void testLoginBlocked_WhenTurnstileVerificationFails() throws Exception {
+        when(turnstileService.verify(any(), any()))
+                .thenReturn(new TurnstileService.Result(false, "invalid-input-response"));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"username\":\"testuser\",\"password\":\"Password123!\","
+                                + "\"turnstileToken\":\"forged-token\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("TURNSTILE_FAILED"))
+                .andExpect(jsonPath("$.mfaRequired").doesNotExist());
+
+        // A refused bot check is not a credential attempt: the *correct* password presented
+        // with a rejected token must leave the account's lockout state untouched, so that
+        // sprayed junk tokens cannot be used to lock a known account out.
+        assertEquals(0, userRepository.findById(testUser.getId()).orElseThrow()
+                .getFailedLoginAttempts());
     }
 
     @Test

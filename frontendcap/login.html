@@ -9,6 +9,16 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
+
+  <!-- Loaded BEFORE the Turnstile API on purpose: api.js is async and calls the
+       __roadwiseTurnstileOnload callback the moment it finishes, which can be before the
+       rest of the page has parsed. A plain script here runs during parsing, so the callback
+       always exists by then. -->
+  <script src="js/turnstile.js"></script>
+  <!-- Cloudflare Turnstile. Explicit rendering (render=explicit) so the widget can sit
+       inside the credentials step, and an onload callback so js/turnstile.js only renders
+       once the API is really there. The site key itself lives in js/turnstile.js. -->
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit&onload=__roadwiseTurnstileOnload" async defer></script>
 </head>
 <body class="login-page">
 
@@ -51,6 +61,14 @@
           <button type="button" onclick="showForgotPassword()" style="background:none; border:none; color:var(--color-primary); font-weight:700; font-size:11.5px; cursor:pointer;">FORGOT PASSWORD?</button>
         </div>
 
+        <!-- Bot check. Nothing here is the control: the widget only produces a token, and
+             /api/auth/login refuses the request unless Cloudflare confirms that token.
+             Keeping the widget inside the credentials step is what makes the refusal
+             actionable, because a failed check leaves the user on the form they can retry. -->
+        <div class="turnstile-group">
+          <div id="turnstile-widget" class="turnstile-widget" role="group" aria-label="Security check"></div>
+          <p id="turnstile-status" class="turnstile-status hidden" role="status" aria-live="polite"></p>
+        </div>
         <button type="button" id="login-btn" class="btn-login" onclick="handleLogin()">Log in ➔</button>
       </div>
 

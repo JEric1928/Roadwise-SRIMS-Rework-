@@ -32,6 +32,46 @@ function setStepVisible(id, visible) {
   step.style.removeProperty("display");
 }
 
+/**
+ * The Turnstile widget, as exposed by the classic script js/turnstile.js. Absent when that
+ * script is missing from the page, which is treated as "no bot check available" rather than
+ * as "no bot check required" -- the backend refuses an unverified login either way.
+ */
+function turnstileWidget() {
+  return (typeof window !== "undefined") ? window.RoadWiseTurnstile : null;
+}
+
+/**
+ * Renders a fresh challenge. Turnstile tokens are single-use and short-lived, so every
+ * attempt -- success, refusal or network error -- leaves the current one spent.
+ */
+function resetTurnstileWidget() {
+  const turnstile = turnstileWidget();
+  if (turnstile && typeof turnstile.reset === "function") {
+    turnstile.reset();
+  }
+}
+
+/**
+ * The token to submit, or null when the check has not been completed. Null is a reason not
+ * to send the request at all: the backend is fail-closed, so the only difference between
+ * submitting anyway and stopping here is that the user gets a security error instead of an
+ * explanation.
+ */
+function currentTurnstileToken() {
+  const turnstile = turnstileWidget();
+  return (turnstile && typeof turnstile.getToken === "function") ? turnstile.getToken() : null;
+}
+
+/** Why {@link currentTurnstileToken} returned null, phrased for the person on the form. */
+function describeTurnstileBlocker() {
+  const turnstile = turnstileWidget();
+  if (turnstile && typeof turnstile.blockingMessage === "function") {
+    return turnstile.blockingMessage();
+  }
+  return "The security check did not load. Reload the page and try again.";
+}
+
 function bindEnterKeyStepSubmit() {
   const stepConfigs = [
     { ids: ['username', 'password'], action: handleLogin },
@@ -82,6 +122,17 @@ export function handleLogin() {
     return;
   }
 
+  const turnstileToken = currentTurnstileToken();
+  if (!turnstileToken) {
+    if (typeof showToast === "function") {
+      showToast(describeTurnstileBlocker(), "error", 6000);
+    }
+    // Reset even on this path: a stale or expired challenge must not be left on screen
+    // looking solvable when the token behind it is gone.
+    resetTurnstileWidget();
+    return;
+  }
+
   const loginBtn = document.getElementById("login-btn");
   if (loginBtn) {
     loginBtn.innerHTML = "Authenticating... ⏳";
@@ -92,7 +143,7 @@ export function handleLogin() {
   fetch(`${API_BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: username, password: password })
+    body: JSON.stringify({ username: username, password: password, turnstileToken: turnstileToken })
   })
     .then(async response => {
       if (!response.ok) {
@@ -131,6 +182,9 @@ export function handleLogin() {
   })
     .catch(error => {
       if (passwordInput) passwordInput.value = "";
+      // The token was spent on this attempt regardless of why it failed, so the challenge
+      // behind it has to be replaced before the form can be submitted again.
+      resetTurnstileWidget();
 
       if (error.message.includes("Failed to fetch") || error.message.includes("NetworkError")) {
         if (typeof showToast === "function") {
@@ -685,6 +739,9 @@ export function handlePasswordReset() {
 // UI HELPER: GO BACK TO LOGIN SCREEN
 // ==========================================
 export function backToLogin() {
+  // Returning from MFA (or the reset flow) means the previous challenge was consumed by the
+  // login request. Without a new one the form would look ready and then refuse to submit.
+  resetTurnstileWidget();
   setStepVisible("login-step-2", false);
   setStepVisible("forgot-step-1", false);
   setStepVisible("forgot-step-2", false);

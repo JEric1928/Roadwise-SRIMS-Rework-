@@ -1067,6 +1067,38 @@ body.login-page {
   border-radius: var(--radius-md);
 }
 
+/* Cloudflare Turnstile bot check on the login form.
+   The height is reserved rather than left to the widget: Cloudflare mounts its iframe
+   asynchronously, and without a placeholder the Log in button jumps down the moment it
+   arrives -- usually just as a click is already on its way. */
+.turnstile-group {
+  margin-bottom: 16px;
+  min-height: 70px;
+}
+
+.turnstile-widget {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 65px;
+}
+
+.turnstile-widget-unavailable {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.turnstile-status {
+  margin: 6px 0 0;
+  color: var(--color-danger);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
 .step-badge {
   display: inline-block;
   margin-bottom: 12px;
