@@ -1,6 +1,10 @@
 package com.roadwise.backend.controller;
 
+import com.roadwise.backend.dto.BarangayResponseDto;
 import com.roadwise.backend.model.Barangay;
+import com.roadwise.backend.security.RoleCapability;
+import com.roadwise.backend.security.RoleCapabilities;
+import org.springframework.security.core.context.SecurityContextHolder;
 import com.roadwise.backend.model.RoadReport;
 import com.roadwise.backend.model.User;
 import com.roadwise.backend.repository.BarangayRepository;
@@ -42,6 +46,9 @@ public class BarangayController {
     // 🚀 INJECTED ACTIVITY LOG AUDIT SERVICE
     @Autowired
     private ActivityLogService activityLogService;
+
+    @Autowired
+    private RoleCapabilities roleCapabilities;
 
     // ==========================================
     // 🚀 HELPER: DYNAMICALLY FIND ADMIN ID
@@ -117,26 +124,32 @@ public class BarangayController {
     // ==========================================
     @GetMapping("/{id}")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<Barangay> getBarangayById(@PathVariable Long id) {
+    public ResponseEntity<BarangayResponseDto> getBarangayById(@PathVariable Long id) {
         Optional<Barangay> brgyOpt = barangayRepository.findById(id);
 
         if (brgyOpt.isPresent()) {
             Barangay brgy = brgyOpt.get();
+            boolean includeOfficialDetails = roleCapabilities.has(
+                    SecurityContextHolder.getContext().getAuthentication(),
+                    RoleCapability.BARANGAY_CONTACT);
 
             List<User> officials = userRepository.findByBarangayId(id);
+            String officialName;
+            String contactNumber;
+            String emailAddress;
 
             if (!officials.isEmpty()) {
                 User official = officials.get(0);
-                brgy.setBrgyCaptain(official.getFirstName() + " " + official.getLastName());
-                brgy.setContactNumber(official.getPhoneNumber());
-                brgy.setEmailAddress(official.getEmail());
+                officialName = official.getFirstName() + " " + official.getLastName();
+                contactNumber = official.getPhoneNumber();
+                emailAddress = official.getEmail();
             } else {
-                brgy.setBrgyCaptain("Unassigned");
-                brgy.setContactNumber("N/A");
-                brgy.setEmailAddress("N/A");
+                officialName = "Unassigned";
+                contactNumber = "N/A";
+                emailAddress = "N/A";
             }
 
-            return ResponseEntity.ok(brgy);
+            return ResponseEntity.ok(BarangayResponseDto.from(brgy, officialName, contactNumber, emailAddress, includeOfficialDetails));
         }
         return ResponseEntity.notFound().build();
     }

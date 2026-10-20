@@ -51,7 +51,8 @@ public class RoleCapabilities {
                 RoleCapability.PRIORITY_RANKING,
                 RoleCapability.LGU_REPORTING,
                 RoleCapability.OPERATIONAL_STATUS,
-                RoleCapability.PROOF_OF_REPAIR));
+                RoleCapability.PROOF_OF_REPAIR,
+                RoleCapability.BARANGAY_CONTACT));
 
         BY_ROLE.put("ADMIN", EnumSet.of(
                 RoleCapability.TECHNICAL_SURVEY,
@@ -59,7 +60,8 @@ public class RoleCapabilities {
                 RoleCapability.PRIORITY_RANKING,
                 RoleCapability.LGU_REPORTING,
                 RoleCapability.OPERATIONAL_STATUS,
-                RoleCapability.PROOF_OF_REPAIR));
+                RoleCapability.PROOF_OF_REPAIR,
+                RoleCapability.BARANGAY_CONTACT));
 
         // "CEO field engineers" in the spec: they run the survey, and they own the
         // operational lifecycle and the proof-of-repair evidence. They do not rank or
@@ -137,5 +139,9 @@ public class RoleCapabilities {
 
     public boolean proofOfRepair(Authentication authentication) {
         return has(authentication, RoleCapability.PROOF_OF_REPAIR);
+    }
+
+    public boolean barangayContact(Authentication authentication) {
+        return has(authentication, RoleCapability.BARANGAY_CONTACT);
     }
 }
