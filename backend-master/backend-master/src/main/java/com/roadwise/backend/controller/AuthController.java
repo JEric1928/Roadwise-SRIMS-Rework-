@@ -257,9 +257,6 @@ public class AuthController {
                     "Failed password verification for '" + username + "'", "FAILED", request);
             return ResponseEntity.status(401).body(Map.of("error", "Invalid username or password."));
         }
-                    "Failed password verification for '" + username + "'", "FAILED", request);
-            return ResponseEntity.status(401).body(Map.of("error", "Invalid username or password."));
-        }
 
         // Persist any legacy-plaintext→BCrypt upgrade. Lockout counters and rate
         // limits are only cleared after MFA succeeds, so possession of a stolen
