@@ -151,6 +151,17 @@
 			<artifactId>spring-boot-starter-cache</artifactId>
 		</dependency>
 
+		<!-- Surefire's bundled launcher predates the 6.0.3 engine that the Boot BOM
+		     puts on the test classpath, so JUnit fails to discover any test at all
+		     ("OutputDirectoryCreator not available"). Declaring the launcher here
+		     lets the BOM supply a version aligned with junit-platform-engine,
+		     instead of the one that ships inside surefire-junit-platform. -->
+		<dependency>
+			<groupId>org.junit.platform</groupId>
+			<artifactId>junit-platform-launcher</artifactId>
+			<scope>test</scope>
+		</dependency>
+
 	</dependencies>
 
 	<build>

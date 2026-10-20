@@ -48,12 +48,7 @@ public class User {
     private String profilePicture;
     private String status;
 
-    // 🔒 RATE LIMITING & SECURITY LOCKOUT
-    @Column(name = "failed_login_attempts")
-    private Integer failedLoginAttempts = 0; // Changed to Integer to safely handle DB nulls for legacy accounts
 
-    @Column(name = "lockout_until")
-    private LocalDateTime lockoutUntil;
 
     // Security stamp embedded in every access token (claim "sv"). Incrementing
     // it revokes all previously issued tokens for this account immediately,
@@ -146,19 +141,7 @@ public class User {
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
 
-    // Rate Limiting Getters & Setters. These are internal security state and
-    // must never leak to API clients.
-    @JsonIgnore
-    public int getFailedLoginAttempts() {
-        return failedLoginAttempts == null ? 0 : failedLoginAttempts;
-    }
 
-    public void setFailedLoginAttempts(Integer failedLoginAttempts) {
-        this.failedLoginAttempts = failedLoginAttempts;
-    }
-
-    @JsonIgnore
-    public LocalDateTime getLockoutUntil() { return lockoutUntil; }
 
     @JsonIgnore
     public Long getSessionVersion() { return sessionVersion == null ? 0L : sessionVersion; }
@@ -194,5 +177,5 @@ public class User {
     public void bumpSessionVersion() {
         this.sessionVersion = getSessionVersion() + 1;
     }
-    public void setLockoutUntil(LocalDateTime lockoutUntil) { this.lockoutUntil = lockoutUntil; }
+
 }

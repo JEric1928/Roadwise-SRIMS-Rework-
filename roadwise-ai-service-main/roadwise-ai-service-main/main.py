@@ -1,3 +1,4 @@
+import hmac
 import hashlib
 import logging
 import io
@@ -19,10 +20,19 @@ import multi_hazard as mh
 
 logger = logging.getLogger("roadwise.forecasting")
 
+docs_kwargs = {}
+if os.environ.get("AI_ENV", "").strip().lower() == "production":
+    docs_kwargs = {
+        "docs_url": None,
+        "redoc_url": None,
+        "openapi_url": None,
+    }
+
 app = FastAPI(
     title="RoadWise AI & Advanced Mathematical Forecasting Service",
     version="2.0.0",
-    description="ISO/IEC 25010 compliant analytical microservice hosting 5 continuous-time stochastic and differential forecasting engines."
+    description="ISO/IEC 25010 compliant analytical microservice hosting 5 continuous-time stochastic and differential forecasting engines.",
+    **docs_kwargs
 )
 
 # 1. Load ONNX Model on Startup (with supply-chain checksum verification)
@@ -61,7 +71,7 @@ def require_api_key(x_api_key: Optional[str] = Header(default=None)):
     if not AI_SERVICE_API_KEY:
         raise HTTPException(status_code=503,
                             detail="AI service authentication is not configured (AI_SERVICE_API_KEY missing).")
-    if not x_api_key or x_api_key != AI_SERVICE_API_KEY:
+    if not x_api_key or not hmac.compare_digest(x_api_key, AI_SERVICE_API_KEY):
         raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key.")
 
 SEVERITY_LEVELS = ["Low", "Medium", "High"]
@@ -236,8 +246,6 @@ def health_check():
     payload = {
         "service": "RoadWise AI Inference & Mathematical Forecasting Engine",
         "model_loaded": session is not None,
-        "auth_configured": bool(AI_SERVICE_API_KEY),
-        "csjdm_profile": CSJDM_GEOMORPHIC_PROFILE
     }
     if session is None:
         payload["status"] = "degraded"

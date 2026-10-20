@@ -32,5 +32,8 @@ public enum RoleCapability {
     OPERATIONAL_STATUS,
 
     /** ROLE_CEO: attach proof-of-repair evidence. */
-    PROOF_OF_REPAIR
+    PROOF_OF_REPAIR,
+
+    /** ROLE_ADMIN / CPDO Admin: view official personal contact details for barangays. */
+    BARANGAY_CONTACT
 }
