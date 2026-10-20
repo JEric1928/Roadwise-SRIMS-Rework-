@@ -224,11 +224,11 @@ public class UserController {
     }
 
     // ==========================================
-    // 3. SECURE PASSWORD UPDATE (1-HOUR LOCKOUT)
-    //    Lockout state is persisted on the user row (failed_login_attempts /
-    //    lockout_until), consistent with the database-backed security model in
-    //    AuthController. The old in-memory securityTracker map was removed:
-    //    it leaked entries and reset on every restart / across instances.
+    // 3. SECURE PASSWORD UPDATE (RATE-LIMITED)
+    //    Failed current-password attempts are throttled per user through
+    //    RateLimitService on a PASSWORD_CHANGE:<id> key. Account login state is
+    //    deliberately left untouched so an administrator or malicious actor
+    //    targeting another account ID cannot lock that account out of login.
     // ==========================================
 
     /**
@@ -270,42 +270,24 @@ public class UserController {
         String currentPassword = payload.get("currentPassword");
         String newPassword = payload.get("newPassword");
 
-        if (user.getLockoutUntil() != null && LocalDateTime.now().isBefore(user.getLockoutUntil())) {
-            long minutesLeft = Duration.between(LocalDateTime.now(), user.getLockoutUntil()).toMinutes() + 1;
-            return ResponseEntity.status(429).body(Map.of("error", "Security lockout active. Please try again in " + minutesLeft + " minute(s)."));
+        String passwordFailureKey = "PASSWORD_CHANGE:" + id;
+        if (rateLimitService.isBlocked(passwordFailureKey)) {
+            return ResponseEntity.status(429)
+                    .header("Retry-After", "60")
+                    .body(Map.of("error", "Too many failed attempts. Please try again in a minute."));
         }
 
         if (!verifyAndMigratePassword(user, currentPassword)) {
-            int attempts = user.getFailedLoginAttempts() + 1;
-            user.setFailedLoginAttempts(attempts);
-            if (attempts >= 5) {
-                user.setLockoutUntil(LocalDateTime.now().plusHours(1));
-                userRepository.save(user);
-
-                activityLogService.log(
-                        user,
-                        "AUTH",
-                        "PASSWORD_CHANGE_LOCKED",
-                        "#USR-" + user.getId(),
-                        "Password update locked for 1 hour due to multiple incorrect password attempts.",
-                        "WARNING",
-                        request
-                );
-
-                return ResponseEntity.status(429).body(Map.of("error", "Maximum attempts reached! Account locked for 1 hour for security."));
-            }
-            userRepository.save(user);
-            int remaining = 5 - attempts;
-            return ResponseEntity.status(401).body(Map.of("error", "Incorrect current password. " + remaining + " attempt(s) remaining."));
+            rateLimitService.recordFailure(passwordFailureKey);
+            return ResponseEntity.status(401).body(Map.of("error", "Incorrect current password."));
         }
+        rateLimitService.clear(passwordFailureKey);
 
         String policyError = PasswordPolicy.validate(newPassword);
         if (policyError != null) {
             return ResponseEntity.badRequest().body(Map.of("error", policyError));
         }
 
-        user.setFailedLoginAttempts(0);
-        user.setLockoutUntil(null);
         user.setPassword(passwordEncoder.encode(newPassword));
         user.setPasswordChangeRequired(false);
         user.setTempPasswordExpiresAt(null);
@@ -601,8 +583,6 @@ public class UserController {
         user.setPassword(passwordEncoder.encode(tempPassword));
         user.setPasswordChangeRequired(true);
         user.setTempPasswordExpiresAt(LocalDateTime.now().plusHours(24));
-        user.setFailedLoginAttempts(0);
-        user.setLockoutUntil(null);
         // Force re-authentication: revoke refresh tokens, access stamps and any
         // pending MFA/recovery challenge for the account.
         revokeUserSessionsAndChallenges(user, "administrator password reset");
@@ -738,7 +718,6 @@ public class UserController {
         newAdmin.setTempPasswordExpiresAt(LocalDateTime.now().plusHours(24));
         newAdmin.setRole("CPDO Admin");
         newAdmin.setStatus("Active");
-        newAdmin.setFailedLoginAttempts(0);
         newAdmin.setProfilePicture("no_image.jpg");
 
         User savedNewAdmin = userRepository.save(newAdmin);
@@ -875,7 +854,6 @@ public class UserController {
         newCeo.setTempPasswordExpiresAt(LocalDateTime.now().plusHours(24));
         newCeo.setRole(currentCeo.getRole() != null ? currentCeo.getRole() : "ENGINEER");
         newCeo.setStatus("Active");
-        newCeo.setFailedLoginAttempts(0);
         newCeo.setProfilePicture("no_image.jpg");
 
         User savedNewCeo = userRepository.save(newCeo);

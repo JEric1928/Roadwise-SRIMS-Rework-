@@ -18,6 +18,9 @@ import com.roadwise.backend.util.SecurityUtils;
 import com.roadwise.backend.util.TokenHashes;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -95,6 +98,13 @@ public class AuthController {
     private long sessionIdleExpirationMs;
 
     private final SecureRandom secureRandom = new SecureRandom();
+
+    private String dummyPasswordHash;
+
+    @PostConstruct
+    void initialiseDummyPasswordHash() {
+        this.dummyPasswordHash = passwordEncoder.encode(UUID.randomUUID().toString());
+    }
 
     // Failed-attempt counters age out after this window instead of blocking forever.
     private static final Duration RESET_REQUEST_COOLDOWN = Duration.ofSeconds(60);
@@ -191,17 +201,6 @@ public class AuthController {
         User user = userOpt.get();
         String formattedUserId = String.format("#USR-%04d", user.getId());
 
-        if (user.getLockoutUntil() != null && LocalDateTime.now().isBefore(user.getLockoutUntil())) {
-            activityLogService.log(
-                    null, "AUTH", "AUTH_ACCOUNT_LOCKED", formattedUserId,
-                    "Blocked login attempt during active lockout penalty.", "WARNING", request);
-            long retryAfter = Math.max(
-                    1, Duration.between(LocalDateTime.now(), user.getLockoutUntil()).getSeconds());
-            return ResponseEntity.status(429)
-                    .header("Retry-After", String.valueOf(retryAfter))
-                    .body(Map.of("error", "Too many failed attempts. Account temporarily rate-limited for security."));
-        }
-
         if (user.getPasswordChangeRequired() && user.getTempPasswordExpiresAt() != null
                 && LocalDateTime.now().isAfter(user.getTempPasswordExpiresAt())) {
             activityLogService.log(
@@ -217,33 +216,22 @@ public class AuthController {
                 || user.getPassword().startsWith("$2y$")) {
             passwordMatches = passwordEncoder.matches(password, user.getPassword());
         } else {
-            passwordMatches = user.getPassword().equals(password);
+            passwordMatches = MessageDigest.isEqual(
+                    user.getPassword().getBytes(StandardCharsets.UTF_8),
+                    password.getBytes(StandardCharsets.UTF_8));
             if (passwordMatches) {
                 user.setPassword(passwordEncoder.encode(password));
             }
         }
 
         if (!passwordMatches) {
-            int attempts = user.getFailedLoginAttempts() + 1;
-            user.setFailedLoginAttempts(attempts);
-            if (attempts > 5) {
-                long penaltySeconds = Math.min((long) Math.pow(2, attempts - 5), 900);
-                user.setLockoutUntil(LocalDateTime.now().plusSeconds(penaltySeconds));
-
-                if (attempts == 6 || attempts == 15) {
-                    notificationService.sendNotification(
-                            getAdminId(),
-                            "Security Alert: Brute-Force Activity",
-                            "Lockout triggered for user: '" + username + "' after " + attempts + " consecutive failed attempts.",
-                            "SECURITY"
-                    );
-                }
-            }
-            userRepository.save(user);
             recordFailedAttempt("IP:" + clientIp);
             recordFailedAttempt("USER:" + username);
             activityLogService.log(
                     null, "AUTH", "AUTH_LOGIN_FAILED", formattedUserId,
+                    "Failed password verification for '" + username + "'", "FAILED", request);
+            return ResponseEntity.status(401).body(Map.of("error", "Invalid username or password."));
+        }
                     "Failed password verification for '" + username + "'", "FAILED", request);
             return ResponseEntity.status(401).body(Map.of("error", "Invalid username or password."));
         }
@@ -252,6 +240,15 @@ public class AuthController {
         // limits are only cleared after MFA succeeds, so possession of a stolen
         // password alone cannot reset brute-force protections.
         userRepository.save(user);
+
+        if (user.getPasswordChangeRequired() && user.getTempPasswordExpiresAt() != null
+                && LocalDateTime.now().isAfter(user.getTempPasswordExpiresAt())) {
+            activityLogService.log(
+                    null, "AUTH", "AUTH_TEMP_PASSWORD_EXPIRED", formattedUserId,
+                    "Login attempt with expired temporary password.", "WARNING", request);
+            return ResponseEntity.status(401).body(Map.of("error",
+                    "Temporary password has expired. Please request a password reset or contact CPDO Admin."));
+        }
 
         SystemSettings settings = systemSettingsRepository.findById(1L).orElse(null);
         if (settings != null && settings.isMaintenanceMode()) {
@@ -604,14 +601,11 @@ public class AuthController {
     /**
      * Issues the session once every factor requirement is satisfied.
      *
-     * <p>Also the only place failed-password counters and rate limits are cleared.
+     * <p>Also the only place rate limits are cleared.
      * Possession of a stolen password must not reset brute-force protections; only
      * completing MFA does.
      */
     private ResponseEntity<?> completeLogin(User user, String verifiedFactor, HttpServletRequest request) {
-        user.setFailedLoginAttempts(0);
-        user.setLockoutUntil(null);
-        userRepository.save(user);
         clearRateLimit("IP:" + request.getRemoteAddr());
         clearRateLimit("USER:" + user.getUsername());
 
@@ -903,8 +897,6 @@ public class AuthController {
         user.setPassword(passwordEncoder.encode(newPassword));
         user.setPasswordChangeRequired(false);
         user.setTempPasswordExpiresAt(null);
-        user.setFailedLoginAttempts(0);
-        user.setLockoutUntil(null);
         sessionRevocationService.revoke(user, "password reset");
 
         resetToken.setUsed(true);

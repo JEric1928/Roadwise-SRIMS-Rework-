@@ -9,8 +9,9 @@ import java.time.LocalDate;
  * Safe, read-only projection of a {@link User} for API responses.
  *
  * <p>Deliberately excludes credentials and security state (password hash,
- * failed-login counter, lockout expiry). Returning the JPA entity directly
- * invited accidental disclosure whenever a new field was added.</p>
+ * MFA secrets). A user response carries identity and role, never authentication
+ * state or credential metadata. Returning the JPA entity directly invited
+ * accidental disclosure whenever a new field was added.</p>
  */
 public class UserResponseDto {
 

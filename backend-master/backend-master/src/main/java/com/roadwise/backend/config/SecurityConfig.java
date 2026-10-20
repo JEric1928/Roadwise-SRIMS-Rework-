@@ -56,6 +56,12 @@ public class SecurityConfig {
      * summary. Kept as GET-only rules so the write endpoints on the same prefixes still need
      * a session.
      */
+    static final List<String> ACTUATOR_ADMIN_PATHS = List.of(
+            "/actuator/metrics",
+            "/actuator/metrics/**",
+            "/actuator/info",
+            "/actuator/info/**");
+
     static final List<String> PUBLIC_GET_PATHS = List.of(
             "/api/barangays",
             "/api/roads/**",
@@ -104,6 +110,7 @@ public class SecurityConfig {
                 .requestMatchers(STEP_UP_PATHS.toArray(String[]::new)).authenticated()
                 .requestMatchers(PUBLIC_PATHS.toArray(String[]::new)).permitAll()
                 .requestMatchers(HttpMethod.GET, PUBLIC_GET_PATHS.toArray(String[]::new)).permitAll()
+                .requestMatchers(ACTUATOR_ADMIN_PATHS.toArray(String[]::new)).hasAnyRole("ADMIN", "CPDO Admin")
                 .requestMatchers(AUTHENTICATED_PREFIXES.toArray(String[]::new)).authenticated()
                 // Fail closed. A new route is unreachable until it is listed above, and the
                 // coverage test says so at build time instead of a caller finding out.

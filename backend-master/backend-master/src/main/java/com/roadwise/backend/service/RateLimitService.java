@@ -108,10 +108,14 @@ public class RateLimitService {
     public void recordFailure(String key) {
         inNewTransactionWithInsertRetry(() -> {
             LoginRateLimit rateLimit = lockedOrNull(key);
-            if (rateLimit == null || isWindowExpired(rateLimit)) {
+            if (rateLimit == null) {
                 rateLimit = new LoginRateLimit(key);
                 rateLimit.setAttemptCount(0);
                 rateLimit.setFirstAttemptAt(LocalDateTime.now());
+            } else if (isWindowExpired(rateLimit)) {
+                rateLimit.setAttemptCount(0);
+                rateLimit.setFirstAttemptAt(LocalDateTime.now());
+                rateLimit.setBlockedUntil(null);
             }
             rateLimit.setAttemptCount(rateLimit.getAttemptCount() + 1);
             rateLimit.setLastAttemptAt(LocalDateTime.now());
@@ -148,10 +152,14 @@ public class RateLimitService {
     public void recordRequest(String key) {
         inNewTransactionWithInsertRetry(() -> {
             LoginRateLimit rateLimit = lockedOrNull(key);
-            if (rateLimit == null || isWindowExpired(rateLimit)) {
+            if (rateLimit == null) {
                 rateLimit = new LoginRateLimit(key);
                 rateLimit.setAttemptCount(0);
                 rateLimit.setFirstAttemptAt(LocalDateTime.now());
+            } else if (isWindowExpired(rateLimit)) {
+                rateLimit.setAttemptCount(0);
+                rateLimit.setFirstAttemptAt(LocalDateTime.now());
+                rateLimit.setBlockedUntil(null);
             }
             rateLimit.setAttemptCount(rateLimit.getAttemptCount() + 1);
             rateLimit.setLastAttemptAt(LocalDateTime.now());
