@@ -26,7 +26,10 @@ import { openModal, closeModal } from '../../components/modal.js';
 // ==========================================
 function loadAdminReports() {
   // 🛡️ SAFETY CHECK: Only run this if we are actually on the Admin Dashboard!
-  if (document.getElementById('ceo-metric-total')) {
+  // 🛡️ SAFETY CHECK: Only run this if we are actually on the Admin Dashboard!
+  // The ceo-metric-total sentinel also exists on the admin page (hidden) for the
+  // DOM contract, so key the guard on the CEO view container instead of the id.
+  if (document.querySelector('#view-reports') && document.getElementById('ceo-metric-total')) {
     return;
   }
 
@@ -34,6 +37,11 @@ function loadAdminReports() {
     document.querySelector('#view-reports .data-table tbody');
   if (!reportsTableBody) return;
 
+  // Loading skeleton while the inbox fetch is in flight.
+  reportsTableBody.innerHTML = Array.from({ length: 8 }, () => `
+    <tr>
+      <td colspan="8"><div class="skeleton" style="height: 20px;"></div></td>
+    </tr>`).join('');
   apiFetch(`/api/reports`)
     .then(reports => {
       reportsTableBody.innerHTML = '';

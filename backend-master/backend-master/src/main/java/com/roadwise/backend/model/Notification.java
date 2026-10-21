@@ -33,6 +33,12 @@ public class Notification {
     @Column(length = 50)
     private String type;
 
+
+    @Column(name = "target_type", length = 50)
+    private String targetType;
+
+    @Column(name = "target_id")
+    private Long targetId;
     @JsonProperty("recipientId")
     public Long getRecipientId() {
         return recipient != null ? recipient.getId() : null;
@@ -69,4 +75,10 @@ public class Notification {
 
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
+
+    public String getTargetType() { return targetType; }
+    public void setTargetType(String targetType) { this.targetType = targetType; }
+
+    public Long getTargetId() { return targetId; }
+    public void setTargetId(Long targetId) { this.targetId = targetId; }
 }

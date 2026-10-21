@@ -8,6 +8,102 @@ import { showToast } from '../../components/toast.js';
 
 let isSubmittingReport = false;
 
+// ==========================================
+// DRAFT AUTOSAVE: long report forms are costly to re-enter after an accidental
+// navigation or refresh. Values are mirrored to localStorage on every input and
+// restored when the form loads again. Only text/select/textarea fields are kept;
+// the photo input is intentionally excluded (a stored File handle cannot be
+// reconstructed), so a draft remembers everything except the image.
+// ==========================================
+const DRAFT_STORAGE_KEY = 'roadwise.report-draft.v1';
+
+const DRAFT_FIELD_IDS = [
+  'cityRoadName', 'cityRoadId', 'roadImportance', 'roadType', 'terrainType',
+  'width', 'length', 'numberOfBridges', 'lengthOfCulverts',
+  'damageType', 'otherDamageType', 'damageDescription',
+  'damageLength', 'damageWidth', 'latitude', 'longitude'
+];
+
+function collectDraft() {
+  if (typeof document === 'undefined') return {};
+  const draft = {};
+  for (const id of DRAFT_FIELD_IDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    const value = el.value;
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      draft[id] = value;
+    }
+  }
+  return draft;
+}
+
+function draftIsEmpty(draft) {
+  return Object.keys(draft).length === 0;
+}
+
+export function saveDraftToStorage() {
+  if (typeof localStorage === 'undefined') return;
+  const draft = collectDraft();
+  try {
+    if (draftIsEmpty(draft)) {
+      localStorage.removeItem(DRAFT_STORAGE_KEY);
+    } else {
+      localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+    }
+  } catch (e) {
+    // Storage full or blocked (private mode): drafts are best-effort.
+  }
+}
+
+export function restoreDraftFromStorage() {
+  if (typeof localStorage === 'undefined' || typeof document === 'undefined') return false;
+  let draft;
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    if (!raw) return false;
+    draft = JSON.parse(raw);
+  } catch (e) {
+    return false;
+  }
+  if (!draft || typeof draft !== 'object' || draftIsEmpty(draft)) return false;
+
+  let restoredAny = false;
+  for (const [id, value] of Object.entries(draft)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.tagName === 'SELECT') {
+      const matching = [...el.options].some(opt => opt.value === String(value));
+      if (!matching) continue;
+    }
+    el.value = value;
+    restoredAny = true;
+  }
+  return restoredAny;
+}
+
+export function clearDraftStorage() {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.removeItem(DRAFT_STORAGE_KEY);
+  } catch (e) { /* best-effort */ }
+}
+
+export function initDraftAutosave() {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return;
+  const form = document.getElementById('addReportForm');
+  if (!form) return;
+
+  const persist = () => saveDraftToStorage();
+  form.addEventListener('input', persist);
+  form.addEventListener('change', persist);
+
+  const draftRestored = restoreDraftFromStorage();
+  if (draftRestored && typeof showToast === 'function') {
+    showToast('Draft restored — review before submitting.', 'success');
+  }
+}
+
 export function isReportFormDirty() {
   const roadName = document.getElementById("cityRoadName")?.value;
   const length = document.getElementById("length")?.value;
@@ -204,6 +300,7 @@ export function executeFinalSubmission() {
       }
 
       resetAddReportForm();
+      clearDraftStorage();
 
       if (typeof window.loadBarangayReports === 'function') {
         const brgyId = sessionStorage.getItem("barangayId");
@@ -302,6 +399,9 @@ export function resetAddReportForm() {
   const fileNameDisplay = document.getElementById("fileNameDisplay");
   if (fileNameDisplay) fileNameDisplay.textContent = "";
 }
+
+// Draft autosave initialization (guarded: no-op on non-browser runs).
+initDraftAutosave();
 
 // Window Compatibility Bridges
 window.toggleOtherDamageType = toggleOtherDamageType;

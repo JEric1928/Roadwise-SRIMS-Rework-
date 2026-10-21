@@ -180,6 +180,89 @@ test('report submission module exposes exports and sets up window compatibility 
     }
   }
 });
+// Test 19b: Draft autosave — non-browser environment is a no-op
+test('report draft autosave is a safe no-op without a real form', async () => {
+  const originals = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage };
+  const storage = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (storage.has(k) ? storage.get(k) : null),
+    setItem: (k, v) => storage.set(k, String(v)),
+    removeItem: (k) => storage.delete(k)
+  };
+  globalThis.window = {};
+  globalThis.document = { getElementById: () => null, addEventListener: () => {} };
+  try {
+    const mod = await import(reportSubmissionUrl);
+    assert.doesNotThrow(() => mod.saveDraftToStorage());
+    assert.strictEqual(mod.restoreDraftFromStorage(), false);
+    assert.doesNotThrow(() => mod.clearDraftStorage());
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
+});
+
+// Test 19c: Draft autosave — save/restore round-trip with select-value guard
+test('report draft autosave round-trips values and rejects unknown select options', async () => {
+  const originals = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage };
+  const storage = new Map();
+  globalThis.localStorage = {
+    getItem: (k) => (storage.has(k) ? storage.get(k) : null),
+    setItem: (k, v) => storage.set(k, String(v)),
+    removeItem: (k) => storage.delete(k)
+  };
+  globalThis.window = {};
+  const elements = new Map();
+  function makeEl(tagName, value, options) {
+    return {
+      tagName,
+      value,
+      options: options || [],
+      set value(v) { this._value = v; },
+      get value() { return this._value || ''; }
+    };
+  }
+  const roadName = makeEl('INPUT', '');
+  const damageType = makeEl('SELECT', '', [{ value: 'Pothole' }, { value: 'Cracking' }]);
+  elements.set('cityRoadName', roadName);
+  elements.set('damageType', damageType);
+  globalThis.document = {
+    getElementById: (id) => elements.get(id) || null,
+    addEventListener: () => {}
+  };
+  try {
+    const mod = await import(reportSubmissionUrl);
+
+    roadName.value = 'Maharlika Highway';
+    damageType.value = 'Pothole';
+    mod.saveDraftToStorage();
+
+    // Reset inputs to simulate a refresh; restore should repopulate.
+    roadName.value = '';
+    damageType.value = '';
+    assert.strictEqual(mod.restoreDraftFromStorage(), true);
+    assert.strictEqual(roadName.value, 'Maharlika Highway');
+    assert.strictEqual(damageType.value, 'Pothole');
+
+    // Stale select option must be skipped, not forced in.
+    localStorage.setItem('roadwise.report-draft.v1', JSON.stringify({ damageType: 'DoesNotExist' }));
+    roadName.value = '';
+    damageType.value = '';
+    assert.strictEqual(mod.restoreDraftFromStorage(), false);
+    assert.strictEqual(damageType.value, '');
+
+    mod.clearDraftStorage();
+    assert.strictEqual(localStorage.getItem('roadwise.report-draft.v1'), null);
+  } finally {
+    for (const [key, value] of Object.entries(originals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+  }
+});
+
 
 // Test 20: Priority dispatch feature window compatibility bridges
 test('priority dispatch module exposes exports and sets up window compatibility bridges', async () => {

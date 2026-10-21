@@ -2005,3 +2005,69 @@ body.login-page {
     scroll-behavior: auto !important;
   }
 }
+
+/* ==========================================
+   Accessibility: keyboard focus visibility
+   ========================================== */
+:focus-visible {
+  outline: 3px solid #0284c7;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+.modal-overlay:focus {
+  outline: none;
+}
+
+/* ==========================================
+   Feedback animation utilities
+   ========================================== */
+.skeleton,
+.skeleton-block {
+  position: relative;
+  overflow: hidden;
+  background: #e8eef5;
+  border-radius: 6px;
+  color: transparent !important;
+  user-select: none;
+}
+.skeleton::after,
+.skeleton-block::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  animation: skeleton-shimmer 1.4s infinite;
+}
+@keyframes skeleton-shimmer {
+  100% { transform: translateX(100%); }
+}
+
+@keyframes row-flash {
+  0% { background-color: #dbeafe; }
+  60% { background-color: #eff6ff; }
+  100% { background-color: transparent; }
+}
+.tr-flash {
+  animation: row-flash 1.6s ease-out;
+}
+
+.status-badge.pulse-live {
+  animation: badge-pulse 2s infinite;
+}
+@keyframes badge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  50% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0.18); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after,
+  .skeleton-block::after,
+  .tr-flash,
+  .status-badge.pulse-live {
+    animation: none !important;
+  }
+  :focus-visible {
+    outline-width: 2px;
+  }
+}

@@ -40,8 +40,20 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorDto);
     }
 
+    // "… not found" messages are 404s, not validation failures. The controller
+    // layer throws IllegalArgumentException for both, so distinguish on the message
+    // shape instead of forcing every call site to a new exception type.
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ErrorResponseDto> handleIllegalArgumentException(IllegalArgumentException ex, HttpServletRequest request) {
+        if (ex.getMessage() != null && ex.getMessage().endsWith(" not found")) {
+            ErrorResponseDto errorDto = new ErrorResponseDto(
+                    HttpStatus.NOT_FOUND.value(),
+                    "NOT_FOUND",
+                    "The requested resource was not found.",
+                    request.getRequestURI()
+            );
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorDto);
+        }
         ErrorResponseDto errorDto = new ErrorResponseDto(
                 HttpStatus.BAD_REQUEST.value(),
                 "BAD_REQUEST",

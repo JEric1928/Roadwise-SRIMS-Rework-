@@ -48,6 +48,11 @@
   <div class="main-content">
     <header class="top-header">
 
+<!-- Sentinel for the shared bundle's CEO-page guard (dom contract). Kept hidden;
+     loadAdminReports must still run on this page, so the JS guard checks for the
+     CEO view container, not this id alone. -->
+<div id="ceo-metric-total" class="hidden" data-role="sentinel">0</div>
+
       <!-- LEFT SIDE: Mobile Hamburger Toggle + Title -->
       <div style="display: flex; align-items: center; gap: 12px;">
         <button type="button" class="sidebar-toggle-btn" aria-label="Toggle navigation menu" onclick="toggleMobileSidebar()">☰ Menu</button>
@@ -264,8 +269,10 @@
                 </div>
                 <div style="margin-top: 15px; background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 6px; padding: 10px; text-align: center;">
                   <span style="font-size: 11px; color: #065f46; font-weight: 600;">Required Contingency Reserve:</span>
+
                   <div id="reserve-amount-text" style="font-size: 15px; font-weight: 800; color: #047857; margin-top: 2px;">₱0.00</div>
                 </div>
+                <div id="financial-var-status-label" style="margin-top: 10px; font-size: 12px; font-weight: 700; color: var(--color-text); background: #f8fafc; padding: 6px 10px; border-radius: 4px; border: 1px solid var(--color-border);">Financial risk model status: standby...</div>
               </div>
             </div>
 
@@ -429,9 +436,19 @@
             <p style="color: var(--color-muted); font-size: 13px;">Immutable audit trail of administrative actions and report state transitions.</p>
           </div>
 
-          <button type="button" class="btn-primary" id="btn-activity-export-menu" onclick="toggleActivityExportDropdown(event)">
-            <span>📥</span> Export Audit Trail
-          </button>
+          <div style="position: relative; display: inline-block;">
+            <button type="button" class="btn-primary" id="btn-activity-export-menu" onclick="toggleActivityExportDropdown(event)">
+              <span>📥</span> Export Audit Trail <span style="font-size: 10px;">▼</span>
+            </button>
+            <div id="activity-export-dropdown" class="hidden" style="position: absolute; right: 0; top: calc(100% + 6px); background: #ffffff; border: 1px solid var(--color-border); border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); width: 220px; z-index: 1000; overflow: hidden; display: none;">
+              <button type="button" onclick="exportActivityLogCSV()" style="width: 100%; text-align: left; padding: 10px 14px; background: none; border: none; border-bottom: 1px solid #f1f5f9; font-size: 12.5px; font-weight: 600; color: var(--color-text); cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 15px;">📊</span> Export as CSV (.csv)
+              </button>
+              <button type="button" onclick="openActivityLogPrintModal()" style="width: 100%; text-align: left; padding: 10px 14px; background: none; border: none; font-size: 12.5px; font-weight: 600; color: var(--color-text); cursor: pointer; display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 15px;">🖨️</span> Print / Save to PDF (.pdf)
+              </button>
+            </div>
+          </div>
         </div>
 
         <div class="section-card">
@@ -482,6 +499,11 @@
               </tbody>
             </table>
           </div>
+
+          <div style="margin-top: 15px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--color-muted); font-weight: 600;">
+            <span id="activity-log-count">Showing 0 log entries</span>
+            <span style="font-size: 11px; color: #94a3b8; font-style: italic;">Records are cryptographically bound and tamper-evident</span>
+          </div>
         </div>
       </div>
 
@@ -502,6 +524,17 @@
               </select>
               <button type="button" class="btn-primary" onclick="generateAdminReport('INVENTORY')">Export PDF</button>
             </div>
+            <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+              <select id="export-inventory-year" class="bd-status-select" style="flex: 1; min-width: 150px;" aria-label="Select year for report preview">
+                <option value="ALL">All Recorded Years</option>
+              </select>
+              <select id="export-report-category" class="bd-status-select" style="flex: 1; min-width: 150px;" aria-label="Select report category">
+                <option value="ALL">All Records</option>
+                <option value="ACTIVE">Active Engineering Projects</option>
+                <option value="ACCOMPLISHMENT">Annual Accomplishment Report</option>
+              </select>
+              <button type="button" class="btn-primary" style="flex-shrink: 0;" onclick="openAnnualReportPreview()">Preview Report</button>
+            </div>
           </div>
 
           <div class="metric-card">
@@ -519,6 +552,7 @@
         <div class="section-card">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 12px;">
             <h3 style="margin: 0; font-size: 17px; font-weight: 700;">Historical Project Database</h3>
+            <span id="archive-database-count" style="font-size: 13px; color: var(--color-muted); font-weight: 600;">Loading...</span>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
               <input type="text" id="archive-search-input" placeholder="Search ID, Road, Barangay..." onkeyup="filterArchiveDatabaseTable()" class="bd-search-bar" aria-label="Search archived database">
               <select id="archive-filter-year" onchange="filterArchiveDatabaseTable()" class="bd-status-select" aria-label="Filter archive year">
@@ -564,11 +598,30 @@
         <div class="section-card">
           <h2>System Settings & Cycle Management</h2>
           <div style="margin-top: 20px;">
-            <h3>Active Inventory Cycle</h3>
+            <h3>Active Inventory Cycle · <span id="settings-active-year" style="font-weight: 800; color: var(--color-primary);">Loading...</span></h3>
             <p>Inspected <span id="settings-inspected-count">0</span> of <span id="settings-total-roads">0</span> roads (<span id="settings-progress-percent">0%</span>)</p>
             <div style="width: 100%; background: #e2e8f0; height: 10px; border-radius: 5px; margin: 10px 0;">
               <div id="settings-progress-bar" style="width: 0%; background: var(--color-primary); height: 100%; border-radius: 5px;"></div>
             </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; flex-wrap: wrap;">
+              <span id="cycle-status-badge" style="padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 800; letter-spacing: 0.5px; background: #dcfce7; color: #16a34a; border: 1px solid #bbf7d0;">ACTIVE (OPEN FOR INSPECTION)</span>
+              <button type="button" class="btn-danger" onclick="openRolloverModal()">🔴 Finalize Cycle & Flush for New Year</button>
+            </div>
+          </div>
+        </div>
+        <div class="section-card" style="margin-top: 20px;">
+          <h2>🔒 System Maintenance Mode</h2>
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-top: 14px;">
+            <div style="flex: 1; min-width: 240px;">
+              <p style="margin: 0 0 5px; font-size: 15px; font-weight: 700; color: var(--color-text);">Lock System Logins</p>
+              <p style="margin: 0; font-size: 13px; color: var(--color-muted);">Prevents Barangays and CEO from logging in during updates. Admins bypass this lock.</p>
+            </div>
+            <label style="position: relative; display: inline-block; width: 50px; height: 26px; flex-shrink: 0;">
+              <input type="checkbox" id="toggle-maintenance" onchange="toggleMaintenanceMode(this.checked)" style="opacity: 0; width: 0; height: 0;">
+              <span id="maintenance-slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .4s; border-radius: 34px;">
+                <span id="maintenance-knob" style="position: absolute; height: 18px; width: 18px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%;"></span>
+              </span>
+            </label>
           </div>
         </div>
 
@@ -597,6 +650,20 @@
         <div class="bd-controls">
           <h2 style="margin: 0; font-size: 20px;">City Road Submissions</h2>
           <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+            <button type="button" class="btn-primary" onclick="switchView('view-road-inventory')">📑 Annual City Road Inventory</button>
+            <div style="position: relative; display: inline-block;">
+              <button type="button" class="btn-primary" onclick="const d=document.getElementById('print-dropdown');d.classList.toggle('hidden');d.style.display=d.classList.contains('hidden')?'none':'block';" aria-haspopup="true" aria-expanded="false">
+                <span>🖨️</span> Generate Report <span style="font-size: 10px;">▼</span>
+              </button>
+              <div id="print-dropdown" class="hidden" style="position: absolute; right: 0; top: calc(100% + 6px); background: #ffffff; border: 1px solid var(--color-border); border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,0.12); width: 250px; z-index: 99999; overflow: hidden; display: none;">
+                <button type="button" onclick="switchView('view-road-inventory')" style="width: 100%; text-align: left; padding: 12px 15px; background: none; border: none; border-bottom: 1px solid #f1f5f9; cursor: pointer; font-size: 13px; color: var(--color-primary); font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                  <span>📑</span> Annual City Road Inventory
+                </button>
+                <button type="button" onclick="openPriorityReportList(event)" style="width: 100%; text-align: left; padding: 12px 15px; background: none; border: none; cursor: pointer; font-size: 13px; color: var(--color-danger); font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                  <span>🚨</span> Priority Repair List
+                </button>
+              </div>
+            </div>
             <input type="text" id="adminSearch" class="bd-search-bar" placeholder="Search ID or Brgy..." aria-label="Search reports inbox">
             <select id="admin-status-filter" class="bd-status-select" aria-label="Filter reports by status">
               <option value="All">All Status</option>
@@ -626,6 +693,93 @@
           </table>
         </div>
       </div>
+      <!-- ANNUAL CITY ROAD PHYSICAL INVENTORY VIEW -->
+      <div id="view-road-inventory" class="content-section hidden">
+        <div class="no-print" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; background: #ffffff; padding: 15px 20px; border-radius: 8px; border: 1px solid var(--color-border); box-shadow: 0 2px 6px rgba(0,0,0,0.04); flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 15px; flex-wrap: wrap;">
+            <button type="button" id="btn-close-inventory" class="btn-secondary">⬅ Back</button>
+            <div style="display: flex; align-items: center; gap: 8px; padding-left: 10px; border-left: 2px solid var(--color-border);">
+              <span style="font-weight: 700; font-size: 13px; color: var(--color-text);">Current Status:</span>
+              <span id="active-inventory-badge" style="padding: 4px 12px; background: #dcfce7; color: #16a34a; border: 1px solid #bbf7d0; border-radius: 20px; font-size: 12px; font-weight: 800; letter-spacing: 0.5px;">LOADING...</span>
+            </div>
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <button type="button" class="btn-primary" onclick="printAdminRoadInventory()">🖨️ Print Masterlist</button>
+            <button type="button" class="btn-primary" style="background: #16a34a; border-color: #16a34a;" onclick="downloadAdminInventoryCSV()">📥 Export CSV</button>
+          </div>
+        </div>
+
+        <div id="admin-inventory-sheet" style="background: #ffffff; border-radius: 8px; padding: 40px; border: 1px solid var(--color-border); box-shadow: 0 4px 15px rgba(0,0,0,0.03); color: var(--color-text); font-family: 'Segoe UI', Arial, sans-serif;">
+          <!-- Letterhead -->
+          <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid var(--color-text); padding-bottom: 15px; margin-bottom: 18px;">
+            <img src="img/cpdologo.png" alt="CPDO Logo" style="height: 70px; width: auto;" onerror="this.style.display='none'">
+            <div style="text-align: center; flex: 1; margin: 0 20px;">
+              <p style="margin: 0; font-size: 11px; text-transform: uppercase; color: var(--color-muted); letter-spacing: 1px; font-weight: 600;">Republic of the Philippines • Province of Bulacan</p>
+              <h2 style="margin: 3px 0; font-size: 20px; color: var(--color-text); font-weight: 800; text-transform: uppercase;">City of San Jose Del Monte</h2>
+              <h3 style="margin: 0; font-size: 13px; font-weight: 700; color: #2563eb;">CITY PLANNING AND DEVELOPMENT OFFICE</h3>
+              <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: 800; color: var(--color-text); letter-spacing: 0.5px;">ANNUAL CITY ROAD PHYSICAL INVENTORY REPORT</p>
+            </div>
+            <img src="img/logo.png" alt="RoadWise Logo" style="height: 70px; width: auto;" onerror="this.style.display='none'">
+          </div>
+
+          <!-- Metadata Strip -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; font-size: 11.5px; color: var(--color-text); font-weight: 600; flex-wrap: wrap; gap: 8px;">
+            <div>CITY/MUNICIPALITY: <span style="font-weight: 800; color: var(--color-text);">SAN JOSE DEL MONTE CITY</span></div>
+            <div>INVENTORY CYCLE: <span id="admin-inventory-year-label" style="font-weight: 800; color: #2563eb;">ALL RECORDED YEARS</span></div>
+            <div>DATE GENERATED: <span id="admin-inventory-date-label" style="font-weight: 800; color: var(--color-text);"></span></div>
+          </div>
+
+          <!-- Inventory Data Table -->
+          <div class="table-responsive" style="width: 100%;">
+            <table class="data-table" style="border: 1.5px solid var(--color-text);">
+              <thead>
+              <tr style="background: #0f172a; color: #ffffff; text-align: center; font-weight: 700;">
+                <th style="padding: 8px 6px; border: 1px solid #334155; width: 110px;">Road ID</th>
+                <th style="padding: 8px 6px; border: 1px solid #334155; text-align: left;">Road Name</th>
+                <th style="padding: 8px 4px; border: 1px solid #334155; width: 45px;">Class</th>
+                <th style="padding: 8px 5px; border: 1px solid #334155; width: 60px;">Length<br>(km)</th>
+                <th style="padding: 8px 5px; border: 1px solid #334155; width: 50px;">Width<br>(m)</th>
+                <th style="padding: 8px 5px; border: 1px solid #334155; width: 55px;">Asphalt<br>(km)</th>
+                <th style="padding: 8px 5px; border: 1px solid #334155; width: 55px;">Gravel<br>(km)</th>
+                <th style="padding: 8px 5px; border: 1px solid #334155; width: 55px;">Earth<br>(km)</th>
+                <th style="padding: 8px 5px; border: 1px solid #334155; width: 60px;">Concrete<br>(km)</th>
+                <th style="padding: 8px 5px; border: 1px solid #334155; width: 55px;">Mixed<br>(km)</th>
+                <th style="padding: 8px 6px; border: 1px solid #334155; width: 80px;">Road<br>Importance</th>
+                <th style="padding: 8px 6px; border: 1px solid #334155; width: 85px;">Terrain Type</th>
+                <th style="padding: 8px 6px; border: 1px solid #334155; width: 75px;">Length of<br>Culverts (m)</th>
+                <th style="padding: 8px 6px; border: 1px solid #334155; width: 55px;">Number of<br>Bridges</th>
+                <th style="padding: 8px 6px; border: 1px solid #334155; width: 85px; text-align: center;">Date Inspected</th>
+              </tr>
+              </thead>
+              <tbody id="admin-inventory-table-body">
+              <tr>
+                <td colspan="15" style="text-align: center; padding: 25px; color: var(--color-muted); font-style: italic;">Loading City Road Inventory records...</td>
+              </tr>
+              </tbody>
+              <tfoot id="admin-inventory-table-foot" style="background: #f1f5f9; font-weight: 700; border-top: 2px solid var(--color-text);">
+              </tfoot>
+            </table>
+          </div>
+
+          <!-- Signatures -->
+          <div style="display: flex; justify-content: space-between; margin-top: 50px; padding-top: 20px; page-break-inside: avoid; background: #ffffff; flex-wrap: wrap; gap: 20px;">
+            <div style="text-align: center; width: 250px;">
+              <p style="margin: 0 0 6px 0; font-size: 11.5px; color: var(--color-muted); text-align: left; font-weight: 600;">Prepared By:</p>
+              <div style="border-bottom: 1.5px solid var(--color-text); height: 35px; margin-bottom: 6px;"></div>
+              <strong id="admin-inventory-prepared-by" style="text-transform: uppercase; font-size: 12px; color: var(--color-text); display: block; letter-spacing: 0.3px;">CPDO Administrator</strong>
+              <span style="font-size: 10.5px; color: var(--color-muted); font-style: italic; display: block; margin-top: 2px;">(Signature over Printed Name)</span>
+              <span style="font-size: 11px; color: var(--color-muted); font-weight: 600; display: block; margin-top: 2px;">Administrator</span>
+            </div>
+            <div style="text-align: center; width: 250px;">
+              <p style="margin: 0 0 6px 0; font-size: 11.5px; color: var(--color-muted); text-align: left; font-weight: 600;">Certified Correct & Approved:</p>
+              <div style="border-bottom: 1.5px solid var(--color-text); height: 35px; margin-bottom: 6px;"></div>
+              <strong style="text-transform: uppercase; font-size: 12px; color: var(--color-text); display: block; letter-spacing: 0.3px;">City Planning & Development Office</strong>
+              <span style="font-size: 10.5px; color: var(--color-muted); font-style: italic; display: block; margin-top: 2px;">(Signature over Printed Name)</span>
+              <span style="font-size: 11px; color: var(--color-muted); font-weight: 600; display: block; margin-top: 2px;">Head of CPDO</span>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <!-- REPAIR TRACKING VIEW -->
       <div id="view-tracking" class="content-section hidden">
@@ -639,7 +793,28 @@
               <option value="In Progress">In Progress</option>
               <option value="Completed">Completed (Pending QA)</option>
             </select>
+
+            <div style="position: relative;">
+              <button type="button" id="btn-track-generate" class="btn-primary" style="display: flex; align-items: center; gap: 8px;">
+                <span>🖨️</span> Generate Report <span style="font-size: 10px;">▼</span>
+              </button>
+              <div id="track-print-dropdown" class="hidden" style="position: absolute; right: 0; top: calc(100% + 6px); background: white; border: 1px solid var(--color-border); box-shadow: 0 10px 25px rgba(0,0,0,0.15); border-radius: 8px; width: 250px; z-index: 1000; overflow: hidden;">
+                <button type="button" class="dropdown-item" id="btn-print-tracking-summary" style="width: 100%; text-align: left; padding: 12px 16px; background: white; border: none; border-bottom: 1px solid #f1f5f9; cursor: pointer; font-size: 13px; color: var(--color-text); font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                  <span style="color: #2563eb;">📄</span> Print PDF Summary
+                </button>
+                <button type="button" class="dropdown-item" id="btn-export-tracking-csv" style="width: 100%; text-align: left; padding: 12px 16px; background: white; border: none; cursor: pointer; font-size: 13px; color: var(--color-text); font-weight: 600; display: flex; align-items: center; gap: 8px;">
+                  <span style="color: #16a34a;">📊</span> Export Active Matrix (CSV)
+                </button>
+              </div>
+            </div>
           </div>
+        </div>
+
+        <div id="batch-archive-container" style="display: none; justify-content: space-between; align-items: center; background-color: #f8fafc; padding: 12px 20px; border: 1px solid var(--color-border); border-radius: 8px; margin-bottom: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
+          <span style="font-size: 14px; font-weight: 600; color: #475569;"><span id="archive-selected-count">0</span> reports selected</span>
+          <button type="button" id="btn-batch-archive" class="btn-secondary" onclick="submitBatchArchive()" style="background-color: #64748b; color: white;">
+            📥 Archive Selected
+          </button>
         </div>
 
         <div class="table-responsive">
@@ -815,6 +990,397 @@
 </div>
 
 <!-- PRIORITY DISPATCH CONFIRMATION MODAL -->
+<!-- ==========================================================
+     RESTORED ADMIN MANAGEMENT MODALS (user/barangay/road)
+     Restored from tools/_old_admin.txt and modernized to the
+     current design system (.modal-overlay/.modal-content/
+     .section-card/.status-badge/etc.).
+     ========================================================== -->
+
+<!-- ➕ PROVISION NEW OFFICIAL MODAL -->
+<div id="add-user-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="add-user-modal-title">
+  <div class="modal-content" style="max-width: 520px; width: 95%; overflow: visible;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;" aria-hidden="true">➕</span>
+        <h3 id="add-user-modal-title" style="margin: 0; font-size: 16px; font-weight: 700; color: var(--color-text);">Provision New Account</h3>
+      </div>
+      <button type="button" class="close-modal-btn" aria-label="Close add user modal">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 20px;">
+      <p style="font-size: 12.5px; color: var(--color-muted); margin-top: 0; margin-bottom: 18px; line-height: 1.5;">Create a securely generated account for a newly appointed Barangay Official.</p>
+
+      <form id="form-add-user">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+          <div class="form-group-vertical">
+            <label for="add-user-first">First Name <span style="color: var(--color-danger);">*</span></label>
+            <input type="text" id="add-user-first" required placeholder="e.g. Juan">
+          </div>
+          <div class="form-group-vertical">
+            <label for="add-user-middle">Middle Name</label>
+            <input type="text" id="add-user-middle" placeholder="e.g. M.">
+          </div>
+          <div class="form-group-vertical">
+            <label for="add-user-last">Last Name <span style="color: var(--color-danger);">*</span></label>
+            <input type="text" id="add-user-last" required placeholder="e.g. Dela Cruz">
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px;">
+          <div class="form-group-vertical">
+            <label for="add-user-email">Official Email <span style="color: var(--color-danger);">*</span></label>
+            <input type="email" id="add-user-email" required placeholder="e.g. official@gmail.com">
+          </div>
+
+          <div class="form-group-vertical" style="position: relative;">
+            <label>Jurisdiction <span style="color: var(--color-danger);">*</span></label>
+            <input type="hidden" id="add-user-barangay" name="barangayId">
+            <button type="button" id="add-user-barangay-btn"
+                    style="width: 100%; padding: 9px 12px; border: 1px solid var(--color-border); border-radius: 6px; font-size: 13px; color: var(--color-text); background: #fff; display: flex; justify-content: space-between; align-items: center; cursor: pointer; text-align: left; box-sizing: border-box;">
+              <span id="add-user-barangay-label" style="color: var(--color-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Select Barangay...</span>
+              <span style="font-size: 10px; color: var(--color-muted); margin-left: 6px;">▼</span>
+            </button>
+            <div id="add-user-barangay-menu" class="hidden"
+                 style="position: absolute; top: calc(100% + 4px); left: 0; right: 0; max-height: 200px; overflow-y: auto; background: #ffffff; border: 1px solid var(--color-border); border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.18); z-index: 100050;"></div>
+          </div>
+        </div>
+
+        <div style="background: #f8fafc; padding: 16px; border-radius: 8px; border: 1px solid var(--color-border); margin-bottom: 20px;">
+          <h4 style="margin: 0 0 10px 0; font-size: 12.5px; font-weight: 800; color: #1e40af; text-transform: uppercase; letter-spacing: 0.5px;">🔑 Auto-Generated Credentials</h4>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 600; color: var(--color-muted); margin-bottom: 4px;">System Username</label>
+              <input type="text" id="add-user-username" disabled style="width: 100%; padding: 8px 10px; background: #e2e8f0; color: var(--color-text); font-weight: 700; border: 1px solid var(--color-border); border-radius: 6px; box-sizing: border-box; font-size: 12.5px;">
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 600; color: var(--color-muted); margin-bottom: 4px;">Temporary Password</label>
+              <input type="text" id="add-user-password" disabled value="RoadWise2026!" style="width: 100%; padding: 8px 10px; background: #e2e8f0; color: var(--color-text); font-weight: 700; border: 1px solid var(--color-border); border-radius: 6px; box-sizing: border-box; font-size: 12.5px;">
+            </div>
+          </div>
+          <p style="font-size: 11px; color: var(--color-muted); margin: 10px 0 0 0; line-height: 1.4;"><i>Note: Hand these credentials to the official. They will be forced to change the password upon first login.</i></p>
+        </div>
+
+        <div class="modal-actions" style="justify-content: flex-end; gap: 10px; padding-top: 16px;">
+          <button type="button" class="btn-secondary btn-cancel" onclick="document.getElementById('add-user-modal').classList.add('hidden')">Cancel</button>
+          <button type="submit" class="btn-primary">💾 Provision Account</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ⚙️ MANAGE OFFICIAL MODAL -->
+<div id="manage-user-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="manage-user-modal-title">
+  <div class="modal-content" style="max-width: 560px;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;" aria-hidden="true">⚙️</span>
+        <h3 id="manage-user-modal-title" style="margin: 0; font-size: 16px; font-weight: 700; color: var(--color-text);">Manage Official Account</h3>
+      </div>
+      <button type="button" class="close-modal-btn" onclick="document.getElementById('manage-user-modal').classList.add('hidden')" aria-label="Close manage user modal">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 20px;">
+      <input type="hidden" id="manage-user-id">
+
+      <form id="form-manage-user">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 15px;">
+          <div class="form-group-vertical">
+            <label for="manage-user-first">First Name <span style="color: var(--color-danger);">*</span></label>
+            <input type="text" id="manage-user-first" required>
+          </div>
+          <div class="form-group-vertical">
+            <label for="manage-user-middle">Middle Name</label>
+            <input type="text" id="manage-user-middle">
+          </div>
+          <div class="form-group-vertical">
+            <label for="manage-user-last">Last Name <span style="color: var(--color-danger);">*</span></label>
+            <input type="text" id="manage-user-last" required>
+          </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 15px;">
+          <div class="form-group-vertical">
+            <label for="manage-user-email">Official Email <span style="color: var(--color-danger);">*</span></label>
+            <input type="email" id="manage-user-email" required>
+          </div>
+          <div class="form-group-vertical">
+            <label for="manage-user-barangay">Jurisdiction <span style="color: var(--color-danger);">*</span></label>
+            <select id="manage-user-barangay" required style="background: white;">
+              <option value="" disabled>Loading Barangays...</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group-vertical" style="margin-bottom: 24px;">
+          <label for="manage-user-status">System Access Status <span style="color: var(--color-danger);">*</span></label>
+          <select id="manage-user-status" required style="background: #f8fafc; font-weight: bold; color: var(--color-text);">
+            <option value="Active">🟢 Active (Full Access)</option>
+            <option value="Suspended">🟠 Suspended (Temporary Lock)</option>
+            <option value="Deactivated">🔴 Deactivated (Term Ended)</option>
+          </select>
+        </div>
+
+        <div class="modal-actions" style="justify-content: flex-end; gap: 10px; margin-bottom: 22px; padding-bottom: 22px; border-bottom: 1px solid var(--color-border);">
+          <button type="submit" class="btn-primary" style="width: 100%;">💾 Save Profile Changes</button>
+        </div>
+      </form>
+
+      <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 15px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <div>
+            <h4 style="margin: 0 0 5px 0; color: var(--color-danger); font-size: 14px;">🚨 Emergency Password Reset</h4>
+            <p style="margin: 0; font-size: 11px; color: #7f1d1d;">Reset this account's password to the default <strong>RoadWise2026!</strong></p>
+          </div>
+          <button type="button" id="btn-emergency-reset" class="btn-danger" style="background: white; border: 1px solid var(--color-danger); color: var(--color-danger);" onclick="document.getElementById('reset-confirm-modal').classList.remove('hidden')">Reset Password</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 🚨 EMERGENCY RESET CONFIRM MODAL -->
+<div id="reset-confirm-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="reset-confirm-title" style="z-index: 10001;">
+  <div class="modal-content" style="max-width: 420px; text-align: center;">
+    <div class="modal-body" style="padding: 28px 24px;">
+      <div style="font-size: 40px; margin-bottom: 12px;">🚨</div>
+      <h3 id="reset-confirm-title" style="margin: 0 0 10px 0; color: var(--color-danger);">Emergency Reset</h3>
+      <p style="color: var(--color-muted); font-size: 14px; margin-bottom: 24px;">Are you sure you want to reset this official's password to <strong>RoadWise2026!</strong>? This will permanently overwrite their private password.</p>
+      <div class="modal-actions" style="justify-content: center; gap: 10px;">
+        <button type="button" class="btn-secondary" onclick="document.getElementById('reset-confirm-modal').classList.add('hidden')">Cancel</button>
+        <button type="button" id="btn-confirm-reset" class="btn-danger">Yes, Reset Password</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 🏢 MANAGE BARANGAY MODAL -->
+<div id="barangay-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="barangay-modal-title">
+  <div class="modal-content" style="width: 720px; max-width: 95vw; max-height: 90vh; overflow-y: auto;">
+    <div class="modal-header" style="align-items: center; gap: 8px; flex-wrap: wrap;">
+      <h3 id="barangay-modal-title" style="margin: 0; font-size: 16px; font-weight: 700; color: var(--color-text); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        Manage Barangay: <span id="manage-brgy-name" style="color: var(--color-primary);">Loading...</span>
+        <button type="button" onclick="openRenameBarangayModal()" style="background: none; border: none; cursor: pointer; font-size: 15px; padding: 0; color: #3b82f6;" title="Rename Barangay" aria-label="Rename Barangay">✏️</button>
+      </h3>
+      <button type="button" class="close-brgy-btn close-modal-btn" aria-label="Close barangay modal">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 22px;">
+      <div class="section-card" style="margin-bottom: 20px;">
+        <h3 class="section-title" style="margin: 0 0 12px 0;">Barangay Details</h3>
+        <div class="report-detail-grid">
+          <div><strong>Current Official:</strong> <span id="manage-brgy-kapitan" style="color: var(--color-text);">Loading...</span></div>
+          <div><strong>Official Contact:</strong> <span id="manage-brgy-contact">Loading...</span></div>
+          <div><strong>Official Email:</strong> <span id="manage-brgy-email" style="color: var(--color-primary);">Loading...</span></div>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 10px; flex-wrap: wrap;">
+          <h3 class="section-title" style="margin: 0;">Registered City Roads</h3>
+          <button type="button" id="btn-open-add-road" class="btn-primary" style="padding: 7px 14px; font-size: 12px; gap: 6px;">+ Add City Road</button>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+            <tr>
+              <th>City Road ID</th>
+              <th>City Road Name</th>
+              <th>Road Importance</th>
+              <th style="text-align: right;">Action</th>
+            </tr>
+            </thead>
+            <tbody id="manage-brgy-roads-body">
+            <tr><td colspan="4" style="text-align: center; padding: 15px; color: var(--color-muted);">Loading roads...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ➕ ADD CITY ROAD MODAL -->
+<div id="add-road-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="add-road-modal-title" style="z-index: 100020;">
+  <div class="modal-content" style="width: 540px; max-width: 95vw; overflow: hidden;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px; color: #2563eb;" aria-hidden="true">➕</span>
+        <h3 id="add-road-modal-title" style="margin: 0; font-size: 16px; font-weight: 700; color: var(--color-text);">Register New City Road</h3>
+      </div>
+      <button type="button" class="close-add-road-btn close-modal-btn" aria-label="Close add road modal">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 22px;">
+      <p style="font-size: 12.5px; color: var(--color-muted); margin: 0 0 18px 0; line-height: 1.5;">
+        Register a new road for this jurisdiction. The <strong>City Road ID</strong> will be securely auto-generated by the system upon saving.
+      </p>
+
+      <form id="form-add-city-road">
+        <div class="form-group-vertical" style="margin-bottom: 16px;">
+          <label for="add-road-name">City Road Name <span style="color: var(--color-danger);">*</span></label>
+          <input type="text" id="add-road-name" name="road_name" placeholder="e.g. Abella Road" required>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+          <div class="form-group-vertical">
+            <label for="add-road-importance">Road Importance <span style="color: var(--color-danger);">*</span></label>
+            <select id="add-road-importance" name="road_importance" required>
+              <option value="" disabled selected>Select...</option>
+              <option value="Core">Core</option>
+              <option value="Non-core">Non-core</option>
+            </select>
+          </div>
+          <div class="form-group-vertical">
+            <label for="add-road-type">Road Type <span style="color: var(--color-danger);">*</span></label>
+            <select id="add-road-type" name="road_type" required>
+              <option value="" disabled selected>Select...</option>
+              <option value="Asphalt">Asphalt</option>
+              <option value="Gravel">Gravel</option>
+              <option value="Earth">Earth</option>
+              <option value="Concrete">Concrete</option>
+              <option value="Mixed">Mixed</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group-vertical">
+          <label for="add-road-terrain">Terrain Type <span style="color: var(--color-danger);">*</span></label>
+          <select id="add-road-terrain" name="terrain_type" required>
+            <option value="" disabled selected>Select Terrain...</option>
+            <option value="Flat">Flat</option>
+            <option value="Mountainous">Mountainous</option>
+            <option value="Rolling">Rolling</option>
+          </select>
+        </div>
+
+        <div class="modal-actions" style="justify-content: flex-end; gap: 10px; border-top: 1px solid var(--color-border); padding-top: 18px;">
+          <button type="button" class="btn-secondary close-add-road-btn">Cancel</button>
+          <button type="submit" class="btn-primary btn-submit">💾 Save City Road</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ✏️ EDIT CITY ROAD MODAL -->
+<div id="edit-road-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="edit-road-modal-title">
+  <div class="modal-content" style="width: 560px; max-width: 95vw; overflow: hidden;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px;" aria-hidden="true">✏️</span>
+        <h3 id="edit-road-modal-title" style="margin: 0; font-size: 16px; font-weight: 700; color: var(--color-text);">Edit City Road Details</h3>
+      </div>
+      <button type="button" class="close-edit-road-btn close-modal-btn" aria-label="Close edit road modal">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 22px;">
+      <p style="font-size: 13px; color: var(--color-muted); margin-top: 0; margin-bottom: 20px; line-height: 1.5;">
+        Update the infrastructure details below. The <strong>City Road ID</strong> is system-generated and locked to preserve sequence integrity.
+      </p>
+
+      <form id="form-edit-city-road">
+        <input type="hidden" id="edit-db-id" name="db_id">
+
+        <div class="form-group-vertical" style="margin-bottom: 18px;">
+          <label for="edit-road-sequence-id">City Road ID (Locked)</label>
+          <input type="text" id="edit-road-sequence-id" disabled>
+        </div>
+
+        <div class="form-group-vertical" style="margin-bottom: 18px;">
+          <label for="edit-road-name">City Road Name <span style="color: var(--color-danger);">*</span></label>
+          <input type="text" id="edit-road-name" required>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 18px;">
+          <div class="form-group-vertical">
+            <label for="edit-road-importance">Road Importance <span style="color: var(--color-danger);">*</span></label>
+            <select id="edit-road-importance" required>
+              <option value="Core">Core</option>
+              <option value="Non-core">Non-core</option>
+            </select>
+          </div>
+          <div class="form-group-vertical">
+            <label for="edit-road-type">Road Type <span style="color: var(--color-danger);">*</span></label>
+            <select id="edit-road-type" required>
+              <option value="Asphalt">Asphalt</option>
+              <option value="Gravel">Gravel</option>
+              <option value="Earth">Earth</option>
+              <option value="Concrete">Concrete</option>
+              <option value="Mixed">Mixed</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group-vertical">
+          <label for="edit-road-terrain">Terrain Type <span style="color: var(--color-danger);">*</span></label>
+          <select id="edit-road-terrain" required>
+            <option value="Flat">Flat</option>
+            <option value="Mountainous">Mountainous</option>
+            <option value="Rolling">Rolling</option>
+          </select>
+        </div>
+
+        <div class="modal-actions" style="justify-content: flex-end; gap: 12px; border-top: 1px solid var(--color-border); padding-top: 18px;">
+          <button type="button" class="btn-secondary close-edit-road-btn">Cancel</button>
+          <button type="submit" class="btn-primary btn-submit">💾 Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ✏️ RENAME BARANGAY MODAL -->
+<div id="rename-brgy-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="rename-brgy-title">
+  <div class="modal-content" style="max-width: 420px;">
+    <div class="modal-body" style="padding: 24px;">
+      <h3 id="rename-brgy-title" style="margin: 0 0 16px 0; color: var(--color-text); font-size: 16px; display: flex; align-items: center; gap: 8px;">
+        <span>✏️</span> Rename Barangay
+      </h3>
+
+      <form id="form-rename-barangay">
+        <div class="form-group-vertical" style="margin-bottom: 20px;">
+          <label for="rename-brgy-input">New Barangay Name</label>
+          <input type="text" id="rename-brgy-input" required>
+        </div>
+
+        <div class="modal-actions" style="justify-content: flex-end; gap: 10px;">
+          <button type="button" class="btn-secondary" onclick="document.getElementById('rename-brgy-modal').classList.add('hidden')">Cancel</button>
+          <button type="submit" class="btn-primary btn-submit">💾 Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ➕ REGISTER NEW BARANGAY MODAL -->
+<div id="add-brgy-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="add-brgy-modal-title">
+  <div class="modal-content" style="max-width: 480px; overflow: hidden;">
+    <div class="modal-header">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span style="font-size: 18px; color: #6366f1;" aria-hidden="true">➕</span>
+        <h3 id="add-brgy-modal-title" style="margin: 0; font-size: 16px; font-weight: 700; color: var(--color-text);">Register New Barangay</h3>
+      </div>
+      <button type="button" class="close-add-brgy-btn close-modal-btn" aria-label="Close add barangay modal">✕</button>
+    </div>
+    <div class="modal-body" style="padding: 22px;">
+      <p style="font-size: 13px; color: var(--color-muted); margin-top: 0; margin-bottom: 20px; line-height: 1.5;">
+        Create and register a new jurisdiction for the system. Assigning the Kapitan is handled separately in the User Management tab.
+      </p>
+
+      <form id="form-add-barangay">
+        <div class="form-group-vertical" style="margin-bottom: 32px;">
+          <label for="add-brgy-name">Barangay Name <span style="color: var(--color-danger);">*</span></label>
+          <input type="text" id="add-brgy-name" name="barangay_name" placeholder="e.g. Muzon" required>
+        </div>
+
+        <div class="modal-actions" style="justify-content: flex-end; gap: 12px;">
+          <button type="button" class="btn-secondary close-add-brgy-btn">Cancel</button>
+          <button type="submit" class="btn-primary btn-submit">💾 Save Barangay</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Overview anchor (restored): fallback dashboard target used by the priority-report close flow -->
+<div id="view-overview" class="content-section hidden" aria-hidden="true"></div>
 <div id="dispatch-confirm-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dispatch-confirm-title">
   <div class="modal-content" style="max-width: 450px; padding: 0; overflow: hidden; border-radius: 12px; border: none; box-shadow: 0 15px 35px rgba(0,0,0,0.2);">
     <div style="background-color: #f0f7ff; padding: 30px 20px 20px; text-align: center; border-bottom: 1px solid #cce5ff;">
@@ -895,6 +1461,25 @@
     </div>
 
     <div class="modal-body" style="display: flex; flex-direction: column; gap: 20px;">
+
+      <!-- ⏱️ TOP ACCORDION: REVISION & LIFECYCLE HISTORY -->
+      <div class="section-card" style="margin-bottom: 0; padding: 0; overflow: hidden;">
+        <button
+          type="button"
+          id="toggle-admin-timeline-btn"
+          onclick="toggleAdminReviewTimeline()"
+          style="width: 100%; padding: 10px 14px; background: #f8fafc; border: none; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--color-text);"
+          aria-expanded="false"
+        >
+          <span>⏱️ View Past Revisions & Lifecycle History</span>
+          <span id="admin-timeline-arrow" style="font-size: 12px; transition: transform 0.2s ease;">▼</span>
+        </button>
+        <div id="admin-review-timeline-container" class="hidden" style="padding: 14px; background: #ffffff; border-top: 1px solid var(--color-border); max-height: 250px; overflow-y: auto;">
+          <div id="admin-review-timeline">
+            <!-- Populated dynamically by loadReportTimeline -->
+          </div>
+        </div>
+      </div>
       <!-- TWO-COLUMN REVIEW LAYOUT: Evidence Left, Details Right -->
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px;">
 
@@ -1299,6 +1884,638 @@
         </table>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- 🔍 MODAL: ACTIVITY LOG DETAILED AUDIT INSPECTOR         -->
+<!-- ======================================================= -->
+<div id="activity-detail-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" style="z-index: 100000; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px);">
+  <div style="background: white; border-radius: 12px; width: 95%; max-width: 680px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.3);">
+    <div style="padding: 16px 24px; background: #f8fafc; border-bottom: 1px solid var(--color-border); display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h3 style="margin: 0; font-size: 17px; color: var(--color-text); font-weight: 800;">
+          Audit Event Inspector <span id="audit-modal-log-id" style="color: #2563eb; font-family: monospace; font-size: 15px;">#LOG-0000</span>
+        </h3>
+        <p style="margin: 2px 0 0 0; font-size: 11.5px; color: var(--color-muted);">Read-only metadata breakdown and forensic trail verification.</p>
+      </div>
+      <button type="button" onclick="document.getElementById('activity-detail-modal').classList.add('hidden')" style="background: none; border: none; font-size: 22px; color: #94a3b8; cursor: pointer; line-height: 1; padding: 0;" title="Close" aria-label="Close">✕</button>
+    </div>
+    <div id="audit-modal-body" style="flex: 1; padding: 24px 28px; overflow-y: auto; font-size: 12.5px; color: var(--color-text); line-height: 1.5;">
+      <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border: 1px solid var(--color-border); padding: 12px 16px; border-radius: 8px; margin-bottom: 20px;">
+        <div>
+          <span style="font-size: 11px; color: var(--color-muted); font-weight: 600; display: block;">TIMESTAMP (PHT)</span>
+          <strong id="audit-modal-timestamp" style="font-size: 13px; color: var(--color-text);">-</strong>
+        </div>
+        <div style="text-align: right;">
+          <span style="font-size: 11px; color: var(--color-muted); font-weight: 600; display: block;">OUTCOME STATUS</span>
+          <span id="audit-modal-status-badge" style="padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 800; background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; display: inline-block;">SUCCESS</span>
+        </div>
+      </div>
+      <div style="margin-bottom: 20px;">
+        <h4 style="margin: 0 0 8px 0; font-size: 12px; font-weight: 800; color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.5px;">1. Actor Information</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: #f8fafc; border: 1px solid var(--color-border); padding: 12px; border-radius: 6px;">
+          <div><strong style="color: var(--color-muted);">Full Name:</strong> <span id="audit-modal-actor-name" style="font-weight: 700; color: var(--color-text);">-</span></div>
+          <div><strong style="color: var(--color-muted);">Role:</strong> <span id="audit-modal-actor-role" style="font-weight: 600;">-</span></div>
+          <div><strong style="color: var(--color-muted);">Office / Barangay:</strong> <span id="audit-modal-actor-office">-</span></div>
+          <div><strong style="color: var(--color-muted);">User ID:</strong> <span id="audit-modal-actor-id" style="font-family: monospace;">-</span></div>
+        </div>
+      </div>
+      <div style="margin-bottom: 20px;">
+        <h4 style="margin: 0 0 8px 0; font-size: 12px; font-weight: 800; color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.5px;">2. Event Details & Target</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: #f8fafc; border: 1px solid var(--color-border); padding: 12px; border-radius: 6px;">
+          <div><strong style="color: var(--color-muted);">Action Category:</strong> <span id="audit-modal-category" style="font-weight: 700; color: #2563eb;">-</span></div>
+          <div><strong style="color: var(--color-muted);">Target Entity:</strong> <span id="audit-modal-target" style="font-weight: 700; font-family: monospace;">-</span></div>
+          <div style="grid-column: 1 / -1;"><strong style="color: var(--color-muted);">Action Name / Verb:</strong> <span id="audit-modal-action">-</span></div>
+          <div style="grid-column: 1 / -1;">
+            <strong style="color: var(--color-muted); display: block; margin-bottom: 4px;">Description / Audit Remarks:</strong>
+            <div id="audit-modal-description" style="background: white; border: 1px solid #cbd5e1; padding: 10px; border-radius: 4px; font-family: inherit;">-</div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-bottom: 10px;">
+        <h4 style="margin: 0 0 8px 0; font-size: 12px; font-weight: 800; color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.5px;">3. Security & Network Telemetry</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: #f8fafc; border: 1px solid var(--color-border); padding: 12px; border-radius: 6px; font-size: 11.5px;">
+          <div><strong style="color: var(--color-muted);">IP Address:</strong> <span id="audit-modal-ip" style="font-family: monospace; font-weight: 700;">-</span></div>
+          <div><strong style="color: var(--color-muted);">HTTP Method:</strong> <span id="audit-modal-method" style="font-family: monospace; font-weight: 700; color: #16a34a;">-</span></div>
+          <div style="grid-column: 1 / -1;"><strong style="color: var(--color-muted);">Device / User-Agent:</strong> <span id="audit-modal-useragent" style="word-break: break-all; color: #475569;">-</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- 🖨️ MODAL: OFFICIAL PRINTABLE ACTIVITY AUDIT REPORT       -->
+<!-- ======================================================= -->
+<div id="activity-log-print-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" style="position: fixed; inset: 0; z-index: 100000; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center;">
+  <div style="background: white; border-radius: 12px; width: 95%; max-width: 1050px; height: 90vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.3);">
+    <div class="no-print" style="padding: 14px 24px; background: #f8fafc; border-bottom: 1px solid var(--color-border); display: flex; justify-content: space-between; align-items: center;">
+      <div>
+        <h3 style="margin: 0; font-size: 17px; color: var(--color-text); font-weight: 800;">Official System Audit Report Preview</h3>
+        <p style="margin: 2px 0 0 0; font-size: 11.5px; color: var(--color-muted);">Government-compliant printable activity log with official LGU letterhead.</p>
+      </div>
+      <div style="display: flex; gap: 10px; align-items: center;">
+        <button type="button" class="btn-primary" onclick="printActivityLogSheet()">🖨️ Print / Save as PDF</button>
+        <button type="button" onclick="closeActivityLogPrintModal()" style="background: none; border: none; font-size: 22px; color: #94a3b8; cursor: pointer; line-height: 1; padding: 0 4px;" title="Close" aria-label="Close">✕</button>
+      </div>
+    </div>
+    <div id="activity-printable-audit-area" style="flex: 1; padding: 25px 35px; overflow-y: auto; background: white; color: var(--color-text); font-family: 'Segoe UI', Arial, sans-serif;">
+      <div class="audit-letterhead" style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid var(--color-text); padding-bottom: 8px; margin-bottom: 14px;">
+        <img src="img/cpdologo.png" alt="CPDO Logo" style="height: 55px; width: auto;" onerror="this.style.display='none'">
+        <div style="text-align: center; flex: 1; margin: 0 15px;">
+          <p style="margin: 0; font-size: 10px; text-transform: uppercase; color: var(--color-muted); letter-spacing: 1px; font-weight: 600;">Republic of the Philippines • Province of Bulacan</p>
+          <h2 style="margin: 1px 0; font-size: 16px; color: var(--color-text); font-weight: 800; text-transform: uppercase;">City of San Jose Del Monte</h2>
+          <h3 style="margin: 0; font-size: 11px; font-weight: 700; color: #dc2626;">CITY PLANNING AND DEVELOPMENT OFFICE</h3>
+          <p style="margin: 2px 0 0 0; font-size: 12px; font-weight: 800; color: var(--color-text); letter-spacing: 0.5px;">OFFICIAL SYSTEM AUDIT & ACTIVITY TRAIL</p>
+        </div>
+        <img src="img/logo.png" alt="RoadWise Logo" style="height: 55px; width: auto;" onerror="this.style.display='none'">
+      </div>
+      <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border: 1px solid var(--color-border); padding: 8px 14px; border-radius: 6px; margin-bottom: 15px; font-size: 11px;">
+        <div>
+          <span style="color: var(--color-muted); font-weight: 600;">REPORT GENERATED:</span>
+          <strong id="activity-print-generated-date" style="color: var(--color-text); margin-left: 4px;">-</strong>
+          <span style="margin: 0 8px; color: #cbd5e1;">|</span>
+          <span style="color: var(--color-muted); font-weight: 600;">TIMEFRAME:</span>
+          <strong id="activity-print-timeframe" style="color: var(--color-text); margin-left: 4px;">All Records</strong>
+        </div>
+        <div>
+          <span style="color: var(--color-muted); font-weight: 600;">CATEGORY SCOPE:</span>
+          <strong id="activity-print-category" style="color: var(--color-text); margin-left: 4px;">ALL CATEGORIES</strong>
+        </div>
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 10.5px; text-align: left; margin-bottom: 25px;">
+        <thead>
+        <tr style="background: var(--color-text); color: #ffffff; font-weight: 700;">
+          <th style="padding: 6px 8px; border: 1px solid var(--color-text); width: 125px; text-align: center;">Timestamp (PHT)</th>
+          <th style="padding: 6px 8px; border: 1px solid var(--color-text); width: 140px;">Actor (Name / Role)</th>
+          <th style="padding: 6px 8px; border: 1px solid var(--color-text); width: 110px; text-align: center;">Category</th>
+          <th style="padding: 6px 8px; border: 1px solid var(--color-text); width: 85px; text-align: center;">Target</th>
+          <th style="padding: 6px 8px; border: 1px solid var(--color-text);">Action Details & Remarks</th>
+          <th style="padding: 6px 8px; border: 1px solid var(--color-text); width: 65px; text-align: center;">Status</th>
+        </tr>
+        </thead>
+        <tbody id="activity-print-tbody">
+        <tr>
+          <td colspan="6" style="text-align: center; padding: 25px; color: var(--color-muted); font-style: italic;">No log entries selected for printing.</td>
+        </tr>
+        </tbody>
+      </table>
+      <div class="audit-signature" style="page-break-inside: avoid; margin-top: 25px;">
+        <div style="width: 250px; text-align: center;">
+          <p style="text-align: left; margin: 0 0 3px 0; font-size: 10px; font-weight: 600; color: #334155;">Certified & Verified By:</p>
+          <div style="border-bottom: 1.5px solid var(--color-text); height: 22px; margin-bottom: 3px;"></div>
+          <strong id="activity-print-signer-name" style="text-transform: uppercase; font-size: 11px; color: var(--color-text); display: block; letter-spacing: 0.3px;">CPDO ADMINISTRATOR</strong>
+          <span style="font-size: 8.5px; color: var(--color-muted); font-style: italic; display: block;">(Signature over Printed Name)</span>
+          <span style="font-size: 9.5px; color: #334155; font-weight: 600; display: block; margin-top: 1px;">City Planning & Development Office</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- 📄 MODAL: REPAIR TRACKING REPORT PREVIEW                 -->
+<!-- ======================================================= -->
+<div id="tracking-report-preview-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" style="position: fixed; inset: 0; z-index: 100050; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center;">
+  <div style="background: #ffffff; border-radius: 12px; width: 95%; max-width: 1100px; height: 90vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.4);">
+    <div class="no-print" style="padding: 14px 24px; background: #f8fafc; border-bottom: 1px solid var(--color-border); display: flex; justify-content: space-between; align-items: center; flex-shrink: 0;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 20px;">📄</span>
+        <div>
+          <h3 style="margin: 0; font-size: 16px; font-weight: 800; color: var(--color-text);">Infrastructure Accomplishment Report Preview</h3>
+          <p style="margin: 2px 0 0 0; font-size: 11.5px; color: var(--color-muted);">Review live layout and metrics before printing or exporting.</p>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <button type="button" class="btn-secondary" onclick="exportTrackingMatrixCSV()" style="color: #15803d;">📊 Export CSV</button>
+        <button type="button" class="btn-primary" onclick="executeTrackingPrint()">🖨️ Print / Save as PDF</button>
+        <button type="button" onclick="closeTrackingReportPreview()" style="background: none; border: none; font-size: 22px; color: #94a3b8; cursor: pointer; line-height: 1; padding: 0 4px;" title="Close Preview" aria-label="Close">✕</button>
+      </div>
+    </div>
+    <div id="tracking-report-preview-body" style="flex: 1; overflow-y: auto; background: #64748b; padding: 30px 15px; display: block;">
+      <div id="tracking-printable-sheet" style="background: #ffffff; width: 100%; max-width: 980px; margin: 0 auto; padding: 40px; border-radius: 6px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: var(--color-text); height: auto;">
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- 📥 MODAL: BATCH ARCHIVE CONFIRMATION                     -->
+<!-- ======================================================= -->
+<div id="batch-archive-confirm-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" style="z-index: 99999;">
+  <div class="modal-content" style="max-width: 400px; text-align: center; padding: 30px;">
+    <h2 style="margin-bottom: 15px; color: var(--color-danger);">📥 Batch Archive Projects?</h2>
+    <p id="batch-archive-confirm-text" style="color: #64748b; font-size: 14px; margin-bottom: 25px;">Are you sure you want to securely archive these projects?</p>
+    <div style="display: flex; justify-content: center; gap: 15px;">
+      <button type="button" class="btn-secondary" onclick="document.getElementById('batch-archive-confirm-modal').classList.add('hidden')">Cancel</button>
+      <button type="button" class="btn-danger" onclick="executeBatchArchive()">Yes, Archive</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- 📄 ANNUAL ENGINEERING PROJECT REPORT PREVIEW & PRINT MODAL -->
+<!-- ======================================================= -->
+<div id="annual-report-preview-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.7); z-index: 100000; display: none; align-items: center; justify-content: center; backdrop-filter: blur(4px);">
+  <div class="modal-content" style="max-width: 1050px; width: 95%; height: 90vh; padding: 0; border-radius: 12px;">
+    <div class="no-print modal-header" style="padding: 16px 24px;">
+      <div>
+        <h3 style="margin: 0; font-size: 18px;">Engineering Project Report Preview</h3>
+        <p style="margin: 3px 0 0 0; font-size: 12px; color: var(--color-muted);">Review document layout and verify records before printing or downloading.</p>
+      </div>
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <button type="button" class="btn-primary" onclick="printReportDocument()">🖨️ Print / Save as PDF</button>
+        <button type="button" class="btn-primary" style="background: #16a34a; border-color: #16a34a;" onclick="downloadPreviewedCSV()">📥 Download CSV</button>
+        <button type="button" class="btn-secondary" style="font-size: 22px; line-height: 1; padding: 4px 14px;" onclick="closeReportPreviewModal()" aria-label="Close preview">&times;</button>
+      </div>
+    </div>
+
+    <div id="printable-report-area" class="modal-body" style="flex: 1; padding: 40px; overflow-y: auto; font-family: 'Segoe UI', Arial, sans-serif; color: var(--color-text);">
+      <!-- Official Header -->
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid var(--color-text); padding-bottom: 15px; margin-bottom: 20px;">
+        <img src="img/cpdologo.png" alt="Logo" style="height: 65px; width: auto;" onerror="this.style.display='none'">
+        <div style="text-align: center; flex: 1; margin: 0 20px;">
+          <h4 style="margin: 0; font-size: 12px; text-transform: uppercase; color: var(--color-muted); letter-spacing: 1px;">Republic of the Philippines • City of San Jose Del Monte</h4>
+          <h2 style="margin: 4px 0; font-size: 20px; color: var(--color-text); font-weight: 800;">ENGINEERING PROJECT & REPAIR INVENTORY REPORT</h2>
+          <p id="preview-report-subtitle" style="margin: 0; font-size: 13px; font-weight: 600; color: #2563eb;">Inventory Cycle: Loading...</p>
+        </div>
+        <img src="img/logo.png" alt="RoadWise Logo" style="height: 65px; width: auto;" onerror="this.style.display='none'">
+      </div>
+
+      <!-- Report Metadata Banner -->
+      <div class="report-detail-grid" style="grid-template-columns: repeat(4, 1fr); gap: 12px; background: #f8fafc; border: 1px solid var(--color-border); border-radius: 8px; padding: 12px 16px; margin-bottom: 25px; font-size: 12px;">
+        <div><strong>Generated By:</strong> <span id="preview-generated-by">Loading...</span></div>
+        <div><strong>Scope:</strong> <span id="preview-scope">City-Wide Scope</span></div>
+        <div><strong>Date Generated:</strong> <span id="preview-date">-</span></div>
+        <div><strong>Total Records:</strong> <span id="preview-total-count">0</span></div>
+      </div>
+
+      <!-- Data Table with Full Road Specifications -->
+      <div class="table-responsive">
+        <table class="data-table" style="border: 1.5px solid var(--color-text); font-size: 11px; text-align: left;">
+          <thead>
+          <tr style="background: #0f172a; color: white;">
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 65px;">Proj ID</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155;">Barangay</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155;">Road Name & Type</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 110px;">Road Dimensions</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 100px;">Culverts / Bridges</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155;">Damage Details</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 70px; text-align: center;">Severity</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 90px; text-align: center;">Status</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 80px; text-align: right;">Date</th>
+          </tr>
+          </thead>
+          <tbody id="preview-report-table-body">
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Signatures Footer -->
+      <div style="display: flex; justify-content: space-between; margin-top: 50px; padding-top: 20px; page-break-inside: avoid; flex-wrap: wrap; gap: 20px;">
+        <div style="text-align: center; width: 240px;">
+          <div style="border-bottom: 1.5px solid var(--color-text); height: 35px; margin-bottom: 6px;"></div>
+          <strong id="preview-sign-name" style="margin: 0; font-size: 12px; font-weight: 700; color: var(--color-text); display: block; text-transform: uppercase;">Official Name</strong>
+          <span style="font-size: 10.5px; color: var(--color-muted); font-style: italic; display: block; margin-top: 2px;">(Signature over Printed Name)</span>
+          <span id="preview-sign-role" style="margin: 2px 0 0 0; font-size: 11px; color: var(--color-muted); font-weight: 600; display: block;">CPDO Lead Administrator</span>
+        </div>
+        <div style="text-align: center; width: 240px;">
+          <div style="border-bottom: 1.5px solid var(--color-text); height: 35px; margin-bottom: 6px;"></div>
+          <strong id="preview-cpdo-sign-name" style="margin: 0; font-size: 12px; font-weight: 700; color: var(--color-text); display: block; text-transform: uppercase;">CPDO Lead Administrator</strong>
+          <span style="font-size: 10.5px; color: var(--color-muted); font-style: italic; display: block; margin-top: 2px;">(Signature over Printed Name)</span>
+          <span style="margin: 2px 0 0 0; font-size: 11px; color: var(--color-muted); font-weight: 600; display: block;">Prepared By</span>
+        </div>
+        <div style="text-align: center; width: 240px;">
+          <div style="border-bottom: 1.5px solid var(--color-text); height: 35px; margin-bottom: 6px;"></div>
+          <strong id="preview-ceo-sign-name" style="margin: 0; font-size: 12px; font-weight: 700; color: var(--color-text); display: block; text-transform: uppercase;">City Engineer</strong>
+          <span style="font-size: 10.5px; color: var(--color-muted); font-style: italic; display: block; margin-top: 2px;">(Signature over Printed Name)</span>
+          <span style="margin: 2px 0 0 0; font-size: 11px; color: var(--color-muted); font-weight: 600; display: block;">Certified Correct & Approved</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- 📋 MODAL: INDIVIDUAL PROJECT ARCHIVE & AUDIT DETAIL     -->
+<!-- ======================================================= -->
+<div id="archive-detail-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" style="z-index: 100000; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px);">
+  <div style="background: white; border-radius: 12px; width: 95%; max-width: 920px; height: 90vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.3);">
+    <div class="no-print modal-header" style="padding: 12px 24px;">
+      <div>
+        <h3 style="margin: 0; font-size: 17px;">Audit Project Details <span id="archive-modal-prj-id" style="color: #2563eb;">#PRJ-0000</span></h3>
+        <p style="margin: 2px 0 0 0; font-size: 11.5px; color: var(--color-muted);">Read-only historical audit record and evidence file.</p>
+      </div>
+      <div style="display: flex; gap: 10px; align-items: center; padding-top: 0; border-top: none;">
+        <button type="button" class="btn-primary" onclick="printSingleArchiveIncident()" style="padding: 7px 15px; font-size: 12.5px;">🖨️ Print Audit Sheet</button>
+        <button type="button" class="btn-secondary" style="font-size: 22px; line-height: 1; padding: 2px 12px;" onclick="closeArchiveDetailModal()" aria-label="Close">✕</button>
+      </div>
+    </div>
+
+    <div id="archive-printable-audit-sheet" class="modal-body" style="flex: 1; padding: 20px 30px; overflow-y: auto; background: white; color: var(--color-text); font-family: 'Segoe UI', Arial, sans-serif;">
+      <!-- Status Header Banner -->
+      <div style="display: flex; justify-content: space-between; align-items: center; background: #f8fafc; border: 1px solid var(--color-border); padding: 7px 14px; border-radius: 6px; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+        <div>
+          <span style="font-size: 10.5px; color: var(--color-muted); font-weight: 600;">RECORD CYCLE:</span>
+          <strong id="archive-modal-year" style="color: var(--color-text); font-size: 11.5px; margin-left: 4px;">2026</strong>
+          <span style="margin: 0 6px; color: var(--color-border);">|</span>
+          <span style="font-size: 10.5px; color: var(--color-muted); font-weight: 600;">DATE ARCHIVED:</span>
+          <strong id="archive-modal-date" style="color: var(--color-text); font-size: 11.5px; margin-left: 4px;">-</strong>
+        </div>
+        <div>
+          <span style="font-size: 10.5px; color: var(--color-muted); font-weight: 600; margin-right: 4px;">ARCHIVE STATUS:</span>
+          <span id="archive-modal-status-badge" class="status-badge" style="background: #f1f5f9; color: #475569; border-color: var(--color-border);">ARCHIVED</span>
+        </div>
+      </div>
+
+      <!-- Timeline Accordion -->
+      <div style="margin-bottom: 14px; border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: #ffffff;">
+        <button type="button" id="toggle-archive-timeline-btn" onclick="toggleArchiveTimeline()" style="width: 100%; padding: 8px 12px; background: #f8fafc; border: none; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 11.5px; font-weight: 700; color: var(--color-text);">
+          <span>⏱️ View Full Project Lifecycle & Audit History</span>
+          <span id="archive-timeline-arrow" style="font-size: 11px; transition: transform 0.2s ease;">▼</span>
+        </button>
+        <div id="archive-modal-timeline-container" class="hidden" style="padding: 12px; background: #ffffff; border-top: 1px solid var(--color-border); max-height: 220px; overflow-y: auto;">
+          <div id="archive-modal-timeline" style="line-height: 1.5; font-size: 12px;"></div>
+        </div>
+      </div>
+
+      <!-- Section 1: Road Details & Specifications -->
+      <div style="margin-bottom: 14px; page-break-inside: avoid;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid var(--color-border); padding-bottom: 4px; margin-bottom: 8px;">
+          <h4 style="margin: 0; font-size: 12px; font-weight: 800; color: var(--color-text); text-transform: uppercase; letter-spacing: 0.5px;">1. Road Details & Specifications</h4>
+          <button type="button" id="archive-btn-locate-map" class="no-print btn-secondary" style="padding: 3px 9px; font-size: 11px;" onclick="toggleArchiveMap()">🗺️ Locate on Map</button>
+        </div>
+        <div id="archive-detail-map-container" class="no-print" style="display: none; margin-bottom: 12px; border-radius: 6px; overflow: hidden; border: 1px solid var(--color-border);">
+          <div id="archive-detail-map" style="height: 180px; width: 100%; z-index: 1;"></div>
+        </div>
+        <div class="report-detail-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 6px 12px; font-size: 11px;">
+          <div><strong style="color: var(--color-muted);">Road Name:</strong> <span id="archive-modal-road-name" style="font-weight: 700; color: var(--color-text);">-</span></div>
+          <div><strong style="color: var(--color-muted);">Barangay:</strong> <span id="archive-modal-brgy" style="font-weight: 600;">-</span></div>
+          <div><strong style="color: var(--color-muted);">City Road ID:</strong> <span id="archive-modal-road-id" style="font-family: monospace; font-weight: 700;">-</span></div>
+          <div><strong style="color: var(--color-muted);">Road Classification:</strong> <span>City Road</span></div>
+          <div><strong style="color: var(--color-muted);">Road Importance:</strong> <span id="archive-modal-importance">-</span></div>
+          <div><strong style="color: var(--color-muted);">Terrain Type:</strong> <span id="archive-modal-terrain">-</span></div>
+          <div><strong style="color: var(--color-muted);">Pavement Type:</strong> <span id="archive-modal-road-type">-</span></div>
+          <div><strong style="color: var(--color-muted);">Road Length (km):</strong> <span id="archive-modal-road-length">0 km</span></div>
+          <div><strong style="color: var(--color-muted);">Road Width (m):</strong> <span id="archive-modal-road-width">0 m</span></div>
+          <div><strong style="color: var(--color-muted);">Length of Culverts (m):</strong> <span id="archive-modal-culverts">-</span></div>
+          <div><strong style="color: var(--color-muted);">Number of Bridges:</strong> <span id="archive-modal-bridges">-</span></div>
+        </div>
+      </div>
+
+      <!-- Section 2: Damage Assessment & Scope -->
+      <div style="margin-bottom: 14px; page-break-inside: avoid;">
+        <h4 style="margin: 0 0 8px 0; font-size: 12px; font-weight: 800; color: var(--color-text); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1.5px solid var(--color-border); padding-bottom: 4px;">2. Damage Assessment & Scope</h4>
+        <div class="report-detail-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 6px 12px; font-size: 11px; margin-bottom: 8px;">
+          <div><strong style="color: var(--color-muted);">Damage Type:</strong> <span id="archive-modal-damage-type" style="font-weight: 700; color: var(--color-text);">-</span></div>
+          <div><strong style="color: var(--color-muted);">Damage Dimensions:</strong> <span id="archive-modal-damage-dims" style="font-weight: 600;">-</span></div>
+          <div><strong style="color: var(--color-muted);">Estimated Area:</strong> <span id="archive-modal-damage-area" style="font-weight: 700; color: #0284c7;">-</span></div>
+          <div><strong style="color: var(--color-muted);">Severity Tier:</strong> <span id="archive-modal-priority-badge" class="status-badge" style="font-weight: 800;">-</span></div>
+          <div><strong style="color: var(--color-muted);">GPS Coordinates:</strong> <span id="archive-modal-gps" style="font-family: monospace;">-</span></div>
+          <div style="grid-column: 1 / -1;"><strong style="color: var(--color-muted);">Originally Submitted By:</strong> <span id="archive-modal-submitter" style="font-weight: 700; color: #2563eb;">-</span></div>
+        </div>
+        <div style="background: #f8fafc; border: 1px solid var(--color-border); padding: 8px 10px; border-radius: 4px; font-size: 11px;">
+          <strong style="color: var(--color-muted); display: block; margin-bottom: 2px;">Damage Description / Field Survey Notes:</strong>
+          <p id="archive-modal-description" style="margin: 0; color: var(--color-text); line-height: 1.4;">No description provided.</p>
+        </div>
+      </div>
+
+      <!-- Section 3: Photographic Evidence & Accomplishment -->
+      <div style="margin-bottom: 14px; page-break-inside: avoid;">
+        <h4 style="margin: 0 0 8px 0; font-size: 12px; font-weight: 800; color: var(--color-text); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1.5px solid var(--color-border); padding-bottom: 4px;">3. Photographic Evidence & Accomplishment</h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">
+          <div style="background: #f8fafc; border: 1px solid var(--color-border); border-radius: 6px; padding: 8px; text-align: center;">
+            <strong style="display: block; font-size: 11px; color: var(--color-muted); margin-bottom: 5px;">Initial Damage Evidence (Before)</strong>
+            <div style="height: 120px; width: 100%; background: #ffffff; border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 1px solid var(--color-border); padding: 2px;">
+              <img id="archive-modal-damage-image" src="" alt="Damage Photo" onclick="openFullscreenImage(this)" style="max-height: 100%; max-width: 100%; object-fit: contain; cursor: zoom-in;">
+            </div>
+          </div>
+          <div id="archive-modal-proof-container" style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 6px; padding: 8px; text-align: center;">
+            <strong style="display: block; font-size: 11px; color: #166534; margin-bottom: 5px;">Proof of Completed Repair (After)</strong>
+            <div style="height: 120px; width: 100%; background: #ffffff; border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 1px solid #bbf7d0; padding: 2px;">
+              <img id="archive-modal-proof-image" src="" alt="Proof of Repair" onclick="openFullscreenImage(this)" style="max-height: 100%; max-width: 100%; object-fit: contain; cursor: zoom-in;">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section 4: Official Remarks & Resolution Log -->
+      <div style="margin-bottom: 10px; page-break-inside: avoid;">
+        <h4 style="margin: 0 0 8px 0; font-size: 12px; font-weight: 800; color: var(--color-text); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1.5px solid var(--color-border); padding-bottom: 4px;">4. Official Remarks & Resolution Log</h4>
+        <div class="report-detail-grid" style="grid-template-columns: 1fr 1fr; gap: 10px; font-size: 11px;">
+          <div style="background: #f8fafc; border: 1px solid var(--color-border); padding: 8px; border-radius: 4px;">
+            <strong style="color: var(--color-muted); display: block; margin-bottom: 3px;">CPDO Admin Remarks:</strong>
+            <p id="archive-modal-admin-remarks" style="margin: 0; color: var(--color-text); line-height: 1.4;">None logged</p>
+          </div>
+          <div style="background: #f8fafc; border: 1px solid var(--color-border); padding: 8px; border-radius: 4px;">
+            <strong style="color: var(--color-muted); display: block; margin-bottom: 3px;">CEO Engineering Remarks:</strong>
+            <p id="archive-modal-repair-remarks" style="margin: 0; color: var(--color-text); line-height: 1.4;">None logged</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dynamic Print Signatory Block -->
+      <div style="display: none; margin-top: 15px; page-break-inside: avoid;">
+        <div style="width: 220px; text-align: center;">
+          <p style="text-align: left; margin: 0 0 2px 0; font-size: 10px; font-weight: 600; color: var(--color-text);">Verified & Certified By:</p>
+          <div style="border-bottom: 1.5px solid var(--color-text); height: 25px; margin-bottom: 3px;"></div>
+          <strong id="archive-modal-signer-name" style="text-transform: uppercase; font-size: 11px; color: var(--color-text); display: block; letter-spacing: 0.5px;">CPDO ADMINISTRATOR</strong>
+          <span style="font-size: 8.5px; color: var(--color-muted); font-style: italic; display: block;">(Signature over Printed Name)</span>
+          <span style="font-size: 9.5px; color: var(--color-text); font-weight: 600; display: block; margin-top: 1px;">City Planning & Development Office</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- 📄 ARCHIVE 1: HISTORICAL ROAD INVENTORY MODAL           -->
+<!-- ======================================================= -->
+<div id="archive-inventory-preview-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" style="position: fixed; inset: 0; z-index: 100000; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center;">
+  <div class="modal-content" style="max-width: 1200px; width: 95%; height: 90vh; padding: 0; border-radius: 12px;">
+    <div class="no-print modal-header" style="padding: 15px 24px;">
+      <div>
+        <h3 style="margin: 0; font-size: 18px;">Historical Inventory Report</h3>
+        <p style="margin: 3px 0 0 0; font-size: 12px; color: var(--color-muted);">Review historical data before saving as PDF.</p>
+      </div>
+      <div style="display: flex; gap: 15px; align-items: center;">
+        <button type="button" class="btn-primary" onclick="printArchiveDocument('archive-inventory-preview-modal')">🖨️ Save as PDF</button>
+        <button type="button" class="btn-secondary" style="font-size: 24px; line-height: 1; padding: 2px 14px;" onclick="document.getElementById('archive-inventory-preview-modal').classList.add('hidden'); document.getElementById('archive-inventory-preview-modal').style.display='none';" aria-label="Close Preview">✕</button>
+      </div>
+    </div>
+
+    <div class="modal-body" style="flex: 1; padding: 40px; overflow-y: auto; background: white; color: var(--color-text); font-family: 'Segoe UI', Arial, sans-serif;">
+      <!-- Letterhead -->
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid var(--color-text); padding-bottom: 15px; margin-bottom: 18px;">
+        <img src="img/cpdologo.png" alt="CPDO Logo" style="height: 70px; width: auto;" onerror="this.style.display='none'">
+        <div style="text-align: center; flex: 1; margin: 0 20px;">
+          <p style="margin: 0; font-size: 11px; text-transform: uppercase; color: var(--color-muted); letter-spacing: 1px; font-weight: 600;">Republic of the Philippines • Province of Bulacan</p>
+          <h2 style="margin: 3px 0; font-size: 20px; color: var(--color-text); font-weight: 800; text-transform: uppercase;">City of San Jose Del Monte</h2>
+          <h3 style="margin: 0; font-size: 13px; font-weight: 700; color: #2563eb;">CITY PLANNING AND DEVELOPMENT OFFICE</h3>
+          <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: 800; color: var(--color-text); letter-spacing: 0.5px;">ANNUAL CITY ROAD PHYSICAL INVENTORY REPORT</p>
+        </div>
+        <img src="img/logo.png" alt="RoadWise Logo" style="height: 70px; width: auto;" onerror="this.style.display='none'">
+      </div>
+
+      <!-- Metadata Strip -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; font-size: 11.5px; color: var(--color-text); font-weight: 600; flex-wrap: wrap; gap: 8px;">
+        <div>CITY/MUNICIPALITY: <span style="font-weight: 800; color: var(--color-text);">SAN JOSE DEL MONTE CITY</span></div>
+        <div>INVENTORY CYCLE: <span id="archive-preview-inventory-year" style="font-weight: 800; color: #2563eb;">ALL RECORDED YEARS</span></div>
+        <div>DATE GENERATED: <span id="archive-preview-inventory-date" style="font-weight: 800; color: var(--color-text);"></span></div>
+      </div>
+
+      <!-- Inventory Data Table -->
+      <div class="table-responsive" style="width: 100%;">
+        <table class="data-table" style="border: 1.5px solid var(--color-text);">
+          <thead>
+          <tr style="background: #0f172a; color: #ffffff; text-align: center; font-weight: 700;">
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 110px;">Road ID</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155; text-align: left;">Road Name</th>
+            <th style="padding: 8px 4px; border: 1px solid #334155; width: 45px;">Class</th>
+            <th style="padding: 8px 5px; border: 1px solid #334155; width: 60px;">Length<br>(km)</th>
+            <th style="padding: 8px 5px; border: 1px solid #334155; width: 50px;">Width<br>(m)</th>
+            <th style="padding: 8px 5px; border: 1px solid #334155; width: 55px;">Asphalt<br>(km)</th>
+            <th style="padding: 8px 5px; border: 1px solid #334155; width: 55px;">Gravel<br>(km)</th>
+            <th style="padding: 8px 5px; border: 1px solid #334155; width: 55px;">Earth<br>(km)</th>
+            <th style="padding: 8px 5px; border: 1px solid #334155; width: 60px;">Concrete<br>(km)</th>
+            <th style="padding: 8px 5px; border: 1px solid #334155; width: 55px;">Mixed<br>(km)</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 80px;">Road<br>Importance</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 85px;">Terrain Type</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 75px;">Length of<br>Culverts (m)</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 55px;">Number of<br>Bridges</th>
+            <th style="padding: 8px 6px; border: 1px solid #334155; width: 85px; text-align: center;">Date Inspected</th>
+          </tr>
+          </thead>
+          <tbody id="archive-preview-inventory-tbody">
+          <tr>
+            <td colspan="15" style="text-align: center; padding: 25px; color: var(--color-muted); font-style: italic;">Loading City Road Inventory records...</td>
+          </tr>
+          </tbody>
+          <tfoot id="archive-preview-inventory-tfoot" style="background: #f1f5f9; font-weight: 700; border-top: 2px solid var(--color-text);">
+          </tfoot>
+        </table>
+      </div>
+
+      <!-- Signatures -->
+      <div style="display: flex; justify-content: flex-start; margin-top: 50px; padding-top: 20px; page-break-inside: avoid;">
+        <div style="text-align: center; width: 250px;">
+          <p style="margin: 0 0 6px 0; font-size: 11.5px; color: var(--color-muted); text-align: left; font-weight: 600;">Prepared By:</p>
+          <div style="border-bottom: 1.5px solid var(--color-text); height: 35px; margin-bottom: 6px;"></div>
+          <strong id="archive-preview-inventory-admin" style="text-transform: uppercase; font-size: 12.5px; color: var(--color-text); display: block; letter-spacing: 0.3px;">CPDO Administrator</strong>
+          <span style="font-size: 10.5px; color: var(--color-muted); font-style: italic; display: block; margin-top: 2px;">(Signature over Printed Name)</span>
+          <span style="font-size: 11px; color: var(--color-text); font-weight: 600; display: block; margin-top: 2px;">City Planning & Development Office</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- 📄 ARCHIVE 2: HISTORICAL PRIORITY MASTERLIST MODAL      -->
+<!-- ======================================================= -->
+<div id="archive-priority-preview-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" style="position: fixed; inset: 0; z-index: 100000; background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(4px); display: none; align-items: center; justify-content: center;">
+  <div class="modal-content" style="max-width: 1100px; width: 95%; height: 90vh; padding: 0; border-radius: 12px;">
+    <div class="no-print modal-header" style="padding: 15px 24px;">
+      <div>
+        <h3 style="margin: 0; font-size: 18px;">Historical Priority Masterlist</h3>
+        <p style="margin: 3px 0 0 0; font-size: 12px; color: var(--color-muted);">Review prioritized backlog before saving as PDF.</p>
+      </div>
+      <div style="display: flex; gap: 15px; align-items: center;">
+        <button type="button" class="btn-danger" onclick="printArchiveDocument('archive-priority-preview-modal')">🖨️ Save as PDF</button>
+        <button type="button" class="btn-secondary" style="font-size: 24px; line-height: 1; padding: 2px 14px;" onclick="document.getElementById('archive-priority-preview-modal').classList.add('hidden'); document.getElementById('archive-priority-preview-modal').style.display='none';" aria-label="Close Preview">✕</button>
+      </div>
+    </div>
+
+    <div class="modal-body" style="flex: 1; padding: 40px; overflow-y: auto; background: white; color: var(--color-text); font-family: 'Segoe UI', Arial, sans-serif;">
+      <!-- Letterhead -->
+      <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid var(--color-text); padding-bottom: 15px; margin-bottom: 18px;">
+        <img src="img/cpdologo.png" alt="CPDO Logo" style="height: 70px; width: auto;" onerror="this.style.display='none'">
+        <div style="text-align: center; flex: 1; margin: 0 20px;">
+          <p style="margin: 0; font-size: 11px; text-transform: uppercase; color: var(--color-muted); letter-spacing: 1px; font-weight: 600;">Republic of the Philippines • Province of Bulacan</p>
+          <h2 style="margin: 3px 0; font-size: 20px; color: var(--color-text); font-weight: 800; text-transform: uppercase;">City of San Jose Del Monte</h2>
+          <h3 style="margin: 0; font-size: 13px; font-weight: 700; color: var(--color-danger);">CITY PLANNING AND DEVELOPMENT OFFICE</h3>
+          <p style="margin: 4px 0 0 0; font-size: 14px; font-weight: 800; color: var(--color-text); letter-spacing: 0.5px;">PRIORITY ROAD REPAIR & BUDGET PLANNING MASTERLIST</p>
+        </div>
+        <img src="img/logo.png" alt="RoadWise Logo" style="height: 70px; width: auto;" onerror="this.style.display='none'">
+      </div>
+
+      <!-- Metadata Strip -->
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; font-size: 11.5px; color: var(--color-text); font-weight: 600; flex-wrap: wrap; gap: 8px;">
+        <div>CITY/MUNICIPALITY: <span style="font-weight: 800; color: var(--color-text);">SAN JOSE DEL MONTE CITY</span></div>
+        <div>RECORD CYCLE: <span id="archive-preview-priority-year" style="font-weight: 800; color: var(--color-danger);">ALL RECORDED YEARS</span></div>
+        <div>DATE GENERATED: <span id="archive-preview-priority-date" style="font-weight: 800; color: var(--color-text);"></span></div>
+      </div>
+
+      <!-- Priority Data Table -->
+      <div class="table-responsive" style="width: 100%;">
+        <table class="data-table" style="border: 1.5px solid var(--color-text);">
+          <thead>
+          <tr style="background: #0f172a; color: #ffffff; text-align: center; font-weight: 700;">
+            <th style="padding: 10px 8px; border: 1px solid #334155; width: 50px;">Rank</th>
+            <th style="padding: 10px 8px; border: 1px solid #334155; width: 100px;">Project ID</th>
+            <th style="padding: 10px 8px; border: 1px solid #334155; text-align: left;">Road Name & Barangay</th>
+            <th style="padding: 10px 8px; border: 1px solid #334155; width: 150px;">Damage Type</th>
+            <th style="padding: 10px 8px; border: 1px solid #334155; width: 120px;">Est. Area (L x W)</th>
+            <th style="padding: 10px 8px; border: 1px solid #334155; width: 100px;">Priority Tier</th>
+          </tr>
+          </thead>
+          <tbody id="archive-preview-priority-tbody">
+          <tr>
+            <td colspan="6" style="text-align: center; padding: 25px; color: var(--color-muted); font-style: italic;">Loading Priority List records...</td>
+          </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Signatures -->
+      <div style="display: flex; justify-content: flex-start; margin-top: 45px; padding-top: 15px; page-break-inside: avoid;">
+        <div style="width: 250px; text-align: center;">
+          <p style="text-align: left; margin: 0 0 6px 0; font-size: 11.5px; font-weight: 600; color: var(--color-text);">Prepared & Verified By:</p>
+          <div style="border-bottom: 1.5px solid var(--color-text); height: 35px; margin-bottom: 6px;"></div>
+          <strong id="archive-preview-priority-admin" style="text-transform: uppercase; font-size: 12.5px; color: var(--color-text); display: block; letter-spacing: 0.3px;">CPDO Administrator</strong>
+          <span style="font-size: 10.5px; color: var(--color-muted); font-style: italic; display: block; margin-top: 2px;">(Signature over Printed Name)</span>
+          <span style="font-size: 11px; color: var(--color-text); font-weight: 600; display: block; margin-top: 2px;">City Planning & Development Office</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================= -->
+<!-- 🛑 TWO-STEP VERIFICATION MODAL FOR ROLLOVER             -->
+<!-- ======================================================= -->
+<div id="modal-rollover-confirm" class="modal-overlay hidden" role="dialog" aria-modal="true" style="display: none; z-index: 999999; background: rgba(15, 23, 42, 0.7);">
+  <div class="modal-content" style="max-width: 440px; padding: 25px; border: 2px solid var(--color-danger); box-sizing: border-box; text-align: left;">
+    <h3 style="margin: 0 0 10px 0; color: var(--color-danger); font-size: 18px; display: flex; align-items: center; gap: 8px;"><span>⚠️</span> Confirm Annual Rollover</h3>
+    <p style="margin: 0 0 15px 0; font-size: 13px; color: var(--color-muted); line-height: 1.5;">Initializing a new annual cycle will permanently archive completed records. Active repairs carry over to the new year.</p>
+    <div id="rollover-preflight-box" style="margin-bottom: 15px; border-radius: 8px; font-size: 12.5px; line-height: 1.4; padding: 10px 12px; background: #f8fafc; border: 1px solid var(--color-border); color: var(--color-muted);">🔍 Running pre-flight system check...</div>
+    <p style="margin: 0 0 10px 0; font-size: 12.5px; color: var(--color-text); font-weight: 600;">To confirm, type <span style="color: var(--color-danger);">ARCHIVE CYCLE</span> below:</p>
+    <input type="text" id="input-rollover-confirm" placeholder="Type ARCHIVE CYCLE" autocomplete="off" style="width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid var(--color-border); border-radius: 6px; font-size: 15px; margin-bottom: 20px; font-weight: 800; text-align: center; text-transform: uppercase; outline: none;">
+    <div style="display: flex; gap: 10px; justify-content: flex-end;">
+      <button type="button" class="btn-secondary" onclick="closeRolloverModal()">Cancel</button>
+      <button type="button" id="btn-execute-rollover" class="btn-danger" onclick="executeAnnualRollover()" style="cursor: not-allowed; opacity: 0.5; pointer-events: none;">Execute Rollover</button>
+    </div>
+  </div>
+</div>
+
+<!-- 🏛️ MODAL: CPDO ADMIN SUCCESSION / HANDOVER -->
+<div id="admin-handover-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" style="z-index: 9999;">
+  <div class="modal-content" style="max-width: 650px;">
+    <div class="modal-header" style="background: #f8fafc; border-bottom: 1px solid var(--color-border);">
+      <h2 style="margin: 0; font-size: 17px; color: var(--color-text); display: flex; align-items: center; gap: 8px;">
+        🏛️ CPDO Administrator Succession Form
+      </h2>
+      <button type="button" class="close-modal-btn" onclick="closeAdminHandoverModal()" aria-label="Close">✕</button>
+    </div>
+    <form id="form-admin-handover" onsubmit="event.preventDefault(); submitAdminHandover();" style="padding: 20px;">
+      <div style="margin-bottom: 20px;">
+        <h4 style="margin: 0 0 12px 0; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; color: #1a0ca3;">👤 Appointed Successor Information</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+          <div>
+            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">First Name *</label>
+            <input type="text" id="succ-first-name" required placeholder="Juan" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;">
+          </div>
+          <div>
+            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Middle Name</label>
+            <input type="text" id="succ-middle-name" placeholder="Perez" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;">
+          </div>
+          <div>
+            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Last Name *</label>
+            <input type="text" id="succ-last-name" required placeholder="Dela Cruz" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;">
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+          <div>
+            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Official Government Email *</label>
+            <input type="email" id="succ-email" required placeholder="successor@sjdm.gov.ph" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;">
+          </div>
+          <div>
+            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Contact Number *</label>
+            <input type="tel" id="succ-phone" required maxlength="11" placeholder="09123456789" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;">
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div>
+            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Assign System Username *</label>
+            <input type="text" id="succ-username" required placeholder="cpdo_admin_jdelacruz" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;">
+          </div>
+          <div>
+            <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px;">Office Memo / Special Order # *</label>
+            <input type="text" id="succ-memo" required placeholder="e.g. SO-2026-089" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;">
+          </div>
+        </div>
+      </div>
+      <div style="background: #f8fafc; border: 1px solid var(--color-border); padding: 15px; border-radius: 6px; margin-bottom: 20px;">
+        <label style="display: block; font-size: 12px; font-weight: 700; color: #b91c1c; margin-bottom: 6px;">🔒 Re-enter YOUR Current Password to Authorize Transfer *</label>
+        <input type="password" id="succ-current-pass" required placeholder="Enter your current password" style="width: 100%; padding: 8px; border: 1px solid var(--color-border); border-radius: 4px; box-sizing: border-box;">
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" onclick="closeAdminHandoverModal()">Cancel</button>
+        <button type="submit" class="btn-danger" id="btn-confirm-handover">Confirm & Execute Handover ➔</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 🏛️ MODAL: SUCCESSFUL CPDO ADMIN TURNOVER -->
+<div id="handover-success-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" style="z-index: 10000;">
+  <div class="modal-content" style="max-width: 500px; text-align: center; padding: 25px;">
+    <div style="font-size: 45px; margin-bottom: 10px;">🏛️</div>
+    <h2 style="margin: 0 0 10px 0; color: #166534; font-size: 20px;">Office Turnover Completed</h2>
+    <p style="font-size: 13px; color: var(--color-muted); margin-bottom: 20px;">
+      Administrative authority for the RoadWise System has been transferred to your appointed successor.
+    </p>
+    <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 15px; text-align: left; margin-bottom: 20px; font-size: 13px;">
+      <p style="margin: 0 0 6px 0;"><strong>Successor:</strong> <span id="disp-succ-name">Loading...</span></p>
+      <p style="margin: 0 0 6px 0;"><strong>System Username:</strong> <span id="disp-succ-user" style="font-family: monospace; color: #15803d; font-weight: bold;">Loading...</span></p>
+      <p style="margin: 0 0 6px 0;"><strong>Temporary Password:</strong> <span id="disp-succ-pass" style="font-family: monospace; color: #b91c1c; font-weight: bold;">• • • • • •</span></p>
+      <p style="margin: 0;"><strong>Credential Delivery:</strong> <span style="color: #166534; font-weight: 600;">Dispatched securely to registered government email</span></p>
+    </div>
+    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; padding: 10px; font-size: 12px; color: #92400e; margin-bottom: 20px; text-align: left;">
+      🔒 <strong>Security Policy:</strong> For non-repudiation and access privacy, temporary login credentials have been transmitted directly to the incoming official. Your active session has now ended.
+    </div>
+    <button type="button" class="btn-primary" onclick="terminateHandoverSession()" style="width: 100%; background: #1a0ca3;">Proceed to Login Portal ➔</button>
   </div>
 </div>
 

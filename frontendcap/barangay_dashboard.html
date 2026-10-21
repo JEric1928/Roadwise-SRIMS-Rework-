@@ -476,24 +476,105 @@
 
       <!-- PROFILE VIEW -->
       <div id="view-profile" class="content-section hidden brgy-profile-theme">
+        <style>
+          #profile-nav-menu li { transition: background-color .12s ease, color .12s ease; }
+          #profile-nav-menu li:hover { background-color: #f1f5f9; }
+          #profile-nav-menu li.active { background-color: #eff6ff; color: var(--color-primary); }
+        </style>
+
         <div class="section-header-flex" style="margin-bottom: 20px;">
           <h2>Barangay Office Settings</h2>
           <button type="button" id="btn-back-dashboard" class="btn-secondary">⬅ Back to Dashboard</button>
         </div>
 
         <div class="profile-split-container">
+
+          <!-- LEFT SIDEBAR -->
           <div class="profile-sidebar">
             <div class="profile-header-mini">
-              <div class="profile-avatar-mini" id="main-profile-avatar">🏛️</div>
-              <h4 id="sidebar-display-name">Loading...</h4>
-              <p id="sidebar-display-role">Loading...</p>
+
+              <div style="display: flex; flex-direction: column; align-items: center; margin-bottom: 15px;">
+                <div class="profile-avatar-mini" id="main-profile-avatar" style="background: linear-gradient(135deg, #15803d, #22c55e); width: 80px; height: 80px; font-size: 35px; margin-bottom: 8px;">🏛️</div>
+                <div style="display: flex; gap: 8px; margin-top: 4px;">
+                  <button type="button" onclick="openProfilePicViewer()" style="font-size: 11px; padding: 4px 10px; border: 1px solid var(--color-border); background: #fff; border-radius: 6px; cursor: pointer; color: var(--color-muted); font-weight: 600;">👁️ View</button>
+                  <label for="profile-pic-upload" style="font-size: 11px; padding: 4px 10px; border: none; background: var(--color-success); color: #fff; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                    📷 Change <input type="file" hidden id="profile-pic-upload" accept="image/*">
+                  </label>
+                </div>
+              </div>
+
+              <h4 id="sidebar-display-name" style="margin: 0; color: var(--color-text); text-align: center; word-break: break-word;">Loading...</h4>
+              <p id="sidebar-display-role" style="margin: 5px 0 0; font-size: 13px; color: var(--color-muted); text-align: center;">Loading...</p>
             </div>
-            <button type="button" class="btn-secondary logout-btn" style="width: 100%; margin-top: 12px;">Sign Out</button>
+
+            <ul id="profile-nav-menu" style="list-style: none; padding: 0; margin: 18px 0 0; display: flex; flex-direction: column; gap: 4px;">
+              <li data-target="tab-identity" class="active" style="padding: 11px 14px; border-radius: 8px; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--color-text);">🪪 Official Details</li>
+              <li data-target="tab-security" style="padding: 11px 14px; border-radius: 8px; cursor: pointer; font-size: 13.5px; font-weight: 600; color: var(--color-text);">🔒 Security & Password</li>
+              <li class="logout-btn" style="margin-top: 8px; padding: 11px 14px; border-radius: 8px; cursor: pointer; font-size: 13.5px; font-weight: 700; color: var(--color-danger); background: #fef2f2; border: 1px solid #fecaca;">🚪 Log Out</li>
+            </ul>
           </div>
+
+          <!-- RIGHT CONTENT -->
           <div class="profile-content">
-            <div class="profile-detail-row"><strong>Full Name:</strong> <span id="profile-full-name">Loading...</span></div>
-            <div class="profile-detail-row"><strong>Official Email:</strong> <span id="profile-email">Loading...</span></div>
-            <div class="profile-detail-row"><strong>Jurisdiction:</strong> <span id="profile-barangay">Loading...</span></div>
+
+            <!-- TAB 1: OFFICIAL DETAILS -->
+            <div id="tab-identity" class="profile-tab active">
+              <div class="section-card" style="padding: 24px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #bbf7d0; padding-bottom: 14px; margin-bottom: 18px;">
+                  <h3 style="margin: 0; font-size: 17px; color: var(--color-text);">🏛️ Official Profile</h3>
+                  <button type="button" id="btn-edit-profile" class="btn-primary btn-small">✏️ Edit Information</button>
+                </div>
+
+                <div class="profile-detail-row"><strong>Full Name:</strong> <span id="profile-full-name">Loading...</span></div>
+                <div class="profile-detail-row"><strong>Official Email:</strong> <span id="profile-email">Loading...</span></div>
+                <div class="profile-detail-row"><strong>Phone Number:</strong> <span id="profile-phone">Loading...</span></div>
+                <div class="profile-detail-row"><strong>Date of Birth:</strong> <span id="profile-birthday">Loading...</span></div>
+                <div class="profile-detail-row"><strong>Age:</strong> <span id="profile-age">Loading...</span></div>
+                <div class="profile-detail-row"><strong>Gender:</strong> <span id="profile-gender">Loading...</span></div>
+                <div class="profile-detail-row"><strong>Username:</strong> <span id="profile-username">Loading...</span></div>
+                <div class="profile-detail-row"><strong>Jurisdiction (Barangay):</strong> <span id="profile-barangay">Loading...</span></div>
+                <div class="profile-detail-row"><strong>System Role:</strong> <span id="profile-role">Loading...</span></div>
+                <div class="profile-detail-row" style="border-bottom: none;"><strong>Account Status:</strong> <span class="status-badge validated">Active</span></div>
+              </div>
+            </div>
+
+            <!-- TAB 2: SECURITY & PASSWORD -->
+            <div id="tab-security" class="profile-tab hidden">
+              <div class="section-card" style="padding: 24px;">
+                <h3 style="margin: 0 0 6px; font-size: 17px; color: var(--color-text);">🔒 Change Password</h3>
+                <p style="margin: 0 0 22px; font-size: 13px; color: var(--color-muted);">Keep your account secure by using a strong, unique password.</p>
+
+                <form id="form-change-password" novalidate>
+                  <div class="form-group-vertical">
+                    <label for="sec-current-pass">Current Password</label>
+                    <div style="position: relative; width: 100%;">
+                      <input type="password" id="sec-current-pass" placeholder="Enter current password" autocomplete="current-password" required style="padding-right: 40px;">
+                      <span role="button" aria-label="Toggle password visibility" onclick="togglePasswordVisibility('sec-current-pass', this)" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); cursor: pointer; user-select: none; font-size: 15px;">👁️</span>
+                    </div>
+                  </div>
+
+                  <div class="form-group-vertical">
+                    <label for="sec-new-pass">New Password</label>
+                    <div style="position: relative; width: 100%;">
+                      <input type="password" id="sec-new-pass" placeholder="Enter new password" autocomplete="new-password" required style="padding-right: 40px;">
+                      <span role="button" aria-label="Toggle password visibility" onclick="togglePasswordVisibility('sec-new-pass', this)" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); cursor: pointer; user-select: none; font-size: 15px;">👁️</span>
+                    </div>
+                    <p style="margin: 6px 0 0; font-size: 11.5px; color: var(--color-muted);">🔒 Minimum 8 characters, 1 uppercase, 1 number, 1 special character (@$!%*?&).</p>
+                  </div>
+
+                  <div class="form-group-vertical">
+                    <label for="sec-confirm-pass">Confirm New Password</label>
+                    <div style="position: relative; width: 100%;">
+                      <input type="password" id="sec-confirm-pass" placeholder="Confirm new password" autocomplete="new-password" required style="padding-right: 40px;">
+                      <span role="button" aria-label="Toggle password visibility" onclick="togglePasswordVisibility('sec-confirm-pass', this)" style="position: absolute; right: 12px; top: 50%; transform: translateY(-50%); cursor: pointer; user-select: none; font-size: 15px;">👁️</span>
+                    </div>
+                  </div>
+
+                  <button type="submit" id="btn-submit-password" class="btn-primary" style="width: 100%; margin-top: 6px;">Update Password</button>
+                </form>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -560,6 +641,14 @@
         <button type="button" id="close-map-btn" aria-label="Close map modal">&times;</button>
       </div>
       <div class="modal-body">
+        <div style="position: relative; margin-bottom: 12px;">
+          <div style="display: flex; align-items: center; gap: 8px; border: 1px solid var(--color-border); border-radius: 8px; padding: 8px 12px; background: #fff;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input type="text" id="custom-map-search" placeholder="Search road, subdivision, or landmark..." autocomplete="off" spellcheck="false" style="flex: 1; border: none; outline: none; font-size: 13.5px; color: var(--color-text); background: transparent;" />
+            <button type="button" id="clear-search-btn" class="hidden" style="background: none; border: none; font-size: 18px; cursor: pointer; color: #94a3b8; line-height: 1; padding: 2px;">&times;</button>
+          </div>
+          <ul id="search-suggestions" class="hidden" style="position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid var(--color-border); border-radius: 8px; max-height: 220px; overflow-y: auto; list-style: none; margin: 0; padding: 4px 0; box-shadow: 0 6px 20px rgba(0,0,0,0.12); z-index: 1000;"></ul>
+        </div>
         <div style="height: 400px; width: 100%; border-radius: 8px; overflow: hidden; margin-bottom: 16px;">
           <div id="roadwiseMap" style="height: 100%; width: 100%;"></div>
         </div>
@@ -597,7 +686,10 @@
   <div id="bd-view-modal" class="modal-overlay hidden" role="dialog" aria-modal="true">
     <div class="modal-content" style="max-width: 700px;">
       <div class="modal-header">
-        <h2>Report Detail <span id="view-modal-id-header">#</span></h2>
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <h2 style="margin: 0;">Report Detail <span id="view-modal-id-header">#</span></h2>
+          <div id="view-modal-status" class="bd-status-badge bd-badge-pending">Pending</div>
+        </div>
         <button type="button" class="close-modal-btn" onclick="closeBdModals()" aria-label="Close modal">&times;</button>
       </div>
       <div class="modal-body">
@@ -616,6 +708,13 @@
           <div><strong>Damage Scope:</strong> <span id="view-modal-damage-length"></span> m × <span id="view-modal-damage-width"></span> m</div>
         </div>
 
+        <div id="view-modal-map-container" style="margin-top: 14px;">
+          <div id="view-modal-map" style="height: 220px; width: 100%; border-radius: 8px; border: 1px solid var(--color-border); z-index: 1;"></div>
+          <p id="view-modal-no-map" class="hidden" style="margin: 10px 0 0; font-size: 12.5px; color: var(--color-muted); font-style: italic; text-align: center; background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px dashed var(--color-border);">
+            📍 No GPS coordinates recorded for this report.
+          </p>
+        </div>
+
         <div style="margin-bottom: 16px;">
           <strong>Survey Notes / Description:</strong>
           <p id="view-modal-desc" style="color: var(--color-muted); font-size: 13px; margin-top: 4px;"></p>
@@ -625,7 +724,15 @@
           <img id="view-modal-img" src="" alt="Damage Photo" style="max-width: 100%; border-radius: 8px;">
         </div>
 
-        <div id="view-modal-timeline" style="margin-top: 16px;"></div>
+        <div style="margin-top: 16px; border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: #ffffff;">
+          <button type="button" onclick="toggleViewTimeline()" style="width: 100%; padding: 10px 14px; background: #f8fafc; border: none; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--color-text);">
+            <span>⏱️ View Project Activity & Audit History</span>
+            <span id="view-timeline-arrow" style="font-size: 12px; transition: transform 0.2s ease;">▼</span>
+          </button>
+          <div id="view-modal-timeline-container" class="hidden" style="padding: 14px; background: #ffffff; border-top: 1px solid var(--color-border); max-height: 250px; overflow-y: auto;">
+            <div id="view-modal-timeline"></div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -640,43 +747,119 @@
       <div class="modal-body">
         <form id="form-edit-report" onsubmit="event.preventDefault(); submitEditedReport();">
           <input type="hidden" id="edit-report-id">
-          <div class="form-group" style="margin-bottom: 12px;">
-            <label>City Road Name</label>
-            <input type="text" id="edit-road-name" readonly style="background: #f8fafc;">
+
+          <!-- Admin Feedback -->
+          <div style="margin-bottom: 12px; font-size: 14px; padding: 12px; border-left: 5px solid var(--color-danger); background-color: #fef2f2; color: #721c24; border-radius: 0 6px 6px 0;">
+            <strong>⚠️ Admin Feedback:</strong> <span id="edit-modal-remarks"></span>
           </div>
+
+          <!-- Timeline Accordion -->
+          <div style="margin-bottom: 16px; border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; background: #ffffff;">
+            <button type="button" onclick="toggleEditTimeline()" style="width: 100%; padding: 10px 14px; background: #f8fafc; border: none; text-align: left; display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 12.5px; font-weight: 700; color: var(--color-text);">
+              <span>⏱️ View Past Revisions & Rejection History</span>
+              <span id="edit-timeline-arrow" style="font-size: 12px; transition: transform 0.2s ease;">▼</span>
+            </button>
+            <div id="edit-modal-timeline-container" class="hidden" style="padding: 14px; background: #ffffff; border-top: 1px solid var(--color-border); max-height: 250px; overflow-y: auto;">
+              <div id="edit-modal-timeline"></div>
+            </div>
+          </div>
+
+          <!-- Road Details -->
           <div class="form-grid" style="margin-bottom: 12px;">
             <div class="form-group">
-              <label for="edit-damage-type">Damage Type</label>
-              <input type="text" id="edit-damage-type" required>
+              <label>City Road Name</label>
+              <input type="text" id="edit-modal-road-name" readonly style="background: #f8fafc; color: #555;">
             </div>
             <div class="form-group">
-              <label for="edit-damage-length">Length (m)</label>
-              <input type="number" id="edit-damage-length" step="0.01">
+              <label>City Road ID</label>
+              <input type="text" id="edit-modal-road-id" readonly style="background: #f8fafc; color: #555;">
             </div>
             <div class="form-group">
-              <label for="edit-damage-width">Width (m)</label>
-              <input type="number" id="edit-damage-width" step="0.01">
+              <label>Road Importance</label>
+              <input type="text" id="edit-modal-importance" readonly style="background: #f8fafc; color: #555;">
+            </div>
+            <div class="form-group">
+              <label>Road Type</label>
+              <input type="text" id="edit-modal-road-type" readonly style="background: #f8fafc; color: #555;">
+            </div>
+            <div class="form-group">
+              <label>Terrain Type</label>
+              <input type="text" id="edit-modal-terrain" readonly style="background: #f8fafc; color: #555;">
+            </div>
+            <div class="form-group">
+              <label>Severity Estimate</label>
+              <input type="text" id="edit-modal-severity" readonly style="background: #e9ecef; color: #6c757d; font-style: italic; font-weight: 600;">
+            </div>
+            <div class="form-group">
+              <label>Length (km) <span style="color: var(--color-danger);">*</span></label>
+              <input type="number" id="edit-modal-length" step="0.01">
+            </div>
+            <div class="form-group">
+              <label>Width (m) <span style="color: var(--color-danger);">*</span></label>
+              <input type="number" id="edit-modal-width" step="0.01">
+            </div>
+            <div class="form-group">
+              <label>Length of Culverts (m)</label>
+              <input type="number" id="edit-modal-culverts" step="0.01">
+            </div>
+            <div class="form-group">
+              <label>Number of Bridges</label>
+              <input type="number" id="edit-modal-bridges">
             </div>
           </div>
+
+          <!-- Damage Information -->
           <div class="form-group" style="margin-bottom: 12px;">
-            <label for="edit-description">Survey Notes / Remarks</label>
-            <textarea id="edit-description" rows="3"></textarea>
+            <label for="edit-modal-damage-type">Damage Type</label>
+            <select id="edit-modal-damage-type" onchange="this.form.querySelector('#edit-modal-damage-other').classList.toggle('hidden', this.value !== 'Other')" style="padding: 8px; border: 1px solid var(--color-border); border-radius: 6px; background: #fff;">
+              <option value="Pothole">Pothole</option>
+              <option value="Surface Cracking">Surface Cracking</option>
+              <option value="Edge Deformation">Edge Deformation</option>
+              <option value="Washout/Sinkhole">Washout / Sinkhole</option>
+              <option value="None">None (Standard Inventory)</option>
+              <option value="Other">Other (Please specify)</option>
+            </select>
+            <input type="text" id="edit-modal-damage-other" placeholder="Specify other damage..." class="hidden" style="margin-top: 8px; padding: 8px; border: 1px solid var(--color-border); border-radius: 6px;">
           </div>
-          <div class="form-grid" style="margin-bottom: 12px;">
-            <div class="form-group">
-              <label for="edit-latitude">Latitude</label>
-              <input type="text" id="edit-latitude">
+          <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <div class="form-group" style="flex: 1;">
+              <label for="edit-modal-damage-length">Damage Length (m)</label>
+              <input type="number" id="edit-modal-damage-length" step="0.01">
             </div>
-            <div class="form-group">
-              <label for="edit-longitude">Longitude</label>
-              <input type="text" id="edit-longitude">
+            <div class="form-group" style="flex: 1;">
+              <label for="edit-modal-damage-width">Damage Width (m)</label>
+              <input type="number" id="edit-modal-damage-width" step="0.01">
             </div>
           </div>
-          <div class="form-group" style="margin-bottom: 16px;">
-            <label for="edit-image-file">Update Photo (Optional)</label>
-            <input type="file" id="edit-image-file" accept="image/*">
+
+          <div class="form-group" style="margin-bottom: 12px;">
+            <label for="edit-modal-desc">Damage Description</label>
+            <textarea id="edit-modal-desc" rows="3"></textarea>
           </div>
-          <div style="display: flex; justify-content: flex-end; gap: 10px;">
+
+          <!-- Photo Upload -->
+          <div style="min-height: 150px; border: 2px dashed var(--color-border); padding: 15px; border-radius: 8px; text-align: center; background-color: #fafafa; margin-bottom: 16px;">
+            <span style="display: block; font-weight: 600; margin-bottom: 10px; color: var(--color-text);">Upload New Photo (Optional)</span>
+            <div style="margin-bottom: 10px;">
+              <img id="edit-modal-current-img" src="" alt="Current Photo" onclick="openFullscreenImage(this)" style="max-width: 140px; border-radius: 6px; border: 1px solid var(--color-border);">
+            </div>
+            <input type="file" id="edit-modal-img" accept="image/*" style="display: none;">
+            <button type="button" class="btn-secondary" onclick="document.getElementById('edit-modal-img').click()" style="padding: 8px 15px;">📤 Select New Photo</button>
+            <p id="edit-modal-filename" style="font-size: 12px; color: var(--color-muted); margin-top: 10px; font-style: italic;"></p>
+          </div>
+
+          <!-- GPS Row -->
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 15px; padding-top: 15px; border-top: 1px dashed var(--color-border); flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center;">
+              <span style="font-weight: 600; font-size: 13px; margin-right: 10px;">GPS Coordinates:</span>
+              <span id="edit-modal-gps" style="font-size: 13px; color: var(--color-success); font-weight: bold; font-family: monospace;"></span>
+            </div>
+            <button type="button" class="btn-secondary" id="btn-edit-define-map" style="padding: 6px 12px; font-size: 12px;">📍 Update Location</button>
+            <input type="hidden" id="edit-latitude">
+            <input type="hidden" id="edit-longitude">
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px;">
             <button type="button" class="btn-secondary" onclick="closeBdModals()">Cancel</button>
             <button type="submit" class="btn-primary">Save & Resubmit Report</button>
           </div>
@@ -685,6 +868,115 @@
     </div>
   </div>
 
+</div>
+
+<!-- ========================================== -->
+<!-- LOGOUT CONFIRMATION MODAL -->
+<!-- ========================================== -->
+<div id="logout-confirm-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="logout-confirm-title">
+  <div class="modal-content" style="max-width: 400px; text-align: center; padding: 30px 22px; border-radius: var(--radius-lg);">
+    <div style="font-size: 45px; margin-bottom: 15px;">👋</div>
+    <h3 id="logout-confirm-title" style="margin: 0 0 10px; font-size: 20px; color: var(--color-text);">Ready to leave?</h3>
+    <p style="margin: 0 0 24px; font-size: 14px; color: var(--color-muted);">Are you sure you want to log out of your account?</p>
+    <div style="display: flex; justify-content: center; gap: 12px;">
+      <button type="button" class="btn-secondary" onclick="document.getElementById('logout-confirm-modal').classList.add('hidden')">Cancel</button>
+      <button type="button" id="btn-confirm-logout" class="btn-danger">Yes, Log Out</button>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- EDIT PROFILE MODAL -->
+<!-- ========================================== -->
+<div id="edit-profile-modal" class="modal-overlay hidden brgy-profile-theme" role="dialog" aria-modal="true" aria-labelledby="edit-profile-title">
+  <div class="modal-content" style="max-width: 700px;">
+    <div class="modal-header">
+      <h2 id="edit-profile-title" style="margin: 0; font-size: 18px;">✏️ Edit Profile Information</h2>
+      <button type="button" class="close-modal-btn" aria-label="Close edit profile modal">✕</button>
+    </div>
+
+    <div class="modal-body" style="padding: 20px;">
+      <form id="form-edit-profile" novalidate>
+
+        <!-- SECTION 1: LOCKED OFFICIAL RECORDS -->
+        <div class="section-card" style="padding: 16px; margin-bottom: 20px;">
+          <h3 style="margin: 0 0 15px; font-size: 13px; color: var(--color-muted); text-transform: uppercase; letter-spacing: 0.5px;">🔒 Official Government Records (Read-Only)</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+            <div class="form-group-vertical">
+              <label for="edit-prof-first">First Name</label>
+              <input type="text" id="edit-prof-first" disabled style="background-color: #e9ecef; color: var(--color-muted); cursor: not-allowed;">
+            </div>
+            <div class="form-group-vertical">
+              <label for="edit-prof-middle">Middle Name</label>
+              <input type="text" id="edit-prof-middle" disabled style="background-color: #e9ecef; color: var(--color-muted); cursor: not-allowed;">
+            </div>
+            <div class="form-group-vertical">
+              <label for="edit-prof-last">Last Name</label>
+              <input type="text" id="edit-prof-last" disabled style="background-color: #e9ecef; color: var(--color-muted); cursor: not-allowed;">
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group-vertical">
+              <label for="edit-prof-role">System Role</label>
+              <input type="text" id="edit-prof-role" disabled style="background-color: #e9ecef; color: var(--color-muted); cursor: not-allowed;">
+            </div>
+            <div class="form-group-vertical">
+              <label for="edit-prof-brgy">Jurisdiction (Barangay)</label>
+              <input type="text" id="edit-prof-brgy" disabled style="background-color: #e9ecef; color: var(--color-muted); cursor: not-allowed;">
+            </div>
+          </div>
+        </div>
+
+        <!-- SECTION 2: EDITABLE PERSONAL DETAILS -->
+        <div class="section-card" style="padding: 16px;">
+          <h3 style="margin: 0 0 15px; font-size: 13px; color: var(--color-primary); text-transform: uppercase; letter-spacing: 0.5px;">📝 Personal Details</h3>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            <div class="form-group-vertical">
+              <label for="edit-prof-phone">Contact Number</label>
+              <input type="tel" id="edit-prof-phone" placeholder="e.g. 09123456789">
+            </div>
+            <div class="form-group-vertical">
+              <label for="edit-prof-email">Official Email</label>
+              <input type="email" id="edit-prof-email" placeholder="e.g. official@gmail.com">
+            </div>
+            <div class="form-group-vertical">
+              <label for="edit-prof-birthday">Date of Birth</label>
+              <input type="date" id="edit-prof-birthday">
+            </div>
+            <div class="form-group-vertical">
+              <label for="edit-prof-gender">Gender</label>
+              <select id="edit-prof-gender">
+                <option value="" disabled selected>Select Gender...</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+                <option value="Prefer not to say">Prefer not to say</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- MODAL ACTIONS -->
+        <div class="modal-actions" style="justify-content: flex-end; gap: 10px; margin-top: 20px; padding: 0;">
+          <button type="button" class="btn-secondary">Cancel</button>
+          <button type="submit" class="btn-primary">💾 Save Changes</button>
+        </div>
+
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- VIEW PROFILE PICTURE MODAL -->
+<!-- ========================================== -->
+<div id="view-profile-pic-modal" class="modal-overlay hidden" role="dialog" aria-modal="true">
+  <div class="modal-content" style="max-width: 520px; text-align: center; background: var(--color-text); padding: 16px; border-radius: var(--radius-lg);">
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 10px;">
+      <button type="button" class="close-modal-btn" onclick="document.getElementById('view-profile-pic-modal').classList.add('hidden')" aria-label="Close profile picture" style="color: var(--color-muted); font-size: 22px;">✕</button>
+    </div>
+    <img id="full-size-profile-pic" src="" alt="Profile Picture" style="max-width: 100%; max-height: 70vh; border-radius: 8px; object-fit: contain;">
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>

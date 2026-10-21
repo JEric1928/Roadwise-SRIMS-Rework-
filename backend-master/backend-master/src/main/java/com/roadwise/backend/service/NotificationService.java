@@ -22,7 +22,17 @@ public class NotificationService {
     // 📨 THE MASTER FUNCTION TO SEND ALERTS
     // ==========================================
     public void sendNotification(Long recipientId, String title, String message, String type) {
+        sendNotification(recipientId, title, message, type, null, null);
+    }
 
+    /**
+     * Sends a notification that can deep-link to the entity it is about.
+     *
+     * @param targetType coarse entity kind (e.g. {@code "REPORT"})
+     * @param targetId   the entity's primary key, or {@code null}
+     */
+    public void sendNotification(Long recipientId, String title, String message, String type,
+                                 String targetType, Long targetId) {
         // 1. Find the user who is supposed to receive this alert
         Optional<User> recipientOpt = userRepository.findById(recipientId);
 
@@ -35,6 +45,8 @@ public class NotificationService {
             notification.setTitle(title);
             notification.setMessage(message);
             notification.setType(type);
+            notification.setTargetType(targetType);
+            notification.setTargetId(targetId);
             notification.setRead(false); // Unread by default!
 
             // 4. Save it to the database (This triggers the red badge!)

@@ -6,6 +6,59 @@
  * and self-registers input listeners and navigation auto-resets.
  */
 
+
+// ==========================================
+// SAVED ADMIN INBOX FILTERS
+// ==========================================
+// The admin inbox search/status filters persist to localStorage so a refresh or
+// accidental navigation does not clear a carefully set filter. Saving happens
+// inside filterAdminReports (every filter interaction), restoring on boot.
+const ADMIN_FILTER_STORAGE_KEY = 'roadwise.admin-filter-state.v1';
+
+function saveAdminFilterState() {
+  if (typeof localStorage === 'undefined') return;
+  const searchInput = document.getElementById('adminSearch');
+  const statusFilter = document.getElementById('admin-status-filter');
+  if (!searchInput || !statusFilter) return;
+  try {
+    const state = { search: searchInput.value, status: statusFilter.value };
+    if (!state.search && (!state.status || String(state.status).toLowerCase() === 'all')) {
+      localStorage.removeItem(ADMIN_FILTER_STORAGE_KEY);
+    } else {
+      localStorage.setItem(ADMIN_FILTER_STORAGE_KEY, JSON.stringify(state));
+    }
+  } catch (e) { /* best-effort */ }
+}
+
+function restoreAdminFilterState() {
+  if (typeof localStorage === 'undefined' || typeof document === 'undefined') return false;
+  let state;
+  try {
+    const raw = localStorage.getItem(ADMIN_FILTER_STORAGE_KEY);
+    if (!raw) return false;
+    state = JSON.parse(raw);
+  } catch (e) {
+    return false;
+  }
+  if (!state || typeof state !== 'object') return false;
+
+  const searchInput = document.getElementById('adminSearch');
+  const statusFilter = document.getElementById('admin-status-filter');
+  let restored = false;
+
+  if (searchInput && typeof state.search === 'string') {
+    searchInput.value = state.search;
+    restored = true;
+  }
+  if (statusFilter && typeof state.status === 'string') {
+    const matches = [...statusFilter.options].some(o => o.value === state.status);
+    if (matches) {
+      statusFilter.value = state.status;
+      restored = true;
+    }
+  }
+  return restored;
+}
 window.clearCurrentTableFilter = function(triggerEl) {
   const container = triggerEl ? triggerEl.closest('.main-card, .dashboard-card, .tab-pane, section, main') : document;
   if (!container) return;
@@ -91,6 +144,7 @@ window.filterCEOReports = function() {
 // 🔍 ADMIN REPORTS: SEARCH & DROPDOWN FILTER
 // ==========================================
 window.filterAdminReports = function() {
+  saveAdminFilterState();
   const searchInput = document.getElementById('adminSearch');
   const statusFilter = document.getElementById('admin-status-filter');
   const tbody = document.querySelector('#view-reports table tbody');
@@ -225,6 +279,13 @@ document.addEventListener('DOMContentLoaded', () => {
     userInput.addEventListener('input', () => {
       executeGlobalSearch('search-user-input', 'user-management-tbody');
     });
+  }
+
+  // Restore saved admin filter state (if any) before binding live listeners, so
+  // a refresh keeps the queue exactly as the user left it. The filter is applied
+  // immediately; it early-returns on pages without the admin inbox.
+  if (restoreAdminFilterState() && typeof window.filterAdminReports === 'function') {
+    window.filterAdminReports();
   }
 
   const adminSearchInput = document.getElementById('adminSearch');

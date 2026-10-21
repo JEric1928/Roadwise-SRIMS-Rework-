@@ -318,7 +318,8 @@ public class RoadReportController {
                         "⚠️ Potential Duplicate Report Flagged",
                         "Report PRJ-" + newReportId + " on " + newReportRoad +
                                 " was flagged as a potential duplicate of PRJ-" + duplicateId + ".",
-                        "DUPLICATE_WARNING"
+                        "DUPLICATE_WARNING",
+                        "REPORT", newReportId
                 ));
             }
 
@@ -347,14 +348,16 @@ public class RoadReportController {
                             adminId,
                             "🚨 CRITICAL HAZARD DETECTED",
                             "System flagged a HIGH severity road damage reported by " + reportedBy + ". Immediate CPDO review required!",
-                            "CRITICAL"
+                            "CRITICAL",
+                            "REPORT", savedReport.getId()
                     );
                 } else {
                     notificationService.sendNotification(
                             adminId,
                             "New Road Damage Report",
                             "A new report has been submitted by " + reportedBy + " and is awaiting CPDO review.",
-                            "REPORT"
+                            "REPORT",
+                            "REPORT", savedReport.getId()
                     );
                 }
                 if (reporterId != null) {
@@ -362,7 +365,8 @@ public class RoadReportController {
                             reporterId,
                             "Report Submitted Successfully",
                             "Your damage report for " + roadName + " has been received by the CPDO and is awaiting initial validation.",
-                            "REPORT"
+                            "REPORT",
+                            "REPORT", savedReport.getId()
                     );
                 }
             });
@@ -634,7 +638,7 @@ public class RoadReportController {
 
         Long adminId = getAdminId();
         if (targetStatusEnum == ReportStatus.COMPLETED) {
-            notificationService.sendNotification(adminId, "Report Status Update", "Report ID PRJ-" + report.getId() + " status updated to: Completed", "REPORT");
+            notificationService.sendNotification(adminId, "Report Status Update", "Report ID PRJ-" + report.getId() + " status updated to: Completed", "REPORT", "REPORT", report.getId());
         }
 
         reportStatusLogService.log(
@@ -1090,6 +1094,15 @@ public class RoadReportController {
             return ResponseEntity.badRequest().body(Map.of("error", "This project has no scheduled target completion date."));
         }
 
+
+        // Anti-spam cooldown: the column was written but never read, so an admin
+        // could re-issue reminders indefinitely. One per hour per report.
+        LocalDateTime nowPst = LocalDateTime.now(ZoneId.of("Asia/Manila"));
+        if (report.getLastReminderSent() != null
+                && report.getLastReminderSent().isAfter(nowPst.minusHours(1))) {
+            return ResponseEntity.status(429).body(Map.of("error",
+                    "A deadline reminder was already sent recently. Please wait at least an hour after sending another."));
+        }
         // A reminder must not report success (or stamp lastReminderSent) when
         // there is no engineer account to receive it.
         Long engineerId = getCeoId();
@@ -1098,7 +1111,6 @@ public class RoadReportController {
                     "No City Engineer account is available to receive deadline reminders."));
         }
 
-        LocalDateTime nowPst = LocalDateTime.now(ZoneId.of("Asia/Manila"));
         report.setLastReminderSent(nowPst);
         repository.save(report);
 
@@ -1107,7 +1119,8 @@ public class RoadReportController {
                 "⏰ Deadline Expedite Reminder",
                 "CPDO Admin issued an expedite reminder for report PRJ-" + report.getId() +
                         " (" + report.getCityRoadName() + "). Scheduled target date: " + report.getTargetCompletionDate() + ".",
-                "REMINDER"
+                "REMINDER",
+                "REPORT", report.getId()
         );
 
         reportStatusLogService.log(

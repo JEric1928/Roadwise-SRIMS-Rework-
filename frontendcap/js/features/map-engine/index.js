@@ -125,6 +125,154 @@ function ensureAdminGeoJsonLoaded() {
     });
 }
 
+// ==========================================
+// SHARED GLOBAL-MAP MARKER RENDERER
+// ==========================================
+// Severity filter + lightweight zoom-aware grid clustering. Clusters collapse
+// nearby reports into one numbered circle marker at low zoom and split apart as
+// the user zooms in — no external clustering plugin needed. Filtering keeps the
+// same renderer path, so filters and clustering stay in sync.
+let adminMapReports = [];
+let ceoMapReports = [];
+let adminMapSeverityFilter = 'all';
+let ceoMapSeverityFilter = 'all';
+
+const HAZARD_ICONS = { red: null, orange: null, green: null, grey: null };
+function ensureHazardIcons() {
+  if (HAZARD_ICONS.red) return;
+  const makePin = (color) => new L.Icon({
+    iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${color}.png`,
+    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+    iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41]
+  });
+  HAZARD_ICONS.red = makePin('red');
+  HAZARD_ICONS.orange = makePin('orange');
+  HAZARD_ICONS.green = makePin('green');
+  HAZARD_ICONS.grey = makePin('grey');
+}
+
+function iconForSeverity(sev) {
+  ensureHazardIcons();
+  const s = String(sev || '').toLowerCase();
+  if (s === 'high') return HAZARD_ICONS.red;
+  if (s === 'medium') return HAZARD_ICONS.orange;
+  if (s === 'low') return HAZARD_ICONS.green;
+  return HAZARD_ICONS.grey;
+}
+
+function severityTier(sev) {
+  const s = String(sev || '').toLowerCase();
+  if (s === 'high' || s === 'medium' || s === 'low') return s;
+  return 'unassessed';
+}
+
+function passesSeverityFilter(report, filterValue) {
+  if (!filterValue || filterValue === 'all') return true;
+  return severityTier(report.severity) === filterValue;
+}
+
+function isUsableCoordinate(report) {
+  const lat = parseFloat(report.latitude);
+  const lng = parseFloat(report.longitude);
+  return !isNaN(lat) && !isNaN(lng) && !(lat === 0 && lng === 0);
+}
+
+function escapeHtmlProp(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function popupHtmlForReport(report, openFn) {
+  const sev = severityTier(report.severity);
+  const bg = sev === 'high' ? '#dc3545' : sev === 'medium' ? '#ff8c00' : sev === 'low' ? '#28a745' : '#6c757d';
+  return `
+    <div style="font-family: sans-serif; min-width: 220px; text-align: center;">
+      <h4 style="margin: 0 0 5px 0; color: #1e40af; font-size: 16px;">#RPT-${String(report.id).padStart(4, '0')}</h4>
+      <p style="margin: 0 0 5px 0; font-size: 13px;"><b>Road:</b> ${escapeHtmlProp(report.cityRoadName) || 'Unknown'}</p>
+      <p style="margin: 0 0 5px 0; font-size: 13px;"><b>Status:</b> ${escapeHtmlProp(report.status) || 'Pending'}</p>
+      <span style="display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-bottom: 10px; background-color: ${bg}; color: white;">
+        SEVERITY: ${sev.toUpperCase()}
+      </span>
+      <button type="button" class="btn-small validate-btn" style="width: 100%; margin-top: 5px;" onclick="${openFn}(${report.id})">Open Report</button>
+    </div>`;
+}
+
+function clusterCellSize(zoom) {
+  return Math.max(0.0008, 0.004 / Math.pow(2, Math.max(0, zoom - 12)));
+}
+
+function debounceMap(fn, ms) {
+  let timer = null;
+  return function(...args) {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn.apply(this, args), ms);
+  };
+}
+
+function renderClusteredMarkers({ reports, layer, map, statusEl, openFn, zoomTarget }) {
+  layer.clearLayers();
+  const valid = reports.filter(isUsableCoordinate);
+
+  if (statusEl) {
+    statusEl.textContent = valid.length === 0
+      ? 'No active hazards to show.'
+      : `${valid.length} active hazard${valid.length === 1 ? '' : 's'} on this view.`;
+  }
+  if (valid.length === 0) return;
+
+  const zoom = map.getZoom();
+  const cell = clusterCellSize(zoom);
+  const buckets = new Map();
+
+  for (const r of valid) {
+    const key = `${Math.round(parseFloat(r.latitude) / cell)},${Math.round(parseFloat(r.longitude) / cell)}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(r);
+  }
+
+  for (const group of buckets.values()) {
+    const latAvg = group.reduce((sum, r) => sum + parseFloat(r.latitude), 0) / group.length;
+    const lngAvg = group.reduce((sum, r) => sum + parseFloat(r.longitude), 0) / group.length;
+
+    if (group.length === 1) {
+      const report = group[0];
+      L.marker([latAvg, lngAvg], { icon: iconForSeverity(report.severity) })
+        .bindPopup(popupHtmlForReport(report, openFn))
+        .addTo(layer);
+      continue;
+    }
+
+    const radius = Math.min(20, 9 + Math.sqrt(group.length) * 3.2);
+    L.circleMarker([latAvg, lngAvg], {
+      radius,
+      color: '#ffffff',
+      weight: 2,
+      fillColor: '#0284c7',
+      fillOpacity: 0.85
+    })
+      .bindPopup(`
+        <div style="font-family: sans-serif; min-width: 200px; text-align: center;">
+          <strong style="font-size: 16px; color:#0f172a;">${group.length} hazards here</strong>
+          <p style="font-size: 11.5px; color: #64748b; margin: 4px 0 8px;">Zoom in or click to expand.</p>
+          <button type="button" class="btn-small validate-btn" style="width: 100%; background:#0284c7; border-color:#0284c7;"
+            onclick="mapJumpTo(${latAvg}, ${lngAvg})">Focus area</button>
+        </div>`)
+      .on('click', () => {
+        map.setView([latAvg, lngAvg], Math.min(map.getZoom() + 1, (zoomTarget || 18)));
+      })
+      .addTo(layer);
+  }
+}
+
+window.mapJumpTo = function(lat, lng) {
+  const m = window.adminGlobalMap || window.ceoGlobalMap || null;
+  if (m) m.setView([lat, lng], Math.min(Math.max(m.getZoom() + 1, 15), 19));
+};
+
 export function loadAdminGlobalMap() {
   const mapContainer = document.getElementById('admin-global-map');
   if (!mapContainer) return;
@@ -220,52 +368,41 @@ export function loadAdminGlobalMap() {
 
   setTimeout(() => { adminGlobalMap.invalidateSize(); }, 300);
 
+  window.adminGlobalMap = adminGlobalMap;
+
   apiFetch(`/api/reports`, { cache: 'no-store' })
     .then(reports => {
-      globalMarkerLayer.clearLayers();
-
       const activeHazards = reports.filter(r => {
         const s = String(r.status || '').toLowerCase();
         return !s.includes('complet') && !s.includes('clos') && !s.includes('reject') && !s.includes('archiv');
       });
+      adminMapReports = activeHazards;
+      const statusEl = document.getElementById('admin-map-status');
+      const filterSelect = document.getElementById('admin-map-severity-filter');
 
-      activeHazards.forEach(report => {
-        const lat = parseFloat(report.latitude);
-        const lng = parseFloat(report.longitude);
-
-        if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return;
-
-        const pinRed = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-        const pinOrange = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-        const pinGreen = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-        const pinGrey = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-grey.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-
-        const severity = String(report.severity || 'Unassessed').toLowerCase();
-        let selectedIcon = pinGrey;
-
-        if (severity === 'high') selectedIcon = pinRed;
-        else if (severity === 'medium') selectedIcon = pinOrange;
-        else if (severity === 'low') selectedIcon = pinGreen;
-
-        const popupHtml = `
-          <div style="font-family: sans-serif; min-width: 220px; text-align: center;">
-              <h4 style="margin: 0 0 5px 0; color: #1e40af; font-size: 16px;">#RPT-${String(report.id).padStart(4, '0')}</h4>
-              <p style="margin: 0 0 5px 0; font-size: 13px;"><b>Road:</b> ${report.cityRoadName || 'Unknown'}</p>
-              <p style="margin: 0 0 5px 0; font-size: 13px;"><b>Status:</b> ${report.status || 'Pending'}</p>
-              <span style="display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-bottom: 10px; background-color: ${selectedIcon === pinRed ? '#dc3545' : selectedIcon === pinOrange ? '#ff8c00' : selectedIcon === pinGreen ? '#28a745' : '#6c757d'}; color: white;">
-                  SEVERITY: ${severity.toUpperCase()}
-              </span>
-
-              <button class="btn-small validate-btn" style="width: 100%; margin-top: 5px;" onclick="reviewReport(${report.id})">
-                  Review Full Report
-              </button>
-          </div>
-        `;
-
-        L.marker([lat, lng], { icon: selectedIcon })
-          .bindPopup(popupHtml)
-          .addTo(globalMarkerLayer);
+      const renderAdminMarkers = () => renderClusteredMarkers({
+        reports: adminMapReports.filter(r => passesSeverityFilter(r, adminMapSeverityFilter)),
+        layer: globalMarkerLayer,
+        map: adminGlobalMap,
+        statusEl,
+        openFn: 'reviewReport',
+        zoomTarget: 18
       });
+
+      if (filterSelect && !filterSelect.dataset.bound) {
+        filterSelect.dataset.bound = '1';
+        filterSelect.addEventListener('change', (e) => {
+          adminMapSeverityFilter = e.target.value;
+          renderAdminMarkers();
+        });
+      }
+
+      if (!adminGlobalMap._clusterBound) {
+        adminGlobalMap._clusterBound = true;
+        adminGlobalMap.on('zoomend', debounceMap(renderAdminMarkers, 120));
+      }
+
+      renderAdminMarkers();
     })
     .catch(err => console.error("Error loading Admin map data:", err));
 }
@@ -395,52 +532,41 @@ export function loadCEOGlobalMap() {
     }
   }, 300);
 
+  window.ceoGlobalMap = ceoGlobalMap;
+
   apiFetch(`/api/reports`, { cache: 'no-store' })
     .then(reports => {
-      ceoGlobalMarkerLayer.clearLayers();
-
       const activeCEOProjects = reports.filter(r => {
         const s = String(r.status || '').toLowerCase();
         return s === 'dispatched to ceo' || s === 'in progress';
       });
+      ceoMapReports = activeCEOProjects;
+      const statusEl = document.getElementById('ceo-map-status');
+      const filterSelect = document.getElementById('ceo-map-severity-filter');
 
-      const pinRed = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-      const pinOrange = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-      const pinGreen = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-      const pinGrey = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-grey.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-
-      activeCEOProjects.forEach(report => {
-        const lat = parseFloat(report.latitude);
-        const lng = parseFloat(report.longitude);
-
-        if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return;
-
-        const severity = String(report.severity || 'Unassessed').toLowerCase();
-        let selectedIcon = pinGrey;
-
-        if (severity === 'high') selectedIcon = pinRed;
-        else if (severity === 'medium') selectedIcon = pinOrange;
-        else if (severity === 'low') selectedIcon = pinGreen;
-
-        const popupHtml = `
-          <div style="font-family: sans-serif; min-width: 220px; text-align: center;">
-              <h4 style="margin: 0 0 5px 0; color: #1e40af; font-size: 16px;">#PRJ-${String(report.id).padStart(4, '0')}</h4>
-              <p style="margin: 0 0 5px 0; font-size: 13px;"><b>Road:</b> ${report.cityRoadName || 'Unknown'}</p>
-              <p style="margin: 0 0 5px 0; font-size: 13px;"><b>Status:</b> ${report.status || 'Pending'}</p>
-              <span style="display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-bottom: 10px; background-color: ${selectedIcon === pinRed ? '#dc3545' : selectedIcon === pinOrange ? '#ff8c00' : selectedIcon === pinGreen ? '#28a745' : '#6c757d'}; color: white;">
-                  SEVERITY: ${severity.toUpperCase()}
-              </span>
-
-              <button class="btn-small validate-btn" style="width: 100%; margin-top: 5px; background-color: #1e40af; border-color: #1e40af;" onclick="openCEOManageModal(${report.id})">
-                  Manage Project
-              </button>
-          </div>
-        `;
-
-        L.marker([lat, lng], { icon: selectedIcon })
-          .bindPopup(popupHtml)
-          .addTo(ceoGlobalMarkerLayer);
+      const renderCeoMarkers = () => renderClusteredMarkers({
+        reports: ceoMapReports.filter(r => passesSeverityFilter(r, ceoMapSeverityFilter)),
+        layer: ceoGlobalMarkerLayer,
+        map: ceoGlobalMap,
+        statusEl,
+        openFn: 'openCEOManageModal',
+        zoomTarget: 18
       });
+
+      if (filterSelect && !filterSelect.dataset.bound) {
+        filterSelect.dataset.bound = '1';
+        filterSelect.addEventListener('change', (e) => {
+          ceoMapSeverityFilter = e.target.value;
+          renderCeoMarkers();
+        });
+      }
+
+      if (!ceoGlobalMap._clusterBound) {
+        ceoGlobalMap._clusterBound = true;
+        ceoGlobalMap.on('zoomend', debounceMap(renderCeoMarkers, 120));
+      }
+
+      renderCeoMarkers();
     })
     .catch(err => console.error("Error loading CEO map data:", err));
 }
@@ -574,18 +700,9 @@ export function loadBarangayLocalMap() {
 
         if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return;
 
-        const pinRed = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-        const pinOrange = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-        const pinGreen = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-        const pinGrey = new L.Icon({ iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-grey.png', shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41] });
-
         const severity = String(report.severity || 'Unassessed').toLowerCase();
         const status = String(report.status || '').toLowerCase();
-        let selectedIcon = pinGrey;
-
-        if (severity === 'high') selectedIcon = pinRed;
-        else if (severity === 'medium') selectedIcon = pinOrange;
-        else if (severity === 'low') selectedIcon = pinGreen;
+        const selectedIcon = iconForSeverity(severity);
 
         let buttonHtml = `<button class="btn-small validate-btn" style="width: 100%; margin-top: 5px; background-color: #6c757d; border-color: #6c757d;" onclick="openViewModal(${report.id})">View Status</button>`;
 
@@ -598,7 +715,7 @@ export function loadBarangayLocalMap() {
               <h4 style="margin: 0 0 5px 0; color: #1e40af; font-size: 16px;">#RPT-${String(report.id).padStart(4, '0')}</h4>
               <p style="margin: 0 0 5px 0; font-size: 13px;"><b>Road:</b> ${report.cityRoadName || 'Unknown'}</p>
               <p style="margin: 0 0 5px 0; font-size: 13px;"><b>Status:</b> ${report.status || 'Pending'}</p>
-              <span style="display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-bottom: 10px; background-color: ${selectedIcon === pinRed ? '#dc3545' : selectedIcon === pinOrange ? '#ff8c00' : selectedIcon === pinGreen ? '#28a745' : '#6c757d'}; color: white;">
+              <span style="display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-bottom: 10px; background-color: ${severityTier(report.severity) === 'high' ? '#dc3545' : severityTier(report.severity) === 'medium' ? '#ff8c00' : severityTier(report.severity) === 'low' ? '#28a745' : '#6c757d'}; color: white;">
                   SEVERITY: ${severity.toUpperCase()}
               </span>
               ${buttonHtml}

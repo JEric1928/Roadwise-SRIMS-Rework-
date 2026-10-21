@@ -12,7 +12,7 @@
  *   live updates).
  */
 import { apiFetch, API_BASE_URL } from '../../core/api.js';
-import { timeAgo } from '../../core/time-ago.js';
+import { timeAgo } from '../../core/time-ago.js'; import { escapeHtml } from '../../core/utils.js';
 
 const currentUserId = sessionStorage.getItem("userId");
 
@@ -72,14 +72,16 @@ function loadNotifications() {
                data-title="${safeTitle}"
                data-message="${safeMessage}"
                data-time="${timeStr}"
+               data-target-type="${escapeHtml(notif.targetType || '')}"
+               data-target-id="${escapeHtml(String(notif.targetId || ''))}"
                onclick="openSingleNotification(${notif.id}, this)"
                style="padding: 14px 18px; border-bottom: 1px solid #f1f5f9; cursor: pointer; background: ${bgClass}; transition: background 0.2s;">
 
               <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
-                  <div class="notif-title" style="font-size: 13.5px; color: #1e293b; font-weight: ${weightClass};">${notif.title}</div>
+                  <div class="notif-title" style="font-size: 13.5px; color: #1e293b; font-weight: ${weightClass};">${escapeHtml(notif.title || 'Notification')}</div>
                   ${dotHtml}
               </div>
-              <div class="notif-message" style="font-size: 12.5px; color: #475569; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;">${notif.message}</div>
+              <div class="notif-message" style="font-size: 12.5px; color: #475569; line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(notif.message || '')}</div>
               <div style="font-size: 11px; color: #94a3b8; margin-top: 6px; font-weight: 500;">${timeStr}</div>
           </div>
         `;
@@ -107,14 +109,39 @@ function openSingleNotification(notifId, element) {
   const message = element.getAttribute('data-message');
   const time = element.getAttribute('data-time');
 
+  const targetType = element.getAttribute('data-target-type') || '';
+  const targetId = element.getAttribute('data-target-id') || '';
   document.getElementById('single-notif-title').innerText = title;
   document.getElementById('single-notif-message').innerText = message;
   document.getElementById('single-notif-time').innerText = time;
-
-  document.getElementById('single-notif-modal').classList.remove('hidden');
+  const modal = document.getElementById('single-notif-modal');
+  modal.classList.remove('hidden');
   const dropdown = document.getElementById('notification-dropdown');
   if (dropdown) dropdown.classList.add('hidden');
 
+  // Deep-link CTA: show an "Open Report" action when the notification carries a
+  // report target. The button is injected once per modal (id-stamped) and hidden
+  // for notifications without a target.
+  const canDeepLink = targetType === 'REPORT' && targetId;
+  let linkBtn = document.getElementById('single-notif-action');
+  if (canDeepLink) {
+    if (!linkBtn) {
+      const actions = modal.querySelector('.modal-actions');
+      if (actions) {
+        linkBtn = document.createElement('button');
+        linkBtn.type = 'button';
+        linkBtn.id = 'single-notif-action';
+        linkBtn.className = 'btn-primary';
+        linkBtn.style.marginRight = 'auto';
+        linkBtn.textContent = 'Open Report →';
+        linkBtn.addEventListener('click', () => openNotificationTarget(targetId));
+        actions.prepend(linkBtn);
+      }
+    }
+    if (linkBtn) linkBtn.style.display = '';
+  } else if (linkBtn) {
+    linkBtn.style.display = 'none';
+  }
   if (element.getAttribute('data-read') === 'true') return;
 
   element.setAttribute('data-read', 'true');
@@ -135,6 +162,35 @@ function openSingleNotification(notifId, element) {
       if (dot) dot.style.display = 'inline-block';
       if (titleEl) titleEl.style.fontWeight = '700';
     });
+}
+
+// ==========================================
+// DEEP-LINK ROUTER: open the notification's target entity.
+// ==========================================
+// Each dashboard exposes its own report-open helper; pick the one present on
+// this page (admin uses the review modal, CEO the manage modal, barangay the
+// view modal). Fal back to a toast when none exists.
+function openNotificationTarget(reportId) {
+  const notifModal = document.getElementById('single-notif-modal');
+  if (notifModal) notifModal.classList.add('hidden');
+  const dropdown = document.getElementById('notification-dropdown');
+  if (dropdown) dropdown.classList.add('hidden');
+
+  if (typeof window.jumpToReportsAndReview === 'function') {
+    window.jumpToReportsAndReview(String(reportId));
+    return;
+  }
+  if (typeof window.openCEOManageModal === 'function') {
+    window.openCEOManageModal(String(reportId));
+    return;
+  }
+  if (typeof window.openViewModal === 'function') {
+    window.openViewModal(String(reportId));
+    return;
+  }
+  if (typeof showToast === 'function') {
+    showToast('This notification has no report view on this page.', 'warning');
+  }
 }
 
 // 4. ACTION: Mark ALL notifications as read
@@ -186,14 +242,16 @@ function viewAllActivity() {
                  data-title="${safeTitle}"
                  data-message="${safeMessage}"
                  data-time="${timeStr}"
+                 data-target-type="${escapeHtml(notif.targetType || '')}"
+                 data-target-id="${escapeHtml(String(notif.targetId || ''))}"
                  onclick="openSingleNotification(${notif.id}, this)"
                  style="padding: 16px 24px; border-bottom: 1px solid #f1f5f9; cursor: pointer; background: ${bgClass}; transition: 0.2s;">
 
                 <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-                    <div class="notif-title" style="font-size: 14px; color: #1e293b; font-weight: ${weightClass};">${notif.title}</div>
+                    <div class="notif-title" style="font-size: 14px; color: #1e293b; font-weight: ${weightClass};">${escapeHtml(notif.title || 'Notification')}</div>
                     ${dotHtml}
                 </div>
-                <div class="notif-message" style="font-size: 13px; color: #475569; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;">${notif.message}</div>
+                <div class="notif-message" style="font-size: 13px; color: #475569; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(notif.message || '')}</div>
                 <div style="font-size: 12px; color: #94a3b8; margin-top: 8px; font-weight: 500;">${timeStr}</div>
             </div>
           `;

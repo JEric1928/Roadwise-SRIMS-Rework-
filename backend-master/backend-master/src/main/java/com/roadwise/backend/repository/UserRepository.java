@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
+import org.springframework.data.domain.Pageable;
 import java.util.List;
 import java.util.Optional;
 
@@ -20,6 +21,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     // 🚀 NEW: Finds a massive list of users based on their role!
     List<User> findByRole(String role);
+    List<User> findByRole(String role, org.springframework.data.domain.Pageable pageable);
     Optional<User> findByEmail(String email);
 
     Optional<User> findFirstByRoleInIgnoreCase(List<String> roles);

@@ -42,12 +42,10 @@ export async function loadActivityLogs() {
   if (timeSelect) timeSelect.value = "ALL";
 
   if (tbody) {
-    tbody.innerHTML = `
+    tbody.innerHTML = Array.from({ length: 6 }, () => `
       <tr>
-        <td colspan="7" style="text-align: center; padding: 35px; color: #64748b; font-style: italic;">
-          Loading system activity audit trail...
-        </td>
-      </tr>`;
+        <td colspan="7"><div class="skeleton" style="height: 20px;"></div></td>
+      </tr>`).join('');
   }
 
   try {

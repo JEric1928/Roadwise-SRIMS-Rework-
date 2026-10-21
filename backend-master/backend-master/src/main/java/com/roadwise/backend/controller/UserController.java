@@ -27,6 +27,8 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 
 import java.security.SecureRandom;
 import java.time.Duration;
@@ -314,8 +316,15 @@ public class UserController {
     // ==========================================
     @GetMapping
     @PreAuthorize("@authz.has('user:read')")
+    // Soft-cap the list read: the endpoint serves pre-flight duplicate checks and
+    // role lookups across the frontend, which expect a flat array, so keep that
+    // contract but stop loading every account into memory/response unbounded.
+    // 1000 rows is far beyond any LGU roster; a real page-based endpoint can
+    // replace this when the admin UI grows pagination controls.
     public ResponseEntity<List<UserResponseDto>> getAllUsers() {
-        List<UserResponseDto> users = userRepository.findAll().stream()
+        List<UserResponseDto> users = userRepository.findAll(
+                        PageRequest.of(0, 1000, Sort.by(Sort.Direction.ASC, "id")))
+                .getContent().stream()
                 .map(UserResponseDto::from)
                 .toList();
         return ResponseEntity.ok(users);
@@ -327,7 +336,9 @@ public class UserController {
     @GetMapping("/officials")
     @PreAuthorize("hasAnyRole('ENGINEER', 'City Engineer', 'ADMIN', 'CPDO Admin')")
     public ResponseEntity<List<UserResponseDto>> getBarangayOfficials() {
-        List<UserResponseDto> officials = userRepository.findByRole("BARANGAY").stream()
+        List<UserResponseDto> officials = userRepository.findByRole("BARANGAY",
+                        PageRequest.of(0, 2000, Sort.by(Sort.Direction.ASC, "id")))
+                .stream()
                 .map(UserResponseDto::from)
                 .toList();
         return ResponseEntity.ok(officials);
